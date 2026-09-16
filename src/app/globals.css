@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light; }
+html { -webkit-text-size-adjust: 100%; }
+body { @apply bg-steel-50 font-sans text-ink antialiased; }
+.tabular { font-variant-numeric: tabular-nums; }
+
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* Franja de seguridad: el único gesto gráfico de la marca */
+.hazard-stripe {
+  background-image: repeating-linear-gradient(-45deg, #FFC20E 0 10px, #000 10px 20px);
+}
