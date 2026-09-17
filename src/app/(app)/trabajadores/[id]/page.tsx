@@ -3,14 +3,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeliveryModal } from "@/components/deliveries/delivery-modal";
+import { VoidDeliveryModal } from "@/components/deliveries/void-delivery-modal";
 import { EmployeeFormModal } from "@/components/employees/employee-form-modal";
-import { Badge } from "@/components/ui/badge";
+import { Badge, VoidedNote } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { formatDate, todayLima } from "@/lib/utils";
+import { cn, formatDate, todayLima } from "@/lib/utils";
 import { getEmployee, getEmployeeOptions, getProductOptions, listDeliveries } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Historial del trabajador" };
@@ -27,12 +28,15 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
     canDeliver ? getProductOptions() : Promise.resolve([]),
     canDeliver ? getEmployeeOptions() : Promise.resolve([]),
   ]);
-  const totalUnits = rows.reduce((s, r) => s + r.quantity, 0);
-  const lastDate = rows[0]?.deliveryDate;
+  const canVoid = can(user.role, "deliveries.void");
+  // Las entregas anuladas se muestran en el historial, pero no cuentan en los totales.
+  const valid = rows.filter((r) => !r.voidedAt);
+  const totalUnits = valid.reduce((s, r) => s + r.quantity, 0);
+  const lastDate = valid[0]?.deliveryDate;
 
   // Resumen por EPP: qué tiene y cuándo lo recibió por última vez
   const byProduct = new Map<string, { name: string; size: string | null; qty: number; last: string }>();
-  for (const r of rows) {
+  for (const r of valid) {
     const key = `${r.productCode}|${r.size ?? ""}`;
     const cur = byProduct.get(key);
     if (cur) cur.qty += r.quantity;
@@ -77,18 +81,31 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <h2 className="mb-3 font-display text-xl font-semibold">Historial de EPP entregados</h2>
           <TableShell>
             <thead>
-              <tr><Th>Fecha</Th><Th>EPP</Th><Th>Talla</Th><Th className="text-right">Cantidad</Th><Th>Motivo</Th><Th>Responsable</Th></tr>
+              <tr><Th>Fecha</Th><Th>EPP</Th><Th>Talla</Th><Th className="text-right">Cantidad</Th><Th>Motivo</Th><Th>Responsable</Th>{canVoid && <Th className="text-right"><span className="sr-only">Acciones</span></Th>}</tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={6} title="Este trabajador aún no ha recibido EPP" />}
+              {rows.length === 0 && <EmptyRow colSpan={canVoid ? 7 : 6} title="Este trabajador aún no ha recibido EPP" />}
               {rows.map((r) => (
-                <Tr key={r.id}>
+                <Tr key={r.id} className={cn(r.voidedAt && "bg-steel-50/60 [&>td]:text-steel-400")}>
                   <Td className="whitespace-nowrap tabular text-steel-600">{formatDate(r.deliveryDate)}</Td>
                   <Td className="font-medium">{r.productName}</Td>
                   <Td>{r.size ?? "—"}</Td>
-                  <Td className="text-right font-display text-lg font-bold tabular">{r.quantity}</Td>
-                  <Td>{r.reason}{r.notes && <p className="text-xs text-steel-500">{r.notes}</p>}</Td>
+                  <Td className={cn("text-right font-display text-lg font-bold tabular", r.voidedAt && "line-through")}>{r.quantity}</Td>
+                  <Td>
+                    {r.reason}{r.notes && <p className="text-xs text-steel-500">{r.notes}</p>}
+                    {r.voidedAt && <VoidedNote voidedAt={r.voidedAt} voidedByName={r.voidedByName} voidReason={r.voidReason} />}
+                  </Td>
                   <Td className="text-steel-600">{r.userName}</Td>
+                  {canVoid && (
+                    <Td className="text-right">
+                      {!r.voidedAt && (
+                        <VoidDeliveryModal
+                          delivery={{ id: r.id, deliveryDate: r.deliveryDate, employeeName: r.employeeName, productName: r.productName, size: r.size, quantity: r.quantity }}
+                          dateLabel={formatDate(r.deliveryDate)}
+                        />
+                      )}
+                    </Td>
+                  )}
                 </Tr>
               ))}
             </tbody>

@@ -7,7 +7,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cn, first, formatDateTime, MOVEMENT_LABEL, pageParams, type SearchParams } from "@/lib/utils";
+import { cn, first, formatDate, formatTime, MOVEMENT_LABEL, pageParams, type SearchParams } from "@/lib/utils";
 import { getProductOptions, getUserOptions, listMovements, readFilters } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Movimientos" };
@@ -57,7 +57,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Se
         <thead>
           <tr>
             <Th>Fecha</Th><Th>Tipo</Th><Th>Producto</Th><Th className="text-right">Cantidad</Th>
-            <Th className="text-right">Stock</Th><Th>Motivo</Th><Th>Trabajador</Th><Th>Usuario</Th><Th>Observaciones</Th>
+            <Th className="text-right">Stock</Th><Th>Motivo</Th><Th>Trabajador</Th><Th className="hidden 2xl:table-cell">Usuario</Th><Th>Observaciones</Th>
           </tr>
         </thead>
         <tbody>
@@ -66,7 +66,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Se
             const signed = m.type === "SALIDA" ? -m.quantity : m.quantity;
             return (
               <Tr key={m.id}>
-                <Td className="whitespace-nowrap text-steel-600 tabular">{formatDateTime(m.createdAt)}</Td>
+                <Td className="whitespace-nowrap text-steel-600 tabular">{formatDate(m.createdAt)}<p className="text-xs text-steel-400">{formatTime(m.createdAt)}</p></Td>
                 <Td><MovementBadge type={m.type} /></Td>
                 <Td>
                   <p className="font-semibold">{m.productName}</p>
@@ -76,10 +76,10 @@ export default async function MovementsPage({ searchParams }: { searchParams: Se
                   {signed > 0 ? "+" : "−"}{Math.abs(signed)}
                 </Td>
                 <Td className="text-right text-steel-500 tabular">{m.stockBefore} → <span className="font-semibold text-ink">{m.stockAfter}</span></Td>
-                <Td>{m.reason}</Td>
+                <Td>{m.reason}<p className="text-xs text-steel-500 2xl:hidden">por {m.userName}</p></Td>
                 <Td className="text-steel-600">{m.employeeName ?? "—"}</Td>
-                <Td className="text-steel-600">{m.userName}</Td>
-                <Td className="max-w-[16rem] truncate text-steel-500" title={m.notes ?? undefined}>{m.notes ?? "—"}</Td>
+                <Td className="hidden text-steel-600 2xl:table-cell">{m.userName}</Td>
+                <Td className="text-steel-500"><p className="line-clamp-2 w-40 xl:w-44 2xl:w-64" title={m.notes ?? undefined}>{m.notes ?? "—"}</p></Td>
               </Tr>
             );
           })}

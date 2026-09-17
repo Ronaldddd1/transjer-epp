@@ -23,6 +23,11 @@ export function formatDateTime(value: Date | string | null | undefined) {
   }).format(new Date(value));
 }
 
+export function formatTime(value: Date | string | null | undefined) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("es-PE", { timeZone: TIMEZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
+}
+
 export function formatNumber(n: number) {
   return new Intl.NumberFormat("es-PE").format(n);
 }

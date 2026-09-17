@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useId, useState, useTransition, type ReactNode } from "react";
 import type { ActionResult } from "@/lib/action-result";
-import { Button } from "./button";
+import { Button, type ButtonVariant } from "./button";
 import { Modal } from "./modal";
 import { useToast } from "./toast";
 
@@ -14,6 +14,7 @@ type Props = {
   title: string;
   description?: string;
   submitLabel: string;
+  submitVariant?: ButtonVariant;
   action: (formData: FormData) => Promise<ActionResult>;
   children: (props: RenderProps) => ReactNode;
   size?: "sm" | "md" | "lg";
@@ -22,7 +23,7 @@ type Props = {
 };
 
 /** Modal con formulario conectado a una server action: valida, muestra errores por campo y refresca los datos. */
-export function FormModal({ trigger, title, description, submitLabel, action, children, size, defaultOpen = false, onClosed }: Props) {
+export function FormModal({ trigger, title, description, submitLabel, submitVariant, action, children, size, defaultOpen = false, onClosed }: Props) {
   const [open, setOpen] = useState(defaultOpen);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formKey, setFormKey] = useState(0);
@@ -70,7 +71,7 @@ export function FormModal({ trigger, title, description, submitLabel, action, ch
         footer={
           <>
             <Button variant="outline" onClick={close} disabled={pending}>Cancelar</Button>
-            <Button type="submit" form={formId} loading={pending}>{submitLabel}</Button>
+            <Button type="submit" form={formId} variant={submitVariant} loading={pending}>{submitLabel}</Button>
           </>
         }
       >

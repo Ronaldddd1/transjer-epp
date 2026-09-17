@@ -3,7 +3,7 @@
 import {
   ArrowLeftRight, BarChart3, ClipboardList, HardHat, LayoutDashboard, LogOut, Menu, PackageSearch, ShieldCheck, Tags, Users, X,
 } from "lucide-react";
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { logoutAction } from "@/actions/auth";
@@ -27,6 +27,20 @@ const SETTINGS_NAV: NavItem[] = [
   { href: "/usuarios", label: "Usuarios", icon: ShieldCheck, permission: "users.manage" },
   { href: "/auditoria", label: "Auditoría", icon: ClipboardList, permission: "audit.view" },
 ];
+
+/** Indica en el menú que la sección elegida se está cargando (sustituye al esqueleto de carga). */
+function NavPending() {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "h-3.5 w-3.5 shrink-0 rounded-full border-2 border-brand border-t-transparent",
+        pending ? "animate-spin opacity-100" : "hidden",
+      )}
+    />
+  );
+}
 
 export function AppShell({ user, lowStockCount, children }: { user: { name: string; role: Role }; lowStockCount: number; children: ReactNode }) {
   const pathname = usePathname();
@@ -52,6 +66,7 @@ export function AppShell({ user, lowStockCount, children }: { user: { name: stri
         <span className={cn("absolute left-0 top-2 bottom-2 w-1 rounded-r", active ? "bg-brand" : "bg-transparent")} aria-hidden />
         <Icon className={cn("h-[18px] w-[18px]", active && "text-brand")} />
         <span className="flex-1">{item.label}</span>
+        <NavPending />
         {item.href === "/inventario" && lowStockCount > 0 && (
           <span className="rounded bg-brand px-1.5 text-xs font-bold text-ink" title="Productos por reponer">{lowStockCount}</span>
         )}

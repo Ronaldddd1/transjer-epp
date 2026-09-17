@@ -165,7 +165,7 @@ Para borrarlos cuando empieces a trabajar en serio:
 npm run db:clear-demo
 ```
 
-Elimina **solo** los registros marcados como prueba y su historial (movimientos y entregas). Los productos, trabajadores, usuarios y movimientos reales no se tocan. El stock de los productos reales tampoco cambia, porque las entregas de prueba solo se registraron sobre productos de prueba.
+Elimina **solo** los registros marcados como prueba y su historial (movimientos y entregas). Los productos, trabajadores, usuarios y movimientos reales no se tocan. Si alguien registró un movimiento de un producto **real** para un trabajador de prueba, ese movimiento se conserva (solo se quita el vínculo con el trabajador), para que el historial siga cuadrando con el stock.
 
 ## 8. Subir el proyecto a GitHub
 
@@ -229,6 +229,18 @@ Vercel despliega automáticamente cada `push` a `main`. Las ramas distintas de `
 npm run db:migrate
 ```
 
+**Ejemplo: actualización "Anular entregas"** (migración `0001_anulacion_entregas`). Solo agrega columnas nuevas; no modifica ni borra datos existentes:
+
+```bash
+# 1. Con el .env apuntando a la base de PRODUCCIÓN
+npm install
+npm run db:migrate
+# 2. Publicar el código
+git add .
+git commit -m "Anulación de entregas"
+git push
+```
+
 Si necesitas volver atrás, en Vercel ve a **Deployments**, elige una versión anterior y pulsa **Promote to Production**. Ten en cuenta que esto no deshace migraciones de base de datos.
 
 **Copias de seguridad:** Neon y Supabase guardan historial automáticamente según tu plan. Para una copia manual:
@@ -245,6 +257,7 @@ pg_dump "$DIRECT_URL" > respaldo-$(date +%F).sql
 | Registrar entregas de EPP | ✅ | ✅ |
 | Registrar entradas y salidas | ✅ | ✅ |
 | Registrar ajustes de inventario | ✅ | — |
+| Anular entregas | ✅ | — |
 | Crear, editar y eliminar productos | ✅ | — |
 | Gestionar trabajadores | ✅ | — |
 | Gestionar categorías | ✅ | — |
@@ -264,6 +277,7 @@ Los permisos se validan **en el servidor** en cada página, acción y exportaci�
 - **El stock solo cambia mediante movimientos** (entrada, salida o ajuste). No se puede editar directamente.
 - **El stock nunca es negativo.** Lo impide la aplicación y también una restricción en la base de datos. Si dos personas registran salidas a la vez, el sistema bloquea la fila para que no se descuadre.
 - **Cada entrega genera automáticamente una salida** y descuenta el stock, en una sola operación.
+- **Las entregas no se borran, se anulan.** Solo un administrador puede anular una entrega registrada por error, con el botón 🚫 **Anular** en *Entregas* o en el historial del trabajador. Debe indicar el motivo. El sistema devuelve las unidades al stock con una entrada ("Anulación de entrega") y marca la entrega como **Anulada**, con fecha, responsable y motivo. Las anuladas siguen visibles (tachadas) pero no cuentan en los totales del trabajador, del dashboard ni de los reportes. Puedes filtrarlas con **Estado: Vigentes / Anuladas**.
 - **El stock inicial** de un producto nuevo se registra como una entrada con motivo "Stock inicial".
 - **Un ajuste** registra la diferencia entre el stock del sistema y el conteo físico.
 - **La eliminación es lógica**: los productos, trabajadores y categorías se desactivan, pero su historial se conserva.

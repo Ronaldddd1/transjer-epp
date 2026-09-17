@@ -65,6 +65,10 @@ export const deliverySchema = z.object({
   notes: optionalText(1000),
 });
 
+export const voidDeliverySchema = z.object({
+  voidReason: requiredText("El motivo de la anulación", 250).refine((v) => v.length >= 5, "Explica el motivo (mínimo 5 caracteres)"),
+});
+
 const password = z.string().min(8, "La contraseña debe tener al menos 8 caracteres").max(100);
 
 export const userBaseSchema = z.object({

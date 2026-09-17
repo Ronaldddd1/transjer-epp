@@ -6,12 +6,12 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { cn, first, formatNumber, MOVEMENT_LABEL, STOCK_STATUS_LABEL, type SearchParams } from "@/lib/utils";
-import { getCategoryOptions, getEmployeeOptions, getProductOptions, getUserOptions, readFilters } from "@/server/queries";
+import { DELIVERY_STATE_LABEL, getCategoryOptions, getEmployeeOptions, getProductOptions, getUserOptions, readFilters } from "@/server/queries";
 import { buildReport, isReportType, REPORT_TYPES, type ReportType } from "@/server/reports";
 
 export const metadata: Metadata = { title: "Reportes" };
 const PREVIEW_ROWS = 50;
-const NOWRAP = new Set(["date", "code", "type", "dni", "size", "status", "quantity", "before", "after", "stock", "minimum"]);
+const NOWRAP = new Set(["date", "code", "type", "dni", "size", "status", "quantity", "before", "after", "stock", "minimum", "state"]);
 
 export default async function ReportsPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePageUser("reports.view");
@@ -31,6 +31,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
     user: { type: "select", name: "user", label: "Usuario", options: users.map((u) => ({ value: u.id, label: u.name })) },
     type: { type: "select", name: "type", label: "Tipo de movimiento", options: Object.entries(MOVEMENT_LABEL).map(([value, label]) => ({ value, label })) },
     status: { type: "select", name: "status", label: "Estado", options: Object.entries(STOCK_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
+    deliveryState: { type: "select", name: "estado", label: "Estado", allLabel: "Todas", options: Object.entries(DELIVERY_STATE_LABEL).map(([value, label]) => ({ value, label })) },
     from: { type: "date", name: "from", label: "Fecha inicial" },
     to: { type: "date", name: "to", label: "Fecha final" },
   } satisfies Record<string, FilterDef>;
@@ -38,7 +39,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const filters: FilterDef[] =
     tipo === "inventario" ? [opt.category, opt.product, opt.status]
     : tipo === "movimientos" ? [opt.from, opt.to, opt.type, opt.product, opt.category, opt.employee, opt.user]
-    : [opt.from, opt.to, opt.employee, opt.product, opt.category, opt.user];
+    : [opt.from, opt.to, opt.employee, opt.product, opt.category, opt.user, opt.deliveryState];
 
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(sp)) if (typeof v === "string" && v) qs.set(k, v);
@@ -94,9 +95,9 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         <tbody>
           {report.rows.length === 0 && <EmptyRow colSpan={report.columns.length} title="No hay datos para estos filtros" />}
           {report.rows.slice(0, PREVIEW_ROWS).map((row, i) => (
-            <Tr key={i}>
+            <Tr key={i} className={cn(row.state === "Anulada" && "text-steel-400 [&_td]:text-steel-400")}>
               {report.columns.map((c) => (
-                <Td key={c.key} className={cn(c.align === "right" && "text-right tabular", NOWRAP.has(c.key) && "whitespace-nowrap", c.key === "notes" && "max-w-[14rem] truncate")}>
+                <Td key={c.key} className={cn(c.align === "right" && "text-right tabular", NOWRAP.has(c.key) && "whitespace-nowrap", (c.key === "notes" || c.key === "voidInfo") && "max-w-[14rem] truncate")}>
                   {row[c.key] === "" ? "—" : row[c.key]}
                 </Td>
               ))}

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { STOCK_STATUS_LABEL, type StockStatus } from "@/lib/utils";
+import { formatDate, STOCK_STATUS_LABEL, type StockStatus } from "@/lib/utils";
 
 const tones = {
   neutral: "bg-steel-100 text-steel-600 border-steel-200",
@@ -40,4 +40,16 @@ export function MovementBadge({ type }: { type: "ENTRADA" | "SALIDA" | "AJUSTE" 
 
 export function DemoBadge() {
   return <Badge tone="neutral" className="font-medium">Prueba</Badge>;
+}
+
+/** Marca de entrega anulada con quién, cuándo y por qué. */
+export function VoidedNote({ voidedAt, voidedByName, voidReason }: { voidedAt: Date | string; voidedByName: string | null; voidReason: string | null }) {
+  return (
+    <div className="mt-1 max-w-[18rem] text-xs text-red-700">
+      <Badge tone="red">Anulada</Badge>
+      <p className="mt-1 whitespace-normal">
+        {formatDate(voidedAt)}{voidedByName ? ` · ${voidedByName}` : ""}{voidReason ? ` — ${voidReason}` : ""}
+      </p>
+    </div>
+  );
 }

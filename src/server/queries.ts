@@ -1,5 +1,6 @@
 import "server-only";
-import { and, asc, count, desc, eq, gte, ilike, lte, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { auditLogs, categories, employees, eppDeliveries, inventoryMovements, products, users, type MovementType } from "@/db/schema";
 import { first, isYmd, limaDayEnd, limaDayStart, limaMonthStartYmd, type SearchParamsRecord, type StockStatus, todayLima } from "@/lib/utils";
@@ -10,13 +11,18 @@ const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 export type ReportFilters = {
   from?: string; to?: string; productId?: string; categoryId?: string;
   employeeId?: string; userId?: string; type?: MovementType; status?: StockStatus; q?: string;
+  /** Entregas: VIGENTE (no anuladas) o ANULADA. Sin valor: todas. */
+  deliveryState?: DeliveryState;
 };
+export type DeliveryState = "VIGENTE" | "ANULADA";
+export const DELIVERY_STATE_LABEL: Record<DeliveryState, string> = { VIGENTE: "Vigentes", ANULADA: "Anuladas" };
 
 export function readFilters(sp: SearchParamsRecord): ReportFilters {
   const type = first(sp.type);
   const status = first(sp.status);
   const from = first(sp.from);
   const to = first(sp.to);
+  const estado = first(sp.estado);
   return {
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
@@ -27,6 +33,7 @@ export function readFilters(sp: SearchParamsRecord): ReportFilters {
     type: type === "ENTRADA" || type === "SALIDA" || type === "AJUSTE" ? type : undefined,
     status: status === "DISPONIBLE" || status === "STOCK_BAJO" || status === "AGOTADO" ? status : undefined,
     q: first(sp.q)?.trim() || undefined,
+    deliveryState: estado === "VIGENTE" || estado === "ANULADA" ? estado : undefined,
   };
 }
 
@@ -130,6 +137,7 @@ export async function listMovements(f: ReportFilters, limit?: number, offset = 0
 }
 
 // ---------- Entregas ----------
+const voider = alias(users, "voider");
 export async function listDeliveries(f: ReportFilters, limit?: number, offset = 0) {
   const where = and(
     f.from ? gte(eppDeliveries.deliveryDate, f.from) : undefined,
@@ -138,6 +146,7 @@ export async function listDeliveries(f: ReportFilters, limit?: number, offset = 
     f.categoryId ? eq(products.categoryId, f.categoryId) : undefined,
     f.employeeId ? eq(eppDeliveries.employeeId, f.employeeId) : undefined,
     f.userId ? eq(eppDeliveries.userId, f.userId) : undefined,
+    f.deliveryState === "VIGENTE" ? isNull(eppDeliveries.voidedAt) : f.deliveryState === "ANULADA" ? isNotNull(eppDeliveries.voidedAt) : undefined,
     f.q ? or(ilike(employees.firstName, like(f.q)), ilike(employees.lastName, like(f.q)), ilike(employees.dni, like(f.q)), ilike(products.name, like(f.q))) : undefined,
   );
   const base = db.select({
@@ -146,11 +155,13 @@ export async function listDeliveries(f: ReportFilters, limit?: number, offset = 
     employeeId: employees.id, employeeName: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
     dni: employees.dni, position: employees.position, area: employees.area,
     productCode: products.code, productName: products.name, categoryName: categories.name, userName: users.name,
+    voidedAt: eppDeliveries.voidedAt, voidReason: eppDeliveries.voidReason, voidedByName: voider.name,
   }).from(eppDeliveries)
     .innerJoin(employees, eq(eppDeliveries.employeeId, employees.id))
     .innerJoin(products, eq(eppDeliveries.productId, products.id))
     .innerJoin(categories, eq(products.categoryId, categories.id))
     .innerJoin(users, eq(eppDeliveries.userId, users.id))
+    .leftJoin(voider, eq(eppDeliveries.voidedBy, voider.id))
     .where(where).orderBy(desc(eppDeliveries.deliveryDate), desc(eppDeliveries.createdAt)).$dynamic();
 
   const [rows, [{ total }]] = await Promise.all([
@@ -170,7 +181,7 @@ export async function listEmployees(opts: { q?: string; area?: string; state?: s
     opts.state === "inactivos" ? eq(employees.active, false) : opts.state === "todos" ? undefined : eq(employees.active, true),
   );
   const deliveredCount = db.$with("dc").as(
-    db.select({ employeeId: eppDeliveries.employeeId, n: sql<number>`sum(${eppDeliveries.quantity})::int`.as("n") }).from(eppDeliveries).groupBy(eppDeliveries.employeeId),
+    db.select({ employeeId: eppDeliveries.employeeId, n: sql<number>`sum(${eppDeliveries.quantity})::int`.as("n") }).from(eppDeliveries).where(isNull(eppDeliveries.voidedAt)).groupBy(eppDeliveries.employeeId),
   );
   const [rows, [{ total }]] = await Promise.all([
     db.with(deliveredCount).select({
@@ -251,13 +262,13 @@ export async function getDashboard(period: { from: string; to: string }) {
       units: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
       deliveries: count(),
       people: sql<number>`count(distinct ${eppDeliveries.employeeId})::int`,
-    }).from(eppDeliveries).where(and(gte(eppDeliveries.deliveryDate, period.from), lte(eppDeliveries.deliveryDate, period.to))),
+    }).from(eppDeliveries).where(and(isNull(eppDeliveries.voidedAt), gte(eppDeliveries.deliveryDate, period.from), lte(eppDeliveries.deliveryDate, period.to))),
     db.select({
       id: products.id, code: products.code, name: products.name, size: products.size, stock: products.stock, minimumStock: products.minimumStock, unit: products.unit,
     }).from(products).where(and(eq(products.active, true), sql`${products.stock} <= ${products.minimumStock}`))
       .orderBy(asc(products.stock), asc(products.name)).limit(8),
     listMovements({}, 6).then((r) => r.rows),
-    listDeliveries({}, 6).then((r) => r.rows),
+    listDeliveries({ deliveryState: "VIGENTE" }, 6).then((r) => r.rows),
     db.execute<{ day: string; entradas: number; salidas: number }>(sql`
       select to_char(d.day, 'YYYY-MM-DD') as day,
         coalesce(sum(m.quantity) filter (where m.type = 'ENTRADA'), 0)::int as entradas,

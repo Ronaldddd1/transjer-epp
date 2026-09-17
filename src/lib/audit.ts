@@ -4,7 +4,7 @@ import { auditLogs } from "@/db/schema";
 import type { CurrentUser } from "./auth";
 
 export type AuditModule = "PRODUCTOS" | "CATEGORIAS" | "TRABAJADORES" | "MOVIMIENTOS" | "ENTREGAS" | "USUARIOS" | "SESION";
-export type AuditAction = "CREAR" | "EDITAR" | "ELIMINAR" | "ACTIVAR" | "DESACTIVAR" | "ENTRADA" | "SALIDA" | "AJUSTE" | "ENTREGA" | "CONTRASEÑA" | "INGRESO";
+export type AuditAction = "CREAR" | "EDITAR" | "ELIMINAR" | "ACTIVAR" | "DESACTIVAR" | "ENTRADA" | "SALIDA" | "AJUSTE" | "ENTREGA" | "ANULAR" | "CONTRASEÑA" | "INGRESO";
 
 export const AUDIT_MODULES: AuditModule[] = ["PRODUCTOS", "CATEGORIAS", "TRABAJADORES", "MOVIMIENTOS", "ENTREGAS", "USUARIOS", "SESION"];
 

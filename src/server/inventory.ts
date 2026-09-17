@@ -16,6 +16,8 @@ type MovementInput = {
   employeeId?: string | null;
   user: CurrentUser;
   auditDescription?: string;
+  /** Permite mover stock de un producto desactivado (p. ej. al anular una entrega antigua). */
+  allowInactive?: boolean;
 };
 
 /**
@@ -29,7 +31,7 @@ export async function applyMovement(tx: Tx, input: MovementInput) {
     .where(eq(products.id, input.productId))
     .for("update");
 
-  if (!product || !product.active) throw new BusinessError("El producto no existe o fue eliminado.");
+  if (!product || (!product.active && !input.allowInactive)) throw new BusinessError("El producto no existe o fue eliminado.");
 
   let delta: number;
   if (input.type === "ENTRADA") delta = input.quantity;

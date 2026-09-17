@@ -81,6 +81,7 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
   }
 
   const { rows } = await listDeliveries(f);
+  const valid = rows.filter((d) => !d.voidedAt);
   return {
     title: REPORT_TYPES.entregas,
     columns: [
@@ -94,15 +95,20 @@ export async function buildReport(type: ReportType, f: ReportFilters): Promise<R
       { key: "quantity", header: "Cantidad", width: 10, align: "right" },
       { key: "reason", header: "Motivo", width: 20 },
       { key: "user", header: "Responsable", width: 18 },
+      { key: "state", header: "Estado", width: 11 },
+      { key: "voidInfo", header: "Anulación", width: 34 },
     ],
     rows: rows.map((d) => ({
       date: formatDate(d.deliveryDate), employee: d.employeeName, dni: d.dni, position: d.position, area: d.area,
       product: d.productName, size: d.size ?? "", quantity: d.quantity, reason: d.reason, user: d.userName,
+      state: d.voidedAt ? "Anulada" : "Vigente",
+      voidInfo: d.voidedAt ? `${formatDate(d.voidedAt)} · ${d.voidedByName ?? ""} · ${d.voidReason ?? ""}` : "",
     })),
     summary: [
-      { label: "Entregas", value: rows.length },
-      { label: "Unidades entregadas", value: rows.reduce((s, d) => s + d.quantity, 0) },
-      { label: "Trabajadores atendidos", value: new Set(rows.map((d) => d.dni)).size },
+      { label: "Entregas vigentes", value: valid.length },
+      { label: "Unidades entregadas", value: valid.reduce((s, d) => s + d.quantity, 0) },
+      { label: "Trabajadores atendidos", value: new Set(valid.map((d) => d.dni)).size },
+      { label: "Anuladas", value: rows.length - valid.length },
     ],
   };
 }
@@ -113,6 +119,7 @@ export function describeFilters(f: ReportFilters, names: { product?: string; cat
   if (names.product) parts.push(`Producto: ${names.product}`);
   if (names.category) parts.push(`Categoría: ${names.category}`);
   if (names.employee) parts.push(`Trabajador: ${names.employee}`);
+  if (f.deliveryState) parts.push(`Estado: ${f.deliveryState === "ANULADA" ? "Anuladas" : "Vigentes"}`);
   if (names.user) parts.push(`Usuario: ${names.user}`);
   if (f.type) parts.push(`Tipo: ${MOVEMENT_LABEL[f.type]}`);
   if (f.status) parts.push(`Estado: ${STOCK_STATUS_LABEL[f.status]}`);

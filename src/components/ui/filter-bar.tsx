@@ -11,6 +11,17 @@ export type FilterDef =
   | { type: "select"; name: string; label: string; options: { value: string; label: string }[]; allLabel?: string }
   | { type: "date"; name: string; label: string };
 
+/**
+ * Estado de navegación de la barra. Vive fuera del componente para que sobreviva si Next
+ * vuelve a montar la página durante una navegación; así no se pierden cambios en curso.
+ *
+ * Regla clave: una sola navegación a la vez (`inFlight`), para que se confirmen en orden.
+ * No usar history.replaceState aquí: Next 15 lo intercepta y deja navegaciones sin aplicar.
+ * Tampoco hay `loading.tsx` en (app): con cambios de parámetros en la misma página, ese
+ * límite de carga dejaba transiciones suspendidas y los filtros dejaban de responder.
+ */
+const nav = { path: "", desired: "", inFlight: null as string | null, sentAt: 0, retries: 0 };
+
 /** Filtros sincronizados con la URL: se pueden compartir, recargar y paginar sin perderlos. */
 export function FilterBar({ searchPlaceholder, filters = [], className }: { searchPlaceholder?: string; filters?: FilterDef[]; className?: string }) {
   const router = useRouter();
@@ -18,34 +29,51 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
   const params = useSearchParams();
   const committed = params.toString();
 
-  // Estado deseado de los filtros: se actualiza al instante y es la base de todo cambio
-  // encadenado (buscar → filtrar → limpiar → ordenar), aunque la URL aún no se confirme.
-  const [desired, setDesired] = useState(committed);
-  const desiredRef = useRef(committed);
-  const requested = useRef(new Set<string>());
-  const [q, setQ] = useState(params.get("q") ?? "");
+  // Estado deseado de los filtros (ver `nav`): se actualiza al instante y es la base de todo
+  // cambio encadenado (buscar → filtrar → limpiar → ordenar), aunque la URL aún no se confirme.
+  // Al montar: si hay una navegación nuestra en curso en esta misma página, se conserva lo
+  // pedido; si no, manda la URL (primera visita, otra página, enlaces del menú).
+  const [desired, setDesired] = useState(() => {
+    if (nav.path !== pathname || nav.inFlight === null) {
+      Object.assign(nav, { path: pathname, desired: committed, inFlight: null, retries: 0 });
+    }
+    return nav.desired;
+  });
+  const [q, setQ] = useState(() => new URLSearchParams(nav.desired).get("q") ?? "");
 
-  // La URL confirmada solo manda si el cambio vino de fuera (enlaces, atrás/adelante).
+  const send = (str: string, retry = false) => {
+    nav.retries = retry ? nav.retries + 1 : 0;
+    nav.inFlight = str;
+    nav.sentAt = Date.now();
+    router.replace(`${pathname}${str ? `?${str}` : ""}`, { scroll: false });
+  };
+
   useEffect(() => {
-    if (committed === desiredRef.current) { requested.current.clear(); return; }
-    if (requested.current.has(committed)) return; // paso intermedio de una navegación nuestra
-    requested.current.clear();
-    desiredRef.current = committed;
-    setDesired(committed);
-    setQ(new URLSearchParams(committed).get("q") ?? "");
+    if (nav.inFlight !== null) {
+      if (committed !== nav.inFlight) return; // aún no llega la navegación en curso
+      nav.inFlight = null;
+      if (nav.desired !== committed) send(nav.desired); // hubo cambios mientras tanto
+      return;
+    }
+    // Sin navegación propia en curso: el cambio vino de fuera (paginación, atrás/adelante).
+    if (committed !== nav.desired) {
+      nav.desired = committed;
+      setDesired(committed);
+      setQ(new URLSearchParams(committed).get("q") ?? "");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [committed]);
 
   const navigate = (next: URLSearchParams) => {
     const str = next.toString();
-    if (str === desiredRef.current) return;
-    desiredRef.current = str;
-    requested.current.add(str);
+    if (str === nav.desired) return;
+    nav.desired = str;
     setDesired(str);
-    router.replace(`${pathname}${str ? `?${str}` : ""}`, { scroll: false });
+    if (nav.inFlight === null) send(str);
   };
 
   const update = (entries: Record<string, string>, opts?: { keepPage?: boolean }) => {
-    const next = new URLSearchParams(desiredRef.current);
+    const next = new URLSearchParams(nav.desired);
     for (const [k, v] of Object.entries(entries)) {
       if (v) next.set(k, v);
       else next.delete(k);
@@ -60,35 +88,24 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
   useEffect(() => {
     if (searchPlaceholder === undefined) return;
     const t = setTimeout(() => {
-      const current = new URLSearchParams(desiredRef.current).get("q") ?? "";
+      const current = new URLSearchParams(nav.desired).get("q") ?? "";
       if (current !== q.trim()) update({ q: q.trim() });
     }, 350);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
 
-  // Salvaguarda: Next puede descartar una navegación lanzada justo cuando llega la
-  // respuesta de la anterior. Si la URL no alcanza el estado deseado, se reintenta.
+  // Salvaguarda: si una navegación no se confirma (p. ej. se cortó la red), se reenvía el
+  // estado deseado vigente.
   useEffect(() => {
-    if (desired === committed) return;
-    const t = setTimeout(() => {
-      if (desiredRef.current === desired) router.replace(`${pathname}${desired ? `?${desired}` : ""}`, { scroll: false });
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [desired, committed, pathname, router]);
-
-  // Con reemplazos muy seguidos, Next puede renderizar la URL nueva pero dejar la barra
-  // de direcciones con la anterior; al recargar volverían filtros ya quitados. Se sincroniza.
-  useEffect(() => {
-    if (desired !== committed) return;
-    const t = setTimeout(() => {
-      const shown = window.location.search.replace(/^\?/, "");
-      if (desiredRef.current === committed && shown !== committed) {
-        window.history.replaceState(window.history.state, "", `${pathname}${committed ? `?${committed}` : ""}`);
-      }
-    }, 300);
-    return () => clearTimeout(t);
-  }, [desired, committed, pathname]);
+    const id = setInterval(() => {
+      if (nav.inFlight === null || Date.now() - nav.sentAt < 8000) return;
+      if (nav.retries < 2) send(nav.desired, true);
+      else nav.inFlight = null; // se deja de insistir; la URL visible pasa a mandar
+    }, 1000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname]);
 
   const values = new URLSearchParams(desired);
   // Hay una navegación en curso mientras la URL confirmada no alcance a la deseada.
@@ -139,7 +156,7 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
           onClick={() => {
             setQ("");
             const keep = new URLSearchParams();
-            const cur = new URLSearchParams(desiredRef.current);
+            const cur = new URLSearchParams(nav.desired);
             for (const k of ["sort", "dir"]) { const v = cur.get(k); if (v) keep.set(k, v); }
             navigate(keep);
           }}

@@ -106,7 +106,13 @@ export const eppDeliveries = pgTable("epp_deliveries", {
   userId: uuid("user_id").notNull().references(() => users.id),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Anulación: la entrega no se borra; se marca y su stock vuelve con una entrada vinculada.
+  voidedAt: timestamp("voided_at", { withTimezone: true }),
+  voidedBy: uuid("voided_by").references(() => users.id),
+  voidReason: varchar("void_reason", { length: 250 }),
+  voidMovementId: uuid("void_movement_id").unique().references(() => inventoryMovements.id),
 }, (t) => [
+  check("deliveries_void_consistent", sql`(${t.voidedAt} is null) = (${t.voidMovementId} is null)`),
   index("deliveries_employee_date_idx").on(t.employeeId, t.deliveryDate),
   index("deliveries_product_idx").on(t.productId),
   index("deliveries_date_idx").on(t.deliveryDate),

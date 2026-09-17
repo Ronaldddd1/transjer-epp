@@ -4,7 +4,7 @@ import type { Role } from "@/db/schema";
 export const PERMISSIONS = [
   "products.view", "products.manage",
   "movements.view", "movements.create", "movements.adjust",
-  "deliveries.view", "deliveries.create",
+  "deliveries.view", "deliveries.create", "deliveries.void",
   "employees.view", "employees.manage",
   "categories.manage",
   "users.manage",
