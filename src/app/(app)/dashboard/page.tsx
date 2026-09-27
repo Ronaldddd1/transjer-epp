@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, HardHat, Package } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock, HardHat, Mail, Package, Receipt } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { MovementsChart } from "@/components/dashboard/movements-chart";
@@ -10,7 +10,8 @@ import { PageHeader, Panel } from "@/components/ui/page-header";
 import { StockMeter } from "@/components/ui/stock-meter";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cn, first, formatDate, formatDateTime, formatNumber, stockStatus, todayLima, type SearchParams } from "@/lib/utils";
+import { cn, first, formatDate, formatDateTime, formatMoney, formatNumber, invoiceNumber, stockStatus, todayLima, type SearchParams } from "@/lib/utils";
+import { getInvoiceSummary, listPendingInvoices } from "@/server/invoice-queries";
 import { getDashboard } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -57,18 +58,29 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const sp = await searchParams;
   const periodParam = first(sp.period);
   const period: PeriodKey = periodParam && periodParam in PERIODS ? (periodParam as PeriodKey) : "mes";
-  const d = await getDashboard(periodRange(period));
+  const showInventory = can(user.role, "products.view");
+  const showInvoices = can(user.role, "invoices.view");
+  const [d, invoices, pendingInvoices] = await Promise.all([
+    showInventory ? getDashboard(periodRange(period)) : null,
+    showInvoices ? getInvoiceSummary() : null,
+    showInvoices ? listPendingInvoices(6) : [],
+  ]);
   const denied = first(sp.denied) === "1";
 
   return (
     <>
       <PageHeader
-        title="Control de Inventario de EPP"
-        description={`Hola, ${user.name.split(" ")[0]}. Este es el estado actual del almacén de EPP.`}
+        title={showInventory ? "Panel general" : "Facturas de proveedores"}
+        description={`Hola, ${user.name.split(" ")[0]}. Este es el estado actual ${
+          showInventory && showInvoices ? "del almacén y de las cuentas por pagar"
+          : showInventory ? "del almacén de EPP"
+          : "de las facturas por pagar"
+        }.`}
         actions={
           <>
             {can(user.role, "deliveries.create") && <ButtonLink href="/entregas?nuevo=1" variant="primary">Registrar entrega</ButtonLink>}
             {can(user.role, "movements.create") && <ButtonLink href="/movimientos?nuevo=ENTRADA" variant="outline">Registrar entrada</ButtonLink>}
+            {!showInventory && showInvoices && <ButtonLink href="/facturas" variant="primary">Ver facturas</ButtonLink>}
           </>
         }
       />
@@ -79,6 +91,69 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         </p>
       )}
 
+      {showInvoices && invoices && (
+        <section className="mb-4">
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+            <Stat
+              label="Facturas por pagar" value={invoices.pendingCount} icon={Receipt}
+              sub={invoices.pendingByCurrency.map((c) => formatMoney(c.importe, c.currency)).join(" · ") || "Nada pendiente"}
+              tone={invoices.pendingCount > 0 ? "alert" : "default"} href="/facturas?estado=PENDIENTE"
+            />
+            <Stat
+              label="Reprogramadas" value={invoices.rescheduledCount} icon={AlertTriangle}
+              sub={invoices.rescheduledCount > 0 ? "Su viernes pasó sin pagarse" : "Ninguna se pasó de su viernes"}
+              tone={invoices.rescheduledCount > 0 ? "alert" : "default"} href="/facturas?reprogramadas=1"
+            />
+            <Stat
+              label="Se pagan este viernes" value={invoices.friday.count} icon={CalendarClock}
+              sub={invoices.friday.count > 0
+                ? `${formatDate(invoices.friday.date)} · ${invoices.friday.amounts.map((a) => formatMoney(a.importe, a.currency)).join(" · ")}`
+                : `Nada programado para el ${formatDate(invoices.friday.date)}`}
+              tone={invoices.friday.count > 0 ? "alert" : "default"} href="/facturas?viernes=1"
+            />
+            <Stat
+              label="Correos por revisar" value={invoices.emailsToReview} icon={Mail}
+              sub={invoices.emailsToReview > 0 ? "Llegaron y no se registraron solos" : "Buzón al día"}
+              tone={invoices.emailsToReview > 0 ? "alert" : "default"}
+              href={can(user.role, "invoices.manage") ? "/facturas/correos?estado=REVISAR" : undefined}
+            />
+          </div>
+
+          {pendingInvoices.length > 0 && (
+            <Panel
+              className="mt-4"
+              title="Próximas a pagar"
+              action={<Link href="/facturas?estado=PENDIENTE" className="text-sm font-medium text-steel-600 hover:text-ink hover:underline">Ver todas</Link>}
+            >
+              <ul className="divide-y divide-steel-100">
+                {pendingInvoices.map((i) => {
+                  const corrida = i.effectiveFriday !== i.scheduledFriday;
+                  return (
+                    <li key={i.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className="min-w-0 flex-1">
+                        <Link href={`/facturas/${i.id}`} className="truncate text-sm font-medium hover:underline">
+                          {invoiceNumber(i.series, i.number)} · {i.supplierName}
+                        </Link>
+                        <p className="text-xs text-steel-500">
+                          Se paga el viernes {formatDate(i.effectiveFriday)}
+                          {corrida && <span className="text-red-700"> · reprogramada desde el {formatDate(i.scheduledFriday)}</span>}
+                        </p>
+                      </div>
+                      <div className="shrink-0 whitespace-nowrap text-right">
+                        <p className={cn("font-display font-bold tabular", corrida && "text-red-700")}>{formatMoney(i.total, i.currency)}</p>
+                        {corrida && <p className="text-xs font-semibold text-red-700">Reprogramada</p>}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ul>
+            </Panel>
+          )}
+        </section>
+      )}
+
+      {showInventory && d && (
+      <>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Stat label="Total de productos" value={d.totals.products} sub="EPP activos registrados" icon={Package} href="/inventario" />
         <Stat label="Stock total" value={d.totals.stock} sub="Unidades disponibles" icon={Boxes} />
@@ -174,6 +249,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
           )}
         </Panel>
       </div>
+      </>
+      )}
     </>
   );
 }

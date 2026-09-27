@@ -11,7 +11,7 @@ import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../src/db/schema";
 
-const { users, categories, products, employees, inventoryMovements, eppDeliveries, auditLogs } = schema;
+const { users, categories, products, employees, inventoryMovements, eppDeliveries, auditLogs, suppliers, supplierInvoices } = schema;
 
 const BASE_CATEGORIES: [string, string][] = [
   ["Protección de cabeza", "Cascos y accesorios de protección craneal."],
@@ -127,11 +127,65 @@ async function main() {
     await db.update(products).set({ stock }).where(eq(products.id, p.id));
   }
 
+  // Proveedores y facturas de prueba (Administración y Finanzas)
+  const demoSuppliers: [string, string, string][] = [
+    ["20548392117", "TRANSPORTES ABC S.A.C.", "facturacion@transportesabc.pe"],
+    ["20601234567", "LOGISTICA DEL NORTE E.I.R.L.", "admin@lognorte.pe"],
+    ["20487654321", "CARGA SEGURA PERU S.A.C.", "ventas@cargasegura.pe"],
+  ];
+  const createdSuppliers = await db.insert(suppliers).values(
+    demoSuppliers.map(([ruc, businessName, email]) => ({ ruc, businessName, email, isDemo: true })),
+  ).returning();
+
+  // Mezcla de estados para ver el flujo completo: pendientes, vencidas, pagadas y observadas.
+  const demoInvoices: [number, string, string, number, number, string, string | null][] = [
+    // [proveedor, serie, número, díasDesdeLlegada, díasDePlazo, estado, motivo]
+    // Se mezclan recién llegadas (pagan el viernes de esta semana) con atrasadas (reprogramadas).
+    [0, "F001", "2589", 0, 30, "PENDIENTE", null],
+    [0, "F001", "2604", 1, 30, "PENDIENTE", null],
+    [1, "F002", "0871", 40, 15, "PENDIENTE", null],
+    [2, "F005", "1130", 12, 30, "PENDIENTE", null],
+    [1, "F002", "0844", 55, 30, "PAGADA", null],
+    [2, "F005", "1098", 48, 30, "PAGADA", null],
+    [0, "F001", "2501", 35, 30, "PAGADA", null],
+    [2, "F005", "1142", 8, 30, "OBSERVADA", "Falta la Guía de Remisión Transportista del servicio."],
+  ];
+  const addDays = (base: Date, n: number) => { const d = new Date(base); d.setDate(d.getDate() + n); return d; };
+  const invoiceRows = demoInvoices.map(([si, series, number, emitHace, plazo, status, motivo], idx) => {
+    const issue = daysAgo(emitHace);
+    const subtotal = 850 + idx * 137.5;
+    const igv = subtotal * 0.18;
+    return {
+      supplierId: createdSuppliers[si].id,
+      docType: "FACTURA" as const,
+      series, number,
+      issueDate: ymd(issue),
+      dueDate: ymd(addDays(issue, plazo)),
+      serviceDate: ymd(daysAgo(emitHace + 2)),
+      currency: idx === 3 ? "USD" : "PEN",
+      subtotal: subtotal.toFixed(2),
+      igv: igv.toFixed(2),
+      total: (subtotal + igv).toFixed(2),
+      description: "Servicio de transporte de carga",
+      grtNumber: `T00${si + 1}-${(1000 + idx).toString()}`,
+      status: status as "PENDIENTE" | "PAGADA" | "OBSERVADA",
+      paidAt: status === "PAGADA" ? ymd(addDays(issue, plazo - 3)) : null,
+      paymentReference: status === "PAGADA" ? `Transferencia ${90000 + idx}` : null,
+      paidBy: status === "PAGADA" ? admin.id : null,
+      statusReason: motivo,
+      createdBy: admin.id,
+      receivedAt: issue,
+      isDemo: true,
+    };
+  });
+  await db.insert(supplierInvoices).values(invoiceRows);
+
   await db.insert(auditLogs).values({
     userId: admin.id, userName: admin.name, action: "CREAR", module: "PRODUCTOS",
     description: `Se cargaron datos de prueba: ${createdProducts.length} productos y ${createdEmployees.length} trabajadores.`,
   });
   console.log(`✔ Datos de prueba: ${createdProducts.length} productos, ${createdEmployees.length} trabajadores, con entradas y entregas`);
+  console.log(`✔ Datos de prueba: ${createdSuppliers.length} proveedores y ${invoiceRows.length} facturas`);
   await client.end();
 }
 

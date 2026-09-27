@@ -15,6 +15,20 @@
       "when": 1789588910777,
       "tag": "0001_anulacion_entregas",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790442199239,
+      "tag": "0002_facturas_proveedores",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1790471310525,
+      "tag": "0003_rol_jefe_almacen",
+      "breakpoints": true
     }
   ]
 }

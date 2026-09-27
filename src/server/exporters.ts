@@ -22,7 +22,7 @@ export function toCsv(report: Report) {
 
 export async function toXlsx(report: Report, filtersText: string, generatedBy: string) {
   const wb = new ExcelJS.Workbook();
-  wb.creator = "Control de EPP — Transjer";
+  wb.creator = "Transjer Gestión";
   wb.created = new Date();
   const ws = wb.addWorksheet(report.title.replace("Reporte de ", "").slice(0, 31), { views: [{ state: "frozen", ySplit: 5 }] });
   const lastCol = report.columns.length;

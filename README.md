@@ -1,6 +1,9 @@
-# Control de Inventario de EPP — Transjer Operador Logístico S.A.C.
+# Transjer Gestión — Transjer Operador Logístico S.A.C.
 
-Sistema web para controlar el inventario de Equipos de Protección Personal (EPP): stock, entradas, salidas, ajustes, entregas al personal, alertas de stock bajo, auditoría y reportes en Excel, CSV y PDF. Es multiusuario: todos trabajan sobre la misma base de datos PostgreSQL en la nube, así que lo que registra una persona lo ven las demás al instante.
+Sistema web con dos áreas de trabajo:
+
+- **Almacén (EPP):** stock, entradas, salidas, ajustes, entregas al personal, alertas de stock bajo, auditoría y reportes en Excel, CSV y PDF.
+- **Administración y Finanzas:** facturas de proveedores por servicios de transporte, con control de pagos y lectura automática del buzón `facturas@transjer.com`. Es multiusuario: todos trabajan sobre la misma base de datos PostgreSQL en la nube, así que lo que registra una persona lo ven las demás al instante.
 
 **Tecnologías:** Next.js 15 (App Router, Server Actions) · React 19 · TypeScript · Tailwind CSS · Drizzle ORM · PostgreSQL (Neon o Supabase) · despliegue en Vercel.
 
@@ -18,10 +21,13 @@ Sistema web para controlar el inventario de Equipos de Protección Personal (EPP
 8. [Subir el proyecto a GitHub](#8-subir-el-proyecto-a-github)
 9. [Desplegar en Vercel](#9-desplegar-en-vercel)
 10. [Actualizar el sistema](#10-actualizar-el-sistema)
-11. [Roles y permisos](#11-roles-y-permisos)
-12. [Reglas de negocio](#12-reglas-de-negocio)
-13. [Estructura del proyecto](#13-estructura-del-proyecto)
-14. [Solución de problemas](#14-solución-de-problemas)
+11. [Facturas de proveedores](#11-facturas-de-proveedores)
+12. [Lectura automática del correo](#12-lectura-automática-del-correo)
+13. [Roles y permisos](#13-roles-y-permisos)
+14. [Reglas de negocio](#14-reglas-de-negocio)
+15. [Estructura del proyecto](#15-estructura-del-proyecto)
+16. [Pruebas](#16-pruebas)
+17. [Solución de problemas](#17-solución-de-problemas)
 
 ---
 
@@ -80,6 +86,10 @@ ADMIN_NAME="Ronald Santos"
 ADMIN_EMAIL="rsantos@transjer.pe"
 ADMIN_PASSWORD="UnaClaveSegura123!"
 ```
+
+Esas cinco variables son las únicas obligatorias. El archivo de ejemplo trae además las
+opcionales del módulo de facturas (dónde guardar los PDF y la conexión con el buzón de
+correo); se explican en las secciones 11 y 12 y puedes dejarlas vacías por ahora.
 
 Para generar `AUTH_SECRET`:
 
@@ -196,6 +206,8 @@ Antes del primer `push`, confirma que `.env` **no** aparece en `git status`.
    | `AUTH_SECRET` | Una clave nueva generada con `openssl rand -base64 32` |
 
    `ADMIN_*` no hace falta en Vercel: solo la usan los scripts que ejecutas desde tu computadora.
+   Las variables del módulo de facturas (archivos adjuntos y lectura del correo) se agregan
+   después, cuando las necesites: ver secciones 11 y 12.
 
 4. Pulsa **Deploy**.
 5. **Prepara la base de datos de producción** desde tu computadora, con el `.env` apuntando a esa base:
@@ -209,7 +221,9 @@ Antes del primer `push`, confirma que `.env` **no** aparece en `git status`.
 
 **Región recomendada:** en **Settings → Functions** de Vercel, elige la región más cercana a tu base de datos (por ejemplo, `iad1` si Neon está en US East). Así las consultas son más rápidas.
 
-**Dominio propio (opcional):** en **Settings → Domains** puedes asignar algo como `epp.transjer.pe`.
+**Dominio propio (opcional):** en **Settings → Domains** puedes asignar algo como `epp.transjer.pe`. Si lo haces y tienes activada la lectura del correo, actualiza también `APP_URL` (sección 12).
+
+**Tarea programada:** `vercel.json` ya incluye la revisión diaria del buzón de facturas. Vercel la registra sola al desplegar y solo hace algo si configuraste el correo.
 
 ## 10. Actualizar el sistema
 
@@ -229,7 +243,7 @@ Vercel despliega automáticamente cada `push` a `main`. Las ramas distintas de `
 npm run db:migrate
 ```
 
-**Ejemplo: actualización "Anular entregas"** (migración `0001_anulacion_entregas`). Solo agrega columnas nuevas; no modifica ni borra datos existentes:
+**Ejemplo: última actualización** (migraciones `0002_facturas_proveedores` y `0003_rol_jefe_almacen`). Solo agregan tablas y roles nuevos; no modifican ni borran nada de lo que ya existe:
 
 ```bash
 # 1. Con el .env apuntando a la base de PRODUCCIÓN
@@ -237,7 +251,7 @@ npm install
 npm run db:migrate
 # 2. Publicar el código
 git add .
-git commit -m "Anulación de entregas"
+git commit -m "Transjer Gestión: facturas, calendario de viernes y rol de almacén"
 git push
 ```
 
@@ -249,21 +263,174 @@ Si necesitas volver atrás, en Vercel ve a **Deployments**, elige una versión a
 pg_dump "$DIRECT_URL" > respaldo-$(date +%F).sql
 ```
 
-## 11. Roles y permisos
+## 11. Facturas de proveedores
 
-| Acción | Administrador | Usuario |
-|---|:---:|:---:|
-| Ver dashboard, inventario, movimientos, entregas y trabajadores | ✅ | ✅ |
-| Registrar entregas de EPP | ✅ | ✅ |
-| Registrar entradas y salidas | ✅ | ✅ |
-| Registrar ajustes de inventario | ✅ | — |
-| Anular entregas | ✅ | — |
-| Crear, editar y eliminar productos | ✅ | — |
-| Gestionar trabajadores | ✅ | — |
-| Gestionar categorías | ✅ | — |
-| Gestionar usuarios | ✅ | — |
-| Ver auditoría | ✅ | — |
-| Ver y exportar reportes | ✅ | — |
+Registra las facturas que los transportistas envían a `facturas@transjer.com` y lleva el control de cuáles ya se pagaron.
+
+### Cómo se registra una factura
+
+Hay tres caminos, y todos terminan igual: la factura queda **pendiente de pago**.
+
+| Camino | Cuándo se usa | Cómo |
+|---|---|---|
+| **Automático** | El proveedor envía la factura al buzón con su XML | El sistema la registra solo (sección 12) |
+| **Cargar XML** | Tienes los archivos a mano | *Facturas → Cargar XML*: eliges el XML (y el PDF) y los datos se leen solos |
+| **Nueva factura** | No hay XML, solo un PDF o un papel | *Facturas → Nueva factura*: se escriben los datos a mano |
+
+El **XML** es el archivo que SUNAT exige junto a la factura electrónica. De ahí se leen el RUC y la razón social del proveedor, la serie y el número, las fechas, la moneda, los importes y la guía de remisión, sin escribir nada. Si el proveedor no existe todavía, se crea con los datos del comprobante.
+
+### Estados de una factura
+
+- **Pendiente de pago** — recibida y correcta, esperando el pago. Si pasa su fecha de vencimiento se marca **Vencida** en rojo.
+- **Pagada** — guarda la fecha, la referencia (número de operación) y quién la registró.
+- **Observada** — devuelta al proveedor porque falta algo o los datos no coinciden. Se anota el motivo y el proveedor debe corregirla. Cuando la corrige, se **reactiva** y vuelve a la cola de pago.
+- **Anulada** — el registro se hizo por error. No se borra: queda marcado y fuera de los totales.
+
+Una factura pagada no se puede editar ni volver a pagar. Si el pago se registró por equivocación, se usa **Reabrir**, que deja constancia del motivo y devuelve la factura a pendiente.
+
+### Marcar un pago
+
+En *Facturas*, el botón **Pagar** de cada fila (o el del detalle) pide la fecha, la referencia y una observación opcional. Si dos personas intentan pagar la misma factura a la vez, el sistema solo acepta una.
+
+### Calendario de pago: los viernes
+
+Transjer paga a sus proveedores **los viernes**. El sistema lo tiene en cuenta solo:
+
+- A cada factura le toca el **viernes de la semana en que llegó**. Si llegó un sábado o domingo, le toca el viernes siguiente.
+- Si ese viernes pasa sin pagarse, el pago **se corre al viernes siguiente** y la factura queda marcada como **Reprogramada**, indicando cuántas semanas lleva corriéndose y qué viernes le tocaba.
+
+Dónde lo ves:
+
+| Lugar | Qué muestra |
+|---|---|
+| Dashboard | Tarjetas **Se pagan este viernes** (con el total en soles y dólares) y **Reprogramadas** |
+| Dashboard → *Próximas a pagar* | Las siguientes en la cola, ordenadas por su viernes |
+| Facturas | Avisos arriba de la tabla y, en cada fila, el viernes que le toca |
+| Detalle de la factura | El viernes de pago junto al importe |
+
+Filtros rápidos: `?viernes=1` muestra la tanda de esta semana y `?reprogramadas=1` las que se pasaron. Ambos están enlazados desde las tarjetas del dashboard.
+
+**De dónde sale la fecha de llegada:** de las facturas que entran por correo, del momento en que llegó el mensaje. De las que registras a mano, del campo **Llegó el**, que por defecto es hoy y puedes retroceder si la factura llegó antes.
+
+### Archivos
+
+Cada factura guarda sus archivos (PDF, XML, guía de remisión, imágenes). Se ven y se descargan desde el detalle. Dónde se guardan depende de lo que configures en `.env`:
+
+| Configuración | Dónde viven los archivos | Límite por archivo |
+|---|---|---|
+| Nada configurado | Dentro de la base de datos | 3 MB |
+| `BLOB_READ_WRITE_TOKEN` | Vercel Blob | 15 MB |
+| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Supabase Storage (bucket `facturas`) | 15 MB |
+
+Para uso continuo conviene Vercel Blob o Supabase Storage: los PDF ocupan espacio y las bases de datos gratuitas son pequeñas. El cambio no requiere tocar código, solo añadir las variables; los archivos antiguos se siguen leyendo donde estén.
+
+### Proveedores
+
+En *Configuración → Proveedores* se gestionan las empresas que facturan. El RUC es único y tiene 11 dígitos. Los proveedores no se borran: se **desactivan**, y solo si no tienen facturas pendientes de pago.
+
+---
+
+## 12. Lectura automática del correo
+
+Cuando está activada, cada factura que llega a `facturas@transjer.com` se registra sola y aparece en *Facturas* como pendiente de pago. La encargada solo revisa y marca el pago.
+
+**Nada se pierde.** Si un correo no se puede registrar (no trae el XML, viene dañado, o la factura ya estaba registrada), queda en *Facturas → Correos* con sus archivos y el motivo, para revisarlo a mano.
+
+### Cómo funciona
+
+1. **Aviso instantáneo:** Microsoft avisa al sistema en cuanto llega un correo. El permiso para avisar dura casi 7 días y hay que renovarlo.
+2. **Revisión diaria de respaldo:** una tarea programada renueva ese permiso y repasa el buzón por si algún aviso se perdió. Está configurada en `vercel.json` y corre de madrugada.
+3. **Revisar ahora:** en cualquier momento se puede forzar una revisión desde *Facturas → Correos*.
+
+> El plan gratuito (Hobby) de Vercel solo permite **una tarea programada al día**. Por eso el sistema usa el aviso instantáneo para lo urgente y deja la tarea diaria como respaldo. No hace falta el plan Pro.
+
+### Qué debe hacer el administrador de Microsoft 365
+
+Estos pasos los hace quien administra el correo de la empresa, una sola vez.
+
+**1. Registrar la aplicación** (portal de Microsoft Entra ID → *App registrations* → *New registration*):
+
+- Nombre: `Transjer EPP - Facturas`
+- Tipo de cuenta: solo esta organización
+- Sin URI de redirección
+
+Al terminar, anota el **Directory (tenant) ID** y el **Application (client) ID**.
+
+**2. Crear el secreto** (*Certificates & secrets* → *New client secret*). Copia el **Value** en ese momento: después ya no se puede ver. Anota también la fecha de caducidad, porque habrá que renovarlo.
+
+**3. Dar el permiso** (*API permissions* → *Add a permission* → *Microsoft Graph* → **Application permissions** → `Mail.Read`). Luego pulsa **Grant admin consent**.
+
+**4. Limitar el permiso a un solo buzón.** El paso anterior da acceso a *todos* los buzones de la organización, así que hay que acotarlo a `facturas@transjer.com`. Desde PowerShell de Exchange Online:
+
+```powershell
+New-ServicePrincipal -AppId <CLIENT-ID> -ObjectId <OBJECT-ID-DEL-SERVICE-PRINCIPAL> -DisplayName "Transjer EPP Facturas"
+
+New-ManagementScope -Name "BuzonFacturas" -RecipientRestrictionFilter "PrimarySmtpAddress -eq 'facturas@transjer.com'"
+
+New-ManagementRoleAssignment -App <CLIENT-ID> -Role "Application Mail.Read" -CustomResourceScope "BuzonFacturas"
+```
+
+Los cambios tardan entre 30 minutos y 2 horas en aplicarse. Puedes comprobarlo con `Test-ServicePrincipalAuthorization`.
+
+### Qué debes configurar tú en Vercel
+
+En **Settings → Environment Variables**:
+
+| Variable | Valor |
+|---|---|
+| `GRAPH_TENANT_ID` | Directory (tenant) ID del paso 1 |
+| `GRAPH_CLIENT_ID` | Application (client) ID del paso 1 |
+| `GRAPH_CLIENT_SECRET` | El secreto del paso 2 |
+| `INVOICE_MAILBOX` | `facturas@transjer.com` |
+| `GRAPH_WEBHOOK_SECRET` | Genera una con `openssl rand -base64 24` |
+| `CRON_SECRET` | Genera otra con `openssl rand -base64 24` |
+| `APP_URL` | Solo si usas dominio propio, p. ej. `https://epp.transjer.pe` |
+
+Vuelve a desplegar para que se apliquen. Después, entra a *Facturas → Correos* y:
+
+1. **Probar conexión** — confirma que Microsoft acepta las credenciales y que la aplicación llega al buzón.
+2. **Activar avisos** — a partir de ahí, las facturas que lleguen se registran solas.
+
+### Mantenimiento
+
+- **El secreto caduca** (normalmente en 6, 12 o 24 meses). Cuando se acerque la fecha, crea uno nuevo en Microsoft, actualiza `GRAPH_CLIENT_SECRET` en Vercel y vuelve a desplegar. Si caduca, *Correos* mostrará el error y las facturas dejarán de registrarse solas hasta que lo renueves; ninguna se pierde, quedan en el buzón y entran con **Revisar ahora**.
+- **Si cambias el dominio**, actualiza `APP_URL`, desactiva y vuelve a activar los avisos, porque Microsoft guarda la dirección a la que avisa.
+
+### Seguridad
+
+- Las credenciales viven solo en las variables de entorno, nunca en la base de datos ni en el código.
+- El permiso es de **solo lectura** y limitado a un único buzón: el sistema no puede enviar correos, borrarlos ni leer otros buzones.
+- Cada aviso de Microsoft trae `GRAPH_WEBHOOK_SECRET`; si no coincide, se descarta.
+- La tarea diaria exige `CRON_SECRET`.
+
+---
+
+## 13. Roles y permisos
+
+| Acción | Administrador | Jefe de almacén | Usuario | Finanzas |
+|---|:---:|:---:|:---:|:---:|
+| Ver dashboard, inventario, movimientos, entregas y trabajadores | ✅ | ✅ | ✅ | — |
+| Registrar entregas de EPP | ✅ | ✅ | ✅ | — |
+| Registrar entradas y salidas | ✅ | ✅ | ✅ | — |
+| Registrar ajustes de inventario | ✅ | ✅ | — | — |
+| Anular entregas | ✅ | ✅ | — | — |
+| Crear, editar y eliminar productos | ✅ | ✅ | — | — |
+| Gestionar trabajadores | ✅ | ✅ | — | — |
+| Gestionar categorías | ✅ | ✅ | — | — |
+| Gestionar usuarios | ✅ | — | — | — |
+| Ver auditoría | ✅ | — | — | — |
+| Ver y exportar reportes | ✅ | ✅ | — | ✅ |
+| Ver facturas de proveedores | ✅ | — | — | ✅ |
+| Registrar y editar facturas | ✅ | — | — | ✅ |
+| Marcar pagos | ✅ | — | — | ✅ |
+| Gestionar proveedores | ✅ | — | — | ✅ |
+| Configurar la lectura del correo | ✅ | — | — | — |
+
+- **Jefe de almacén**: manda en todo el módulo de EPP (productos, categorías, trabajadores, ajustes y anulaciones), pero no ve facturas, usuarios ni auditoría.
+- **Usuario**: el día a día del almacén — consulta, movimientos y entregas.
+- **Finanzas**: la encargada de pagos. Gestiona las facturas y no entra al almacén.
+
+Al elegir un rol en *Nuevo usuario*, el sistema explica en pantalla qué puede hacer.
 
 Los permisos se definen en `src/lib/permissions.ts`. Para agregar un rol nuevo (por ejemplo, "Supervisor"):
 
@@ -272,7 +439,7 @@ Los permisos se definen en `src/lib/permissions.ts`. Para agregar un rol nuevo (
 
 Los permisos se validan **en el servidor** en cada página, acción y exportación. Ocultar un botón es solo comodidad visual.
 
-## 12. Reglas de negocio
+## 14. Reglas de negocio
 
 - **El stock solo cambia mediante movimientos** (entrada, salida o ajuste). No se puede editar directamente.
 - **El stock nunca es negativo.** Lo impide la aplicación y también una restricción en la base de datos. Si dos personas registran salidas a la vez, el sistema bloquea la fila para que no se descuadre.
@@ -285,7 +452,17 @@ Los permisos se validan **en el servidor** en cada página, acción y exportaci�
 - **Auditoría**: cada creación, edición, eliminación, movimiento e inicio de sesión queda registrado con el usuario, la fecha, la acción y los datos anteriores y nuevos. Las contraseñas nunca se guardan en la auditoría.
 - **Zona horaria**: todas las fechas se muestran en hora de Lima (UTC−5).
 
-## 13. Estructura del proyecto
+Y en las facturas de proveedores:
+
+- **No se registra dos veces el mismo comprobante.** La combinación proveedor + tipo + serie + número es única, tanto si se registra a mano como si llega por correo.
+- **Las facturas no se borran**: se anulan, dejando el motivo y quién lo hizo.
+- **Una factura pagada está cerrada**: no se edita ni se vuelve a pagar. Para corregir, se reabre primero.
+- **El importe total siempre es mayor a cero** y la moneda solo puede ser soles o dólares (lo impide la base de datos).
+- **Una factura pagada siempre tiene fecha de pago**, y una sin pagar nunca la tiene (también lo impide la base de datos).
+- **Ningún correo se pierde**: el que no se pueda registrar queda en la bandeja con sus archivos y el motivo.
+- **Los pagos son los viernes**: a cada factura le toca el viernes de la semana en que llegó, y si ese viernes pasa sin pagarse el pago se corre al siguiente, avisando de la reprogramación.
+
+## 15. Estructura del proyecto
 
 ```
 drizzle/                 Migraciones SQL
@@ -294,20 +471,64 @@ src/
   app/
     login/               Inicio de sesión
     (app)/               Páginas protegidas: dashboard, inventario, movimientos,
-                         entregas, trabajadores, categorías, usuarios, auditoría, reportes
+                         entregas, trabajadores, categorías, usuarios, auditoría, reportes,
+                         facturas, facturas/correos, proveedores
     api/export/          Descarga de reportes (Excel, CSV, PDF)
+    api/facturas/        Descarga de los archivos adjuntos de las facturas
+    api/correo/graph/    Aviso instantáneo de Microsoft 365 (webhook)
+    api/cron/facturas/   Tarea diaria: renueva los avisos y repasa el buzón
   actions/               Server Actions (crear, editar, eliminar…)
   components/            Interfaz: ui/ (base), layout/, inventory/, deliveries/…
   db/                    Esquema y conexión
   lib/                   Sesión, permisos, auditoría, validaciones, utilidades
   server/                Consultas, lógica de inventario, reportes y exportadores
+                         invoice-*.ts (facturas), sunat-xml.ts (lectura del XML),
+                         graph.ts (Microsoft 365), storage.ts (archivos adjuntos)
   middleware.ts          Protección de rutas
+tests/                   Pruebas automáticas
+vercel.json              Tarea diaria programada
 ```
 
-## 14. Solución de problemas
+---
+
+## 15b. Identidad visual
+
+Los archivos oficiales del logotipo están en `public/`:
+
+| Archivo | Para qué |
+|---|---|
+| `logo.png` | Logotipo completo, fondo claro (login) |
+| `logo-blanco.png` | El mismo con el texto en blanco, fondo oscuro (menú lateral) |
+| `logo-tj.png` | Solo el monograma TJ, para espacios estrechos (cabecera móvil) |
+| `icon.png` | Ícono de la pestaña del navegador |
+
+Todo se usa desde `src/components/layout/brand.tsx`. Si la empresa cambia el logotipo, reemplaza los archivos de `public/` respetando los nombres y no hay que tocar código.
+
+---
+
+## 16. Pruebas
+
+```bash
+npm test          # XML de SUNAT, calendario de viernes y registro automático de correos
+```
+
+Las pruebas de interfaz usan Playwright contra el sistema en marcha:
+
+```bash
+npm run build && npm start          # en otra terminal
+python3 tests/e2e-epp.py            # almacén: inventario, movimientos, entregas, permisos
+python3 tests/e2e-facturas.py       # facturas: registro, pagos, correos, permisos, móvil
+```
+
+Las suites se pueden repetir las veces que haga falta: cada una limpia lo que crea. Necesitan la base con datos de prueba (`npm run db:seed:demo`).
+
+## 17. Solución de problemas
 
 **`Falta la variable de entorno DATABASE_URL`**
 No existe `.env` o está en otra carpeta. En Vercel, revisa **Settings → Environment Variables** y vuelve a desplegar: los cambios de variables solo se aplican en un despliegue nuevo.
+
+**`invalid input value for enum role` o "La base de datos está desactualizada"**
+Publicaste el código nuevo sin aplicar las migraciones en esa base. Ejecuta `npm run db:migrate` con el `.env` apuntando a ella y reinicia el servidor. Pasa cuando se agrega un rol o un estado nuevo.
 
 **`relation "users" does not exist`**
 No se ejecutaron las migraciones en esa base de datos: `npm run db:migrate`.
@@ -320,6 +541,18 @@ Estás usando una versión modificada de `src/db/index.ts`. La conexión debe ma
 
 **Errores de conexión o timeouts en las migraciones**
 Usa la cadena **directa** en `DIRECT_URL`, no la del pooler.
+
+**Las facturas no se registran solas**
+Entra a *Facturas → Correos*: ahí se ve si falta configurar algo, si los avisos están activos y cuál fue el último error. Pulsa **Probar conexión**. Si el secreto de Microsoft caducó, créalo de nuevo y actualiza `GRAPH_CLIENT_SECRET` en Vercel. Mientras tanto, **Revisar ahora** recupera los correos pendientes.
+
+**`Sin permiso para leer el buzón ...`**
+Falta el permiso `Mail.Read` con consentimiento del administrador, o la aplicación no está autorizada sobre ese buzón (paso 4 de la sección 12). Los cambios de permisos tardan hasta 2 horas en aplicarse.
+
+**Un correo quedó "Por revisar"**
+Es normal cuando el proveedor no adjuntó el XML o mandó solo el PDF. Desde la bandeja puedes **Registrar** la factura a mano (los archivos del correo se adjuntan solos), **Reintentar** o **Descartar** el correo.
+
+**`El archivo supera el máximo permitido`**
+Estás guardando los adjuntos dentro de la base de datos, donde el límite es 3 MB. Configura Vercel Blob o Supabase Storage (sección 11) para subir a 15 MB.
 
 **El primer inicio de sesión tarda unos segundos**
 Es normal en planes gratuitos: la base de datos se "despierta" tras un tiempo sin uso.

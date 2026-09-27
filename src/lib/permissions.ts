@@ -10,6 +10,9 @@ export const PERMISSIONS = [
   "users.manage",
   "reports.view",
   "audit.view",
+  "invoices.view", "invoices.manage", "invoices.pay",
+  "suppliers.manage",
+  "invoices.mailbox",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -21,9 +24,36 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "deliveries.view", "deliveries.create",
     "employees.view",
   ],
+  // Jefe de almacén: manda en todo el módulo de EPP, sin usuarios ni facturas.
+  JEFE_ALMACEN: [
+    "products.view", "products.manage",
+    "movements.view", "movements.create", "movements.adjust",
+    "deliveries.view", "deliveries.create", "deliveries.void",
+    "employees.view", "employees.manage",
+    "categories.manage",
+    "reports.view",
+  ],
+  // Administración y Finanzas: gestiona las facturas de proveedores, no el almacén.
+  FINANZAS: [
+    "invoices.view", "invoices.manage", "invoices.pay",
+    "suppliers.manage",
+    "reports.view",
+  ],
 };
 
-export const ROLE_LABELS: Record<Role, string> = { ADMIN: "Administrador", USUARIO: "Usuario" };
+export const ROLE_LABELS: Record<Role, string> = {
+  ADMIN: "Administrador",
+  JEFE_ALMACEN: "Jefe de almacén",
+  USUARIO: "Usuario",
+  FINANZAS: "Finanzas",
+};
+
+export const ROLE_DESCRIPTIONS: Record<Role, string> = {
+  ADMIN: "Acceso total al sistema.",
+  JEFE_ALMACEN: "Almacén completo: productos, categorías, trabajadores, ajustes y reportes. Sin usuarios ni facturas.",
+  USUARIO: "Almacén: consulta el inventario, registra movimientos y entregas.",
+  FINANZAS: "Facturas de proveedores: registra, revisa y marca los pagos.",
+};
 
 export function can(role: Role | undefined | null, permission: Permission): boolean {
   if (!role) return false;

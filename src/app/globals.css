@@ -18,3 +18,12 @@ body { @apply bg-steel-50 font-sans text-ink antialiased; }
 .hazard-stripe {
   background-image: repeating-linear-gradient(-45deg, #FFC20E 0 10px, #000 10px 20px);
 }
+
+/* Versión muy tenue de la franja, para dar textura a fondos amplios sin llamar la atención. */
+.hazard-texture {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(255, 194, 14, 0.045) 0 14px,
+    transparent 14px 44px
+  );
+}

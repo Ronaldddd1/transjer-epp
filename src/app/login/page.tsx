@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BrandLockup } from "@/components/layout/brand";
+import { TransjerLogo } from "@/components/layout/brand";
 import { first, type SearchParams } from "@/lib/utils";
 import { LoginForm } from "./login-form";
 
@@ -7,30 +7,34 @@ export const metadata: Metadata = { title: "Iniciar sesión" };
 
 export default async function LoginPage({ searchParams }: { searchParams: SearchParams }) {
   const sp = await searchParams;
+  const year = new Date().getFullYear();
+
   return (
-    <main className="grid min-h-dvh lg:grid-cols-[1.1fr_1fr]">
-      <section className="relative hidden flex-col justify-between overflow-hidden bg-ink p-12 text-white lg:flex">
-        <BrandLockup inverted />
-        <div className="max-w-md">
-          <h1 className="font-display text-[56px] font-bold leading-[0.95] tracking-tight">
-            Control de Inventario de EPP
-          </h1>
-          <p className="mt-5 text-lg text-steel-300">
-            Stock, entregas al personal y trazabilidad de cada equipo de protección, en un solo lugar.
+    <main className="relative flex min-h-dvh flex-col items-center justify-center bg-ink px-4 py-10">
+      <div className="hazard-texture absolute inset-0" aria-hidden />
+      <div className="hazard-stripe absolute inset-x-0 top-0 h-1.5" aria-hidden />
+
+      <div className="relative w-full max-w-[420px]">
+        <div className="rounded-xl border border-steel-200 bg-white px-7 py-9 shadow-2xl shadow-black/40 sm:px-10">
+          <TransjerLogo width={168} priority className="mx-auto" />
+
+          <div className="mt-8 border-t border-steel-200 pt-7">
+            <h1 className="font-display text-2xl font-bold text-ink">Iniciar sesión</h1>
+            <p className="mt-1 text-[15px] text-steel-500">Ingresa con tu usuario o correo corporativo.</p>
+            <LoginForm next={first(sp.next) ?? ""} />
+          </div>
+
+          <p className="mt-7 border-t border-steel-200 pt-5 text-[13px] leading-relaxed text-steel-500">
+            Acceso exclusivo para personal autorizado. Si olvidaste tu contraseña,
+            solicita al administrador del sistema que la restablezca.
           </p>
         </div>
-        <p className="text-sm text-steel-500">Transjer Operador Logístico S.A.C.</p>
-        <div className="hazard-stripe absolute inset-x-0 bottom-0 h-2" aria-hidden />
-      </section>
 
-      <section className="flex flex-col justify-center px-6 py-10 sm:px-12">
-        <div className="mx-auto w-full max-w-sm">
-          <div className="mb-10 lg:hidden"><BrandLockup /></div>
-          <h2 className="font-display text-3xl font-bold text-ink">Iniciar sesión</h2>
-          <p className="mt-1 text-steel-500">Ingresa con tu usuario o correo corporativo.</p>
-          <LoginForm next={first(sp.next) ?? ""} />
-        </div>
-      </section>
+        <footer className="mt-7 text-center text-[13px] text-steel-500">
+          <p className="font-medium text-steel-400">Transjer Operador Logístico S.A.C.</p>
+          <p className="mt-0.5">Sistema de gestión interna · {year}</p>
+        </footer>
+      </div>
     </main>
   );
 }

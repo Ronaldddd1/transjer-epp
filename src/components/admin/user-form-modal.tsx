@@ -1,17 +1,20 @@
 "use client";
 
 import { KeyRound, Pencil, UserPlus } from "lucide-react";
+import { useState } from "react";
 import { changeUserPassword, createUser, updateUser } from "@/actions/users";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { Role } from "@/db/schema";
-import { ROLE_LABELS } from "@/lib/permissions";
+import { ROLE_DESCRIPTIONS, ROLE_LABELS } from "@/lib/permissions";
 
 type UserData = { id: string; name: string; username: string; email: string; role: Role };
 
 export function UserFormModal({ user }: { user?: UserData }) {
   const editing = !!user;
+  // Se explica en el momento qué puede hacer el rol elegido.
+  const [role, setRole] = useState<Role>(user?.role ?? "USUARIO");
   return (
     <FormModal
       title={editing ? `Editar ${user.username}` : "Nuevo usuario"}
@@ -33,10 +36,13 @@ export function UserFormModal({ user }: { user?: UserData }) {
             <Input name="email" type="email" defaultValue={user?.email} invalid={!!errors.email} />
           </Field>
           <Field label="Rol" name="role" required error={errors.role} className={editing ? "sm:col-span-2" : ""}>
-            <Select name="role" defaultValue={user?.role ?? "USUARIO"}>
+            <Select name="role" value={role} onChange={(e) => setRole(e.target.value as Role)}>
               {(Object.keys(ROLE_LABELS) as Role[]).map((r) => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
             </Select>
           </Field>
+          <p className="rounded-md border border-steel-200 bg-steel-50 px-3 py-2 text-sm text-steel-600 sm:col-span-2">
+            <strong className="text-ink">{ROLE_LABELS[role]}:</strong> {ROLE_DESCRIPTIONS[role]}
+          </p>
           {!editing && (
             <Field label="Contraseña" name="password" required error={errors.password} hint="Mínimo 8 caracteres.">
               <Input name="password" type="password" autoComplete="new-password" invalid={!!errors.password} />

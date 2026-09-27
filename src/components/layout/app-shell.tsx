@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowLeftRight, BarChart3, ClipboardList, HardHat, LayoutDashboard, LogOut, Menu, PackageSearch, ShieldCheck, Tags, Users, X,
+  ArrowLeftRight, BarChart3, Building2, ClipboardList, HardHat, LayoutDashboard, LogOut, Menu, PackageSearch, Receipt, ShieldCheck, Tags, Users, X,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
@@ -10,7 +10,7 @@ import { logoutAction } from "@/actions/auth";
 import type { Role } from "@/db/schema";
 import { can, ROLE_LABELS, type Permission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
-import { BrandLockup } from "./brand";
+import { BrandLockup, BrandMark } from "./brand";
 
 type NavItem = { href: string; label: string; icon: typeof LayoutDashboard; permission?: Permission };
 
@@ -20,9 +20,11 @@ const MAIN_NAV: NavItem[] = [
   { href: "/movimientos", label: "Movimientos", icon: ArrowLeftRight, permission: "movements.view" },
   { href: "/entregas", label: "Entregas", icon: HardHat, permission: "deliveries.view" },
   { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+  { href: "/facturas", label: "Facturas", icon: Receipt, permission: "invoices.view" },
   { href: "/reportes", label: "Reportes", icon: BarChart3, permission: "reports.view" },
 ];
 const SETTINGS_NAV: NavItem[] = [
+  { href: "/proveedores", label: "Proveedores", icon: Building2, permission: "suppliers.manage" },
   { href: "/categorias", label: "Categorías", icon: Tags, permission: "categories.manage" },
   { href: "/usuarios", label: "Usuarios", icon: ShieldCheck, permission: "users.manage" },
   { href: "/auditoria", label: "Auditoría", icon: ClipboardList, permission: "audit.view" },
@@ -42,7 +44,7 @@ function NavPending() {
   );
 }
 
-export function AppShell({ user, lowStockCount, children }: { user: { name: string; role: Role }; lowStockCount: number; children: ReactNode }) {
+export function AppShell({ user, lowStockCount, pendingInvoices = 0, children }: { user: { name: string; role: Role }; lowStockCount: number; pendingInvoices?: number; children: ReactNode }) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
@@ -70,15 +72,18 @@ export function AppShell({ user, lowStockCount, children }: { user: { name: stri
         {item.href === "/inventario" && lowStockCount > 0 && (
           <span className="rounded bg-brand px-1.5 text-xs font-bold text-ink" title="Productos por reponer">{lowStockCount}</span>
         )}
+        {item.href === "/facturas" && pendingInvoices > 0 && (
+          <span className="rounded bg-brand px-1.5 text-xs font-bold text-ink" title="Facturas pendientes de pago">{pendingInvoices}</span>
+        )}
       </Link>
     );
   };
 
   const sidebar = (
     <div className="flex h-full flex-col bg-ink">
-      <div className="flex h-16 items-center justify-between px-5">
-        <BrandLockup inverted />
-        <button className="rounded p-1.5 text-steel-400 hover:text-white lg:hidden" onClick={() => setOpen(false)} aria-label="Cerrar menú">
+      <div className="flex items-start justify-between px-5 pb-5 pt-6">
+        <BrandLockup />
+        <button className="-mr-1.5 rounded p-1.5 text-steel-400 hover:text-white lg:hidden" onClick={() => setOpen(false)} aria-label="Cerrar menú">
           <X className="h-5 w-5" />
         </button>
       </div>
@@ -125,7 +130,10 @@ export function AppShell({ user, lowStockCount, children }: { user: { name: stri
         <button onClick={() => setOpen(true)} className="-ml-1 rounded p-2 text-white" aria-label="Abrir menú">
           <Menu className="h-6 w-6" />
         </button>
-        <p className="font-display text-lg font-bold text-white">Transjer <span className="font-medium text-steel-400">EPP</span></p>
+        <span className="flex items-center gap-2.5">
+          <BrandMark height={26} />
+          <span className="font-display text-lg font-bold text-white">Transjer <span className="font-medium text-steel-400">Gestión</span></span>
+        </span>
       </header>
 
       <main className="lg:pl-64">

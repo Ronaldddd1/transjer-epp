@@ -3,10 +3,10 @@ import { db, type Tx } from "@/db";
 import { auditLogs } from "@/db/schema";
 import type { CurrentUser } from "./auth";
 
-export type AuditModule = "PRODUCTOS" | "CATEGORIAS" | "TRABAJADORES" | "MOVIMIENTOS" | "ENTREGAS" | "USUARIOS" | "SESION";
-export type AuditAction = "CREAR" | "EDITAR" | "ELIMINAR" | "ACTIVAR" | "DESACTIVAR" | "ENTRADA" | "SALIDA" | "AJUSTE" | "ENTREGA" | "ANULAR" | "CONTRASEÑA" | "INGRESO";
+export type AuditModule = "PRODUCTOS" | "CATEGORIAS" | "TRABAJADORES" | "MOVIMIENTOS" | "ENTREGAS" | "USUARIOS" | "SESION" | "FACTURAS" | "PROVEEDORES" | "CORREO";
+export type AuditAction = "CREAR" | "EDITAR" | "ELIMINAR" | "ACTIVAR" | "DESACTIVAR" | "ENTRADA" | "SALIDA" | "AJUSTE" | "ENTREGA" | "ANULAR" | "CONTRASEÑA" | "INGRESO" | "PAGAR" | "OBSERVAR" | "REABRIR" | "IMPORTAR" | "ADJUNTAR";
 
-export const AUDIT_MODULES: AuditModule[] = ["PRODUCTOS", "CATEGORIAS", "TRABAJADORES", "MOVIMIENTOS", "ENTREGAS", "USUARIOS", "SESION"];
+export const AUDIT_MODULES: AuditModule[] = ["PRODUCTOS", "CATEGORIAS", "TRABAJADORES", "MOVIMIENTOS", "ENTREGAS", "FACTURAS", "PROVEEDORES", "CORREO", "USUARIOS", "SESION"];
 
 const SENSITIVE_KEYS = new Set(["passwordHash", "password"]);
 

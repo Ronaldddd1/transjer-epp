@@ -1,0 +1,42 @@
+ACTUALIZACIÓN: TRANSJER GESTIÓN
+
+Cambios incluidos:
+  1. El sistema ahora se llama "Transjer Gestión" (antes "EPP Transjer").
+  2. Logotipo oficial de Transjer en el login, el menú y el ícono del navegador.
+  3. Pantalla de inicio de sesión rediseñada, con estilo corporativo.
+  4. Nuevo rol "Jefe de almacén": manda en todo el módulo de EPP, sin acceso a
+     usuarios ni facturas.
+  5. Calendario de pago de los viernes: a cada factura le toca el viernes de la
+     semana en que llegó; si ese viernes pasa sin pagarse, se corre al siguiente
+     y el sistema avisa de la reprogramación.
+  6. Módulo de facturas de proveedores (por si no publicaste la versión anterior).
+
+PASOS
+-----
+1) Copia el contenido de esta carpeta sobre tu proyecto, reemplazando los archivos.
+
+2) BORRA este archivo, que ya no se usa (el ícono ahora es PNG):
+     public/icon.svg
+
+3) Instala las dependencias:
+     npm install
+
+4) Con tu .env apuntando a la base de datos de PRODUCCIÓN:
+     npm run db:migrate
+   ESTE PASO ES OBLIGATORIO. Sin él, al asignar el rol "Jefe de almacén" dará
+   el error: invalid input value for enum role. Las migraciones 0002 y 0003 solo
+   AGREGAN tablas y roles: no modifican ni borran ningún dato existente.
+
+5) Publica:
+     git add -A
+     git commit -m "Transjer Gestión: logo, calendario de viernes y rol de almacén"
+     git push
+   (Usa "git add -A" para que Git registre también el archivo borrado.)
+
+6) Vercel despliega solo. Revisa en Vercel > Deployments que termine en "Ready".
+
+LOGOTIPO
+--------
+Los archivos oficiales están en public/ (logo.png, logo-blanco.png, logo-tj.png,
+icon.png). Si la empresa cambia el logotipo, reemplázalos respetando los nombres
+y no hay que tocar código.

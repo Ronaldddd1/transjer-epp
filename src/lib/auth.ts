@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import { db } from "@/db";
 import { users, type Role } from "@/db/schema";
+import { AuthError } from "./auth-error";
 import { can, type Permission } from "./permissions";
 import { SESSION_COOKIE, SESSION_MAX_AGE, signSession, verifySession } from "./session";
 
@@ -46,7 +47,7 @@ export async function requirePageUser(permission?: Permission): Promise<CurrentU
   return user;
 }
 
-export class AuthError extends Error {}
+export { AuthError } from "./auth-error";
 
 /** Para server actions: lanza error si no hay sesión o permiso. */
 export async function requireActionUser(permission?: Permission): Promise<CurrentUser> {

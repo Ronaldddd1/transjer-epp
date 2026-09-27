@@ -11,17 +11,21 @@ import "@fontsource/barlow-semi-condensed/latin-700.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: { default: "Control de Inventario de EPP — Transjer", template: "%s · EPP Transjer" },
-  description: "Sistema de control de Equipos de Protección Personal de Transjer Operador Logístico S.A.C.",
-  icons: { icon: "/icon.svg" },
+  title: { default: "Transjer Gestión", template: "%s · Transjer Gestión" },
+  description: "Sistema de gestión de Transjer Operador Logístico S.A.C.: almacén de EPP y facturas de proveedores.",
+  icons: { icon: "/icon.png", apple: "/icon.png" },
 };
 
 export const viewport: Viewport = { themeColor: "#000000", width: "device-width", initialScale: 1 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="es-PE">
-      <body>
+    // suppressHydrationWarning: algunas extensiones del navegador (ColorZilla, gestores de
+    // contraseñas, traductores) agregan atributos al <html> y al <body> antes de que React
+    // cargue. Sin esto, el modo de desarrollo avisa de una diferencia que no es del sistema.
+    // Solo afecta a los atributos de esas dos etiquetas; el contenido se sigue verificando.
+    <html lang="es-PE" suppressHydrationWarning>
+      <body suppressHydrationWarning>
         <ToastProvider>{children}</ToastProvider>
       </body>
     </html>

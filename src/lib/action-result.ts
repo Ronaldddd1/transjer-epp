@@ -1,5 +1,5 @@
 import { ZodError } from "zod";
-import { AuthError } from "./auth";
+import { AuthError } from "./auth-error";
 
 export type ActionResult =
   | { ok: true; message: string }
@@ -24,14 +24,22 @@ export function toActionError(error: unknown): ActionResult {
   if (pg?.code === "23505") return { ok: false, message: "Ya existe un registro con ese valor (código, DNI, usuario o correo repetido)." };
   if (pg?.code === "23514") return { ok: false, message: "No hay suficiente stock disponible." };
   if (pg?.code === "23503") return { ok: false, message: "El registro está relacionado con otros datos y no se puede modificar así." };
+  // 22P02 sobre un enum: el código conoce un valor (un rol, un estado) que la base de datos
+  // todavía no. Pasa cuando se publica una versión nueva sin aplicar las migraciones.
+  if (pg?.code === "22P02" && /enum/i.test(pg.message ?? "")) {
+    return {
+      ok: false,
+      message: "La base de datos está desactualizada y no reconoce ese valor. Falta ejecutar las migraciones: npm run db:migrate",
+    };
+  }
   console.error(error);
   return { ok: false, message: "Ocurrió un error inesperado. Inténtalo nuevamente." };
 }
 
-function findPgError(error: unknown): { code?: string } | null {
+function findPgError(error: unknown): { code?: string; message?: string } | null {
   let e: unknown = error;
   for (let i = 0; i < 4 && e && typeof e === "object"; i++) {
-    if ("code" in e && typeof (e as { code: unknown }).code === "string") return e as { code: string };
+    if ("code" in e && typeof (e as { code: unknown }).code === "string") return e as { code: string; message?: string };
     e = (e as { cause?: unknown }).cause;
   }
   return null;

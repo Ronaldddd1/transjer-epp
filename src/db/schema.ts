@@ -5,11 +5,21 @@
  */
 import { relations, sql } from "drizzle-orm";
 import {
-  boolean, check, date, index, integer, jsonb, pgEnum, pgTable, text, timestamp, uuid, varchar,
+  boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
+  uniqueIndex, uuid, varchar,
 } from "drizzle-orm/pg-core";
 
-export const roleEnum = pgEnum("role", ["ADMIN", "USUARIO"]);
+/** Contenido binario de un adjunto (solo se usa con el modo de almacenamiento "db"). */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
+
+export const roleEnum = pgEnum("role", ["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN"]);
 export const movementTypeEnum = pgEnum("movement_type", ["ENTRADA", "SALIDA", "AJUSTE"]);
+/** Facturas de proveedores por servicios de transporte. */
+export const invoiceDocTypeEnum = pgEnum("invoice_doc_type", ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"]);
+export const invoiceStatusEnum = pgEnum("invoice_status", ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"]);
+export const invoiceSourceEnum = pgEnum("invoice_source", ["MANUAL", "CORREO"]);
+export const invoiceEmailStatusEnum = pgEnum("invoice_email_status", ["PROCESADO", "REVISAR", "DESCARTADO", "ERROR"]);
+export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FACTURA_XML", "GRT", "OTRO"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -118,6 +128,118 @@ export const eppDeliveries = pgTable("epp_deliveries", {
   index("deliveries_date_idx").on(t.deliveryDate),
 ]);
 
+
+// ---------------------------------------------------------------------------
+// Facturas de proveedores (Administración y Finanzas)
+// ---------------------------------------------------------------------------
+
+export const suppliers = pgTable("suppliers", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  ruc: varchar("ruc", { length: 11 }).notNull().unique(),
+  businessName: varchar("business_name", { length: 200 }).notNull(),
+  tradeName: varchar("trade_name", { length: 200 }),
+  email: varchar("email", { length: 160 }),
+  phone: varchar("phone", { length: 20 }),
+  contactName: varchar("contact_name", { length: 120 }),
+  notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  isDemo: boolean("is_demo").notNull().default(false),
+  ...timestamps,
+}, (t) => [
+  index("suppliers_active_name_idx").on(t.active, t.businessName),
+  check("suppliers_ruc_format", sql`${t.ruc} ~ '^[0-9]{11}$'`),
+]);
+
+export const supplierInvoices = pgTable("supplier_invoices", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  supplierId: uuid("supplier_id").notNull().references(() => suppliers.id),
+  docType: invoiceDocTypeEnum("doc_type").notNull().default("FACTURA"),
+  /** Serie y correlativo del comprobante, p. ej. F001 y 2589. */
+  series: varchar("series", { length: 8 }).notNull(),
+  number: varchar("number", { length: 12 }).notNull(),
+  issueDate: date("issue_date").notNull(),
+  dueDate: date("due_date"),
+  serviceDate: date("service_date"),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  subtotal: numeric("subtotal", { precision: 14, scale: 2 }),
+  igv: numeric("igv", { precision: 14, scale: 2 }),
+  total: numeric("total", { precision: 14, scale: 2 }).notNull(),
+  description: varchar("description", { length: 250 }),
+  /** Guía de Remisión Transportista asociada al servicio. */
+  grtNumber: varchar("grt_number", { length: 40 }),
+  status: invoiceStatusEnum("status").notNull().default("PENDIENTE"),
+  paidAt: date("paid_at"),
+  paymentReference: varchar("payment_reference", { length: 120 }),
+  paymentNotes: text("payment_notes"),
+  paidBy: uuid("paid_by").references(() => users.id),
+  /** Motivo cuando la factura se devuelve al proveedor o se anula. */
+  statusReason: varchar("status_reason", { length: 250 }),
+  source: invoiceSourceEnum("source").notNull().default("MANUAL"),
+  receivedAt: timestamp("received_at", { withTimezone: true }),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id),
+  isDemo: boolean("is_demo").notNull().default(false),
+  ...timestamps,
+}, (t) => [
+  // Un mismo comprobante no puede registrarse dos veces para el mismo proveedor.
+  uniqueIndex("invoices_supplier_doc_unique").on(t.supplierId, t.docType, t.series, t.number),
+  index("invoices_status_date_idx").on(t.status, t.issueDate),
+  index("invoices_supplier_idx").on(t.supplierId),
+  index("invoices_issue_date_idx").on(t.issueDate),
+  check("invoices_total_positive", sql`${t.total} > 0`),
+  check("invoices_currency_valid", sql`${t.currency} in ('PEN','USD')`),
+  // Una factura pagada siempre guarda su fecha de pago, y viceversa.
+  check("invoices_paid_consistent", sql`(${t.status} = 'PAGADA') = (${t.paidAt} is not null)`),
+]);
+
+export const invoiceEmails = pgTable("invoice_emails", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Identificador del mensaje en el buzón: evita procesar dos veces el mismo correo. */
+  messageId: varchar("message_id", { length: 400 }).notNull().unique(),
+  internetMessageId: varchar("internet_message_id", { length: 400 }),
+  subject: varchar("subject", { length: 400 }),
+  fromAddress: varchar("from_address", { length: 250 }),
+  fromName: varchar("from_name", { length: 250 }),
+  receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
+  status: invoiceEmailStatusEnum("status").notNull().default("REVISAR"),
+  invoiceId: uuid("invoice_id").references(() => supplierInvoices.id, { onDelete: "set null" }),
+  attachmentCount: integer("attachment_count").notNull().default(0),
+  detail: text("detail"),
+  parsed: jsonb("parsed"),
+  processedAt: timestamp("processed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("invoice_emails_status_date_idx").on(t.status, t.receivedAt),
+  index("invoice_emails_date_idx").on(t.receivedAt),
+]);
+
+export const invoiceAttachments = pgTable("invoice_attachments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  emailId: uuid("email_id").references(() => invoiceEmails.id, { onDelete: "cascade" }),
+  kind: attachmentKindEnum("kind").notNull().default("OTRO"),
+  filename: varchar("filename", { length: 250 }).notNull(),
+  contentType: varchar("content_type", { length: 120 }).notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  /** Dónde vive el archivo: "db" (columna content), "blob" o "supabase" (storageKey). */
+  storageDriver: varchar("storage_driver", { length: 20 }).notNull(),
+  storageKey: varchar("storage_key", { length: 500 }),
+  content: bytea("content"),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("invoice_attachments_invoice_idx").on(t.invoiceId),
+  index("invoice_attachments_email_idx").on(t.emailId),
+  check("invoice_attachments_owner", sql`${t.invoiceId} is not null or ${t.emailId} is not null`),
+]);
+
+/** Ajustes del sistema en pares clave/valor: estado de la conexión con el buzón, etc. */
+export const appSettings = pgTable("app_settings", {
+  key: varchar("key", { length: 60 }).primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+});
+
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -157,6 +279,19 @@ export const deliveriesRelations = relations(eppDeliveries, ({ one }) => ({
   movement: one(inventoryMovements, { fields: [eppDeliveries.movementId], references: [inventoryMovements.id] }),
   user: one(users, { fields: [eppDeliveries.userId], references: [users.id] }),
 }));
+export const suppliersRelations = relations(suppliers, ({ many }) => ({ invoices: many(supplierInvoices) }));
+export const supplierInvoicesRelations = relations(supplierInvoices, ({ one, many }) => ({
+  supplier: one(suppliers, { fields: [supplierInvoices.supplierId], references: [suppliers.id] }),
+  attachments: many(invoiceAttachments),
+}));
+export const invoiceAttachmentsRelations = relations(invoiceAttachments, ({ one }) => ({
+  invoice: one(supplierInvoices, { fields: [invoiceAttachments.invoiceId], references: [supplierInvoices.id] }),
+  email: one(invoiceEmails, { fields: [invoiceAttachments.emailId], references: [invoiceEmails.id] }),
+}));
+export const invoiceEmailsRelations = relations(invoiceEmails, ({ one, many }) => ({
+  invoice: one(supplierInvoices, { fields: [invoiceEmails.invoiceId], references: [supplierInvoices.id] }),
+  attachments: many(invoiceAttachments),
+}));
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
@@ -167,3 +302,11 @@ export type Category = typeof categories.$inferSelect;
 export type Employee = typeof employees.$inferSelect;
 export type Role = (typeof roleEnum.enumValues)[number];
 export type MovementType = (typeof movementTypeEnum.enumValues)[number];
+export type Supplier = typeof suppliers.$inferSelect;
+export type SupplierInvoice = typeof supplierInvoices.$inferSelect;
+export type InvoiceAttachment = typeof invoiceAttachments.$inferSelect;
+export type InvoiceEmail = typeof invoiceEmails.$inferSelect;
+export type InvoiceDocType = (typeof invoiceDocTypeEnum.enumValues)[number];
+export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
+export type InvoiceEmailStatus = (typeof invoiceEmailStatusEnum.enumValues)[number];
+export type AttachmentKind = (typeof attachmentKindEnum.enumValues)[number];
