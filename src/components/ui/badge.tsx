@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
-  EMAIL_STATUS_LABEL, formatDate, fridaysBetween, INVOICE_STATUS_LABEL, nextFriday,
-  STOCK_STATUS_LABEL, todayLima, type StockStatus,
+  dueInfo, EMAIL_STATUS_LABEL, formatDate, INSTALLMENT_STATUS_LABEL, INVOICE_STATUS_LABEL,
+  OBLIGATION_STATUS_LABEL, PAYMENT_TERM_LABEL, STOCK_STATUS_LABEL, todayLima,
+  type DueState, type StockStatus,
 } from "@/lib/utils";
 
 const tones = {
@@ -87,28 +88,59 @@ export function EmailStatusBadge({ status }: { status: string }) {
   return <Badge tone={EMAIL_TONE[status] ?? "neutral"}>{EMAIL_STATUS_LABEL[status as keyof typeof EMAIL_STATUS_LABEL] ?? status}</Badge>;
 }
 
-/**
- * Viernes en que se pagará la factura. Si su viernes pasó sin pagarse, avisa de la
- * reprogramación y de cuántas semanas lleva corriéndose.
- */
-export function PaymentFridayBadge({ scheduled, effective, compact = false }: {
-  scheduled: string; effective: string; compact?: boolean;
-}) {
-  const hoy = todayLima();
-  const esTanda = effective === nextFriday(hoy);
-  const corrida = effective !== scheduled;
-  const semanas = corrida ? fridaysBetween(scheduled, effective) : 0;
+const DUE_TONE: Record<DueState, BadgeTone> = {
+  ESPERANDO_GUIA: "blue",
+  VENCIDA: "red",
+  HOY: "red",
+  PRONTO: "yellow",
+  PROGRAMADA: "neutral",
+};
 
+/**
+ * Fecha límite de pago. Una factura a crédito a la que todavía no le entregaron la guía
+ * no tiene fecha, porque su plazo aún no empieza a correr, y eso se dice con todas sus letras.
+ */
+export function DueBadge({ payDueDate, compact = false }: { payDueDate: string | null | undefined; compact?: boolean }) {
+  const info = dueInfo(payDueDate);
   return (
     <div className={cn("whitespace-nowrap", compact ? "text-xs" : "text-sm")}>
-      <Badge tone={corrida ? "red" : esTanda ? "yellow" : "neutral"}>
-        {esTanda ? "Se paga este viernes" : `Viernes ${formatDate(effective)}`}
-      </Badge>
-      {corrida && (
-        <p className="mt-1 text-xs text-red-700">
-          Reprogramada {semanas} semana{semanas === 1 ? "" : "s"}: le tocaba el {formatDate(scheduled)}
-        </p>
-      )}
+      <Badge tone={DUE_TONE[info.state]}>{info.label}</Badge>
+      {payDueDate && <p className="mt-1 text-xs text-steel-500">{formatDate(payDueDate)}</p>}
     </div>
+  );
+}
+
+/** Contado o crédito, tal como se pactó con el proveedor. */
+export function PaymentTermBadge({ term, termDays }: { term: string; termDays?: number | null }) {
+  const label = PAYMENT_TERM_LABEL[term as keyof typeof PAYMENT_TERM_LABEL] ?? term;
+  return (
+    <Badge tone={term === "CREDITO" ? "blue" : "neutral"}>
+      {label}
+      {termDays ? ` · ${termDays} d` : ""}
+    </Badge>
+  );
+}
+
+const OBLIGATION_TONE: Record<string, BadgeTone> = { ACTIVA: "green", CERRADA: "neutral", ANULADA: "red" };
+
+export function ObligationStatusBadge({ status }: { status: string }) {
+  return (
+    <Badge tone={OBLIGATION_TONE[status] ?? "neutral"}>
+      {OBLIGATION_STATUS_LABEL[status as keyof typeof OBLIGATION_STATUS_LABEL] ?? status}
+    </Badge>
+  );
+}
+
+const INSTALLMENT_TONE: Record<string, BadgeTone> = { PENDIENTE: "yellow", PAGADA: "green", ANULADA: "neutral" };
+
+export function InstallmentStatusBadge({ status, dueDate }: { status: string; dueDate?: string | null }) {
+  const vencida = status === "PENDIENTE" && !!dueDate && dueDate < todayLima();
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <Badge tone={vencida ? "red" : INSTALLMENT_TONE[status] ?? "neutral"}>
+        {INSTALLMENT_STATUS_LABEL[status as keyof typeof INSTALLMENT_STATUS_LABEL] ?? status}
+      </Badge>
+      {vencida && <Badge tone="red">Vencida</Badge>}
+    </span>
   );
 }

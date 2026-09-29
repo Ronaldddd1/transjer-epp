@@ -20,6 +20,17 @@ export const invoiceStatusEnum = pgEnum("invoice_status", ["PENDIENTE", "PAGADA"
 export const invoiceSourceEnum = pgEnum("invoice_source", ["MANUAL", "CORREO"]);
 export const invoiceEmailStatusEnum = pgEnum("invoice_email_status", ["PROCESADO", "REVISAR", "DESCARTADO", "ERROR"]);
 export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FACTURA_XML", "GRT", "OTRO"]);
+/**
+ * Condición de pago pactada con el proveedor.
+ *   CONTADO  el plazo corre desde que llega la factura por correo.
+ *   CREDITO  el plazo corre desde que además llega físicamente la guía de remisión.
+ */
+export const paymentTermEnum = pgEnum("payment_term", ["CONTADO", "CREDITO"]);
+
+/** Obligaciones periódicas: préstamos bancarios, servicios, alquileres e impuestos. */
+export const obligationTypeEnum = pgEnum("obligation_type", ["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"]);
+export const obligationStatusEnum = pgEnum("obligation_status", ["ACTIVA", "CERRADA", "ANULADA"]);
+export const installmentStatusEnum = pgEnum("installment_status", ["PENDIENTE", "PAGADA", "ANULADA"]);
 
 const timestamps = {
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -142,12 +153,17 @@ export const suppliers = pgTable("suppliers", {
   phone: varchar("phone", { length: 20 }),
   contactName: varchar("contact_name", { length: 120 }),
   notes: text("notes"),
+  /** Condición pactada con este proveedor; se propone al registrar una factura suya. */
+  defaultPaymentTerm: paymentTermEnum("default_payment_term").notNull().default("CONTADO"),
+  /** Días de plazo por defecto. Contado suele ser 1; crédito, 7. */
+  defaultTermDays: integer("default_term_days").notNull().default(1),
   active: boolean("active").notNull().default(true),
   isDemo: boolean("is_demo").notNull().default(false),
   ...timestamps,
 }, (t) => [
   index("suppliers_active_name_idx").on(t.active, t.businessName),
   check("suppliers_ruc_format", sql`${t.ruc} ~ '^[0-9]{11}$'`),
+  check("suppliers_term_days_range", sql`${t.defaultTermDays} between 0 and 180`),
 ]);
 
 export const supplierInvoices = pgTable("supplier_invoices", {
@@ -167,6 +183,17 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   description: varchar("description", { length: 250 }),
   /** Guía de Remisión Transportista asociada al servicio. */
   grtNumber: varchar("grt_number", { length: 40 }),
+  /** Condición de pago: contado cuenta desde el correo, crédito desde la entrega de la guía. */
+  paymentTerm: paymentTermEnum("payment_term").notNull().default("CONTADO"),
+  /** Días de plazo desde que empieza a correr el tiempo. */
+  termDays: integer("term_days").notNull().default(1),
+  /** Cuándo entregó el proveedor la guía en físico. Se anota a mano; sin ella el crédito no arranca. */
+  guideReceivedAt: date("guide_received_at"),
+  /**
+   * Fecha límite de pago, ya calculada. Se recalcula al crear o editar la factura y al
+   * anotar la guía. Queda en null mientras una factura a crédito espera su guía.
+   */
+  payDueDate: date("pay_due_date"),
   status: invoiceStatusEnum("status").notNull().default("PENDIENTE"),
   paidAt: date("paid_at"),
   paymentReference: varchar("payment_reference", { length: 120 }),
@@ -186,6 +213,8 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   index("invoices_status_date_idx").on(t.status, t.issueDate),
   index("invoices_supplier_idx").on(t.supplierId),
   index("invoices_issue_date_idx").on(t.issueDate),
+  index("invoices_pay_due_idx").on(t.status, t.payDueDate),
+  check("invoices_term_days_range", sql`${t.termDays} between 0 and 180`),
   check("invoices_total_positive", sql`${t.total} > 0`),
   check("invoices_currency_valid", sql`${t.currency} in ('PEN','USD')`),
   // Una factura pagada siempre guarda su fecha de pago, y viceversa.
@@ -240,6 +269,87 @@ export const appSettings = pgTable("app_settings", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
 
+/**
+ * Obligaciones periódicas de la empresa: préstamos bancarios, planes de celular, luz,
+ * internet, alquileres e impuestos. Cada una tiene su cronograma en `obligationInstallments`.
+ *
+ * Un préstamo trae el cronograma completo del banco (capital, interés, seguro y saldo).
+ * Un servicio de monto variable genera cuotas mensuales sin importe, que se completan
+ * cuando llega el recibo.
+ */
+export const obligations = pgTable("obligations", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  type: obligationTypeEnum("type").notNull().default("SERVICIO"),
+  /** Cómo la llama la empresa: "Préstamo BCP capital de trabajo", "Claro - flota". */
+  name: varchar("name", { length: 160 }).notNull(),
+  /** A quién se le paga: BCP, Interbank, Claro, Movistar, el arrendador. */
+  creditor: varchar("creditor", { length: 160 }).notNull(),
+  /** Número de crédito, de cuenta o de suministro. */
+  reference: varchar("reference", { length: 80 }),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+
+  // --- Solo préstamos ---
+  principal: numeric("principal", { precision: 14, scale: 2 }),
+  /** Tasa efectiva anual, en porcentaje: 17.00 */
+  annualRate: numeric("annual_rate", { precision: 6, scale: 3 }),
+  installmentsCount: integer("installments_count"),
+  disbursedAt: date("disbursed_at"),
+
+  // --- Solo servicios y alquileres ---
+  /** Día del mes en que vence. */
+  billingDay: integer("billing_day"),
+  /** El importe cambia cada mes (luz, celular por consumo). */
+  variableAmount: boolean("variable_amount").notNull().default(false),
+  /** Importe cuando no varía (alquiler, plan fijo). */
+  fixedAmount: numeric("fixed_amount", { precision: 14, scale: 2 }),
+
+  status: obligationStatusEnum("status").notNull().default("ACTIVA"),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id),
+  isDemo: boolean("is_demo").notNull().default(false),
+  ...timestamps,
+}, (t) => [
+  index("obligations_status_type_idx").on(t.status, t.type),
+  index("obligations_creditor_idx").on(t.creditor),
+  check("obligations_currency_valid", sql`${t.currency} in ('PEN','USD')`),
+  check("obligations_billing_day_range", sql`${t.billingDay} is null or ${t.billingDay} between 1 and 28`),
+  check("obligations_principal_positive", sql`${t.principal} is null or ${t.principal} > 0`),
+]);
+
+/** Una fila del cronograma: la cuota número N de una obligación. */
+export const obligationInstallments = pgTable("obligation_installments", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  obligationId: uuid("obligation_id").notNull().references(() => obligations.id, { onDelete: "cascade" }),
+  number: integer("number").notNull(),
+  dueDate: date("due_date").notNull(),
+
+  principal: numeric("principal", { precision: 14, scale: 2 }),
+  interest: numeric("interest", { precision: 14, scale: 2 }),
+  /** Seguro de desgravamen u otros seguros que cobra el banco dentro de la cuota. */
+  insurance: numeric("insurance", { precision: 14, scale: 2 }),
+  fees: numeric("fees", { precision: 14, scale: 2 }),
+  /** Importe de la cuota. Null mientras un servicio variable espera su recibo. */
+  total: numeric("total", { precision: 14, scale: 2 }),
+  /** Saldo de capital que queda después de pagar esta cuota. */
+  balanceAfter: numeric("balance_after", { precision: 14, scale: 2 }),
+
+  status: installmentStatusEnum("status").notNull().default("PENDIENTE"),
+  paidAt: date("paid_at"),
+  /** Lo que realmente se pagó, que puede diferir de la cuota programada. */
+  paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }),
+  paymentReference: varchar("payment_reference", { length: 120 }),
+  paidBy: uuid("paid_by").references(() => users.id),
+  notes: text("notes"),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex("obligation_installment_number_unique").on(t.obligationId, t.number),
+  index("installments_status_due_idx").on(t.status, t.dueDate),
+  index("installments_obligation_idx").on(t.obligationId),
+  check("installments_total_positive", sql`${t.total} is null or ${t.total} > 0`),
+  // Una cuota pagada siempre guarda su fecha de pago, y viceversa.
+  check("installments_paid_consistent", sql`(${t.status} = 'PAGADA') = (${t.paidAt} is not null)`),
+]);
+
 export const auditLogs = pgTable("audit_logs", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
@@ -292,6 +402,12 @@ export const invoiceEmailsRelations = relations(invoiceEmails, ({ one, many }) =
   invoice: one(supplierInvoices, { fields: [invoiceEmails.invoiceId], references: [supplierInvoices.id] }),
   attachments: many(invoiceAttachments),
 }));
+export const obligationsRelations = relations(obligations, ({ many }) => ({
+  installments: many(obligationInstallments),
+}));
+export const obligationInstallmentsRelations = relations(obligationInstallments, ({ one }) => ({
+  obligation: one(obligations, { fields: [obligationInstallments.obligationId], references: [obligations.id] }),
+}));
 export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, { fields: [auditLogs.userId], references: [users.id] }),
 }));
@@ -310,3 +426,9 @@ export type InvoiceDocType = (typeof invoiceDocTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type InvoiceEmailStatus = (typeof invoiceEmailStatusEnum.enumValues)[number];
 export type AttachmentKind = (typeof attachmentKindEnum.enumValues)[number];
+export type PaymentTerm = (typeof paymentTermEnum.enumValues)[number];
+export type Obligation = typeof obligations.$inferSelect;
+export type ObligationInstallment = typeof obligationInstallments.$inferSelect;
+export type ObligationType = (typeof obligationTypeEnum.enumValues)[number];
+export type ObligationStatus = (typeof obligationStatusEnum.enumValues)[number];
+export type InstallmentStatus = (typeof installmentStatusEnum.enumValues)[number];

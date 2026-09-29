@@ -9,7 +9,7 @@ import "dotenv/config";
 import { zipSync, strToU8 } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
-import { invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "../src/db/schema";
+import { appSettings, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "../src/db/schema";
 import type { MailboxConfig, GraphAttachment, GraphMessage } from "../src/server/graph";
 import { ingestMessage, syncMailbox, type MailReader } from "../src/server/invoice-ingest";
 
@@ -92,6 +92,9 @@ async function main() {
   await db.delete(invoiceEmails).where(CORREOS);
   await db.delete(supplierInvoices).where(MIOS);
   await db.delete(suppliers).where(sql`${suppliers.ruc} in ('20777777771','20888888882')`);
+  // El buzón recuerda hasta qué fecha revisó. Sin borrarlo, la segunda corrida de esta
+  // prueba se saltaría los correos de ejemplo y el recuento no cuadraría.
+  await db.delete(appSettings).where(sql`${appSettings.key} = 'mailbox.sync'`);
 
   const XML = Buffer.from(factura({ ruc: "20777777771", razon: "TRANSPORTES DEL SUR S.A.C.", serie: "F009", numero: "9001" }));
   const PDF = Buffer.from("%PDF-1.4\nfactura de ejemplo\n%%EOF");

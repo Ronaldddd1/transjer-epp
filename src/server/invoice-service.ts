@@ -3,12 +3,12 @@ import { and, eq } from "drizzle-orm";
 import { db, type Tx } from "@/db";
 import {
   invoiceAttachments, supplierInvoices, suppliers,
-  type AttachmentKind, type InvoiceDocType,
+  type AttachmentKind, type InvoiceDocType, type PaymentTerm,
 } from "@/db/schema";
 import { BusinessError } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { invoiceNumber } from "@/lib/utils";
+import { computePayDueDate, DEFAULT_TERM_DAYS, invoiceNumber } from "@/lib/utils";
 import { putFile, removeFile, safeName } from "./storage";
 import { detectAttachmentKind, parseSunatXml, XmlParseError, type ParsedInvoice } from "./sunat-xml";
 
@@ -34,6 +34,11 @@ export type InvoiceInput = {
   notes?: string | null;
   source?: "MANUAL" | "CORREO";
   receivedAt?: Date | null;
+  paymentTerm?: PaymentTerm;
+  termDays?: number;
+  guideReceivedAt?: string | null;
+  /** Fecha límite ya calculada; null mientras una factura a crédito espera su guía. */
+  payDueDate?: string | null;
 };
 
 /** Evita registrar dos veces el mismo comprobante del mismo proveedor. */
@@ -105,6 +110,10 @@ export async function insertInvoice(
     notes: input.notes ?? null,
     source: input.source ?? "MANUAL",
     receivedAt: input.receivedAt ?? null,
+    paymentTerm: input.paymentTerm ?? "CONTADO",
+    termDays: input.termDays ?? DEFAULT_TERM_DAYS[input.paymentTerm ?? "CONTADO"],
+    guideReceivedAt: input.guideReceivedAt ?? null,
+    payDueDate: input.payDueDate ?? null,
     createdBy: user?.id ?? null,
     isDemo: extra.isDemo ?? false,
   }).returning();

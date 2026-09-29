@@ -96,6 +96,27 @@ export const EMAIL_STATUS_LABEL = {
   ERROR: "Con error",
 } as const;
 
+// ---------- Obligaciones periódicas ----------
+export const OBLIGATION_TYPE_LABEL = {
+  PRESTAMO: "Préstamo",
+  SERVICIO: "Servicio",
+  ALQUILER: "Alquiler",
+  IMPUESTO: "Impuesto",
+  OTRO: "Otro",
+} as const;
+export type ObligationTypeKey = keyof typeof OBLIGATION_TYPE_LABEL;
+
+export const OBLIGATION_TYPE_HINT: Record<ObligationTypeKey, string> = {
+  PRESTAMO: "Crédito bancario con cronograma de cuotas.",
+  SERVICIO: "Celular, luz, agua, internet y similares.",
+  ALQUILER: "Local, cochera o equipo alquilado.",
+  IMPUESTO: "Pagos a SUNAT u otra entidad.",
+  OTRO: "Cualquier pago que se repite cada mes.",
+};
+
+export const OBLIGATION_STATUS_LABEL = { ACTIVA: "Activa", CERRADA: "Cerrada", ANULADA: "Anulada" } as const;
+export const INSTALLMENT_STATUS_LABEL = { PENDIENTE: "Pendiente", PAGADA: "Pagada", ANULADA: "Anulada" } as const;
+
 export const CURRENCY_SYMBOL = { PEN: "S/", USD: "US$" } as const;
 
 /** Importe con su símbolo: S/ 1,180.50 */
@@ -121,46 +142,69 @@ export function daysUntil(ymd: string | null | undefined) {
 }
 
 // ---------- Calendario de pago: los viernes ----------
-// Transjer paga a proveedores los viernes. A cada factura le toca el viernes de la semana en
-// que llegó; si ese viernes pasa sin pagarse, el pago se corre al viernes siguiente.
+// Cada factura se paga en su propia fecha límite, según la condición pactada:
+//
+//   CONTADO  el plazo corre desde que la factura llega por correo. Por acuerdo con los
+//            proveedores es 1 día, así que una factura que llega el lunes se paga el martes.
+//
+//   CREDITO  deben cumplirse dos cosas: que el proveedor haya mandado el correo y que haya
+//            entregado la guía de remisión en físico. El plazo corre desde la más tardía de
+//            las dos fechas, porque hasta entonces no se cumplieron ambas condiciones.
+//            Mientras no se anote la entrega de la guía, la factura no tiene fecha de pago.
 
 const DAY = 86_400_000;
 
-/** Primer viernes en esa fecha o después. Devuelve YYYY-MM-DD. */
-export function nextFriday(ymd: string): string {
-  const d = new Date(`${ymd}T12:00:00Z`);
-  // getUTCDay: domingo 0 … viernes 5
-  const shift = (5 - d.getUTCDay() + 7) % 7;
-  return new Date(d.getTime() + shift * DAY).toISOString().slice(0, 10);
+export const PAYMENT_TERM_LABEL = { CONTADO: "Contado", CREDITO: "Crédito" } as const;
+export type PaymentTermKey = keyof typeof PAYMENT_TERM_LABEL;
+
+/** Plazo habitual de cada condición, en días. Se puede cambiar factura por factura. */
+export const DEFAULT_TERM_DAYS: Record<PaymentTermKey, number> = { CONTADO: 1, CREDITO: 7 };
+
+/** Suma días a una fecha YYYY-MM-DD y devuelve otra fecha YYYY-MM-DD. */
+export function addDays(ymd: string, days: number): string {
+  return new Date(Date.parse(`${ymd}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
 
-/** Cuántos viernes hay entre dos fechas que caen en viernes. */
-export function fridaysBetween(from: string, to: string): number {
-  return Math.round((Date.parse(`${to}T12:00:00Z`) - Date.parse(`${from}T12:00:00Z`)) / (7 * DAY));
-}
-
-export type PaymentSchedule = {
-  /** El viernes que le correspondía según su llegada. */
-  scheduled: string;
-  /** El viernes en que se pagará realmente (si el programado ya pasó, se corre). */
-  effective: string;
-  /** Semanas que se ha corrido el pago. 0 si va en fecha. */
-  weeksDelayed: number;
-  /** Se paga en la tanda de este viernes. */
-  isThisFriday: boolean;
+export type PayDueInput = {
+  paymentTerm: PaymentTermKey;
+  termDays: number;
+  /** Cuándo llegó la factura por correo. */
+  receptionYmd: string;
+  /** Cuándo entregó el proveedor la guía en físico, si ya ocurrió. */
+  guideReceivedAt?: string | null;
 };
 
-/** Calcula el viernes de pago de una factura pendiente, a partir de su fecha de llegada. */
-export function paymentSchedule(receivedYmd: string, today = todayLima()): PaymentSchedule {
-  const scheduled = nextFriday(receivedYmd);
-  const thisFriday = nextFriday(today);
-  const effective = scheduled < thisFriday ? thisFriday : scheduled;
-  return {
-    scheduled,
-    effective,
-    weeksDelayed: fridaysBetween(scheduled, effective),
-    isThisFriday: effective === thisFriday,
-  };
+/**
+ * Fecha límite de pago de una factura.
+ * Devuelve null cuando es a crédito y todavía no se anotó la entrega de la guía:
+ * en ese caso el plazo no ha empezado a correr.
+ */
+export function computePayDueDate(i: PayDueInput): string | null {
+  if (i.paymentTerm === "CONTADO") return addDays(i.receptionYmd, i.termDays);
+  if (!i.guideReceivedAt) return null;
+  // Ambas condiciones deben cumplirse: manda la fecha más tardía.
+  const start = i.guideReceivedAt > i.receptionYmd ? i.guideReceivedAt : i.receptionYmd;
+  return addDays(start, i.termDays);
+}
+
+export type DueState = "ESPERANDO_GUIA" | "VENCIDA" | "HOY" | "PRONTO" | "PROGRAMADA";
+
+export type DueInfo = {
+  state: DueState;
+  /** Días que faltan; negativo si ya venció. Null mientras espera la guía. */
+  days: number | null;
+  label: string;
+};
+
+/** Cómo mostrar el vencimiento de una factura pendiente. */
+export function dueInfo(payDueDate: string | null | undefined, today = todayLima()): DueInfo {
+  if (!payDueDate) return { state: "ESPERANDO_GUIA", days: null, label: "Esperando la guía" };
+  const days = Math.round((Date.parse(`${payDueDate}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / DAY);
+  if (days < 0) return { state: "VENCIDA", days, label: days === -1 ? "Venció ayer" : `Venció hace ${-days} días` };
+  if (days === 0) return { state: "HOY", days, label: "Vence hoy" };
+  if (days === 1) return { state: "PRONTO", days, label: "Vence mañana" };
+  if (days <= 3) return { state: "PRONTO", days, label: `Vence en ${days} días` };
+  return { state: "PROGRAMADA", days, label: `Vence en ${days} días` };
 }
 
 /** Fecha de llegada de una factura: la registrada, o la de creación si no se anotó. */

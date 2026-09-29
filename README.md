@@ -23,6 +23,7 @@ Sistema web con dos áreas de trabajo:
 10. [Actualizar el sistema](#10-actualizar-el-sistema)
 11. [Facturas de proveedores](#11-facturas-de-proveedores)
 12. [Lectura automática del correo](#12-lectura-automática-del-correo)
+12b. [Préstamos y servicios](#12b-préstamos-y-servicios)
 13. [Roles y permisos](#13-roles-y-permisos)
 14. [Reglas de negocio](#14-reglas-de-negocio)
 15. [Estructura del proyecto](#15-estructura-del-proyecto)
@@ -251,7 +252,7 @@ npm install
 npm run db:migrate
 # 2. Publicar el código
 git add .
-git commit -m "Transjer Gestión: facturas, calendario de viernes y rol de almacén"
+git commit -m "Transjer Gestión: plazos de pago, préstamos y servicios"
 git push
 ```
 
@@ -292,25 +293,34 @@ Una factura pagada no se puede editar ni volver a pagar. Si el pago se registró
 
 En *Facturas*, el botón **Pagar** de cada fila (o el del detalle) pide la fecha, la referencia y una observación opcional. Si dos personas intentan pagar la misma factura a la vez, el sistema solo acepta una.
 
-### Calendario de pago: los viernes
+### Plazos de pago: contado y crédito
 
-Transjer paga a sus proveedores **los viernes**. El sistema lo tiene en cuenta solo:
+Cada factura se paga en su propia fecha límite, según lo pactado con el proveedor.
 
-- A cada factura le toca el **viernes de la semana en que llegó**. Si llegó un sábado o domingo, le toca el viernes siguiente.
-- Si ese viernes pasa sin pagarse, el pago **se corre al viernes siguiente** y la factura queda marcada como **Reprogramada**, indicando cuántas semanas lleva corriéndose y qué viernes le tocaba.
+| Condición | Desde cuándo corre el plazo | Plazo habitual |
+|---|---|---|
+| **Contado** | Desde que llega la factura por correo | 1 día |
+| **Crédito** | Desde que el proveedor **además** entrega la guía de remisión en físico | 7 días |
+
+El crédito exige que se cumplan **las dos** cosas —el correo y la guía en mano—, así que el plazo arranca en la más tardía de las dos fechas. Mientras no se anote la entrega de la guía, la factura **no tiene fecha de pago** y el sistema lo dice con todas sus letras: *Esperando la guía*.
+
+**Anotar la guía** es lo que pone el reloj en marcha. Se hace desde la ficha de la factura, con el botón **Anotar guía**, poniendo el día en que el proveedor la trajo. El sistema calcula la fecha límite y la factura entra en la cola de pagos.
+
+Cada proveedor tiene su **condición pactada** (en *Proveedores*), que se propone al registrar sus facturas y se puede cambiar factura por factura. Las que llegan por correo toman la condición del proveedor automáticamente.
 
 Dónde lo ves:
 
 | Lugar | Qué muestra |
 |---|---|
-| Dashboard | Tarjetas **Se pagan este viernes** (con el total en soles y dólares) y **Reprogramadas** |
-| Dashboard → *Próximas a pagar* | Las siguientes en la cola, ordenadas por su viernes |
-| Facturas | Avisos arriba de la tabla y, en cada fila, el viernes que le toca |
-| Detalle de la factura | El viernes de pago junto al importe |
+| Dashboard | Tarjetas **Vencidas** y **Vencen en 3 días** |
+| Dashboard → *Próximas a pagar* | Las siguientes en la cola, ordenadas por fecha límite |
+| Facturas | Avisos de lo vencido y de lo que espera guía; en cada fila, cuándo vence y su condición |
+| Detalle de la factura | La fecha límite, la condición, la fecha de la guía y por qué todavía no hay fecha |
+| Calendario de pagos | Todo junto con las cuotas de préstamos y servicios |
 
-Filtros rápidos: `?viernes=1` muestra la tanda de esta semana y `?reprogramadas=1` las que se pasaron. Ambos están enlazados desde las tarjetas del dashboard.
+Filtros rápidos: `?vencidas=1`, `?porvencer=1` (hoy y los próximos tres días) y `?singuia=1`. Todos están enlazados desde las tarjetas y los avisos.
 
-**De dónde sale la fecha de llegada:** de las facturas que entran por correo, del momento en que llegó el mensaje. De las que registras a mano, del campo **Llegó el**, que por defecto es hoy y puedes retroceder si la factura llegó antes.
+**De dónde sale la fecha de llegada:** de las facturas que entran por correo, del momento en que llegó el mensaje. De las que registras a mano, del campo **Llegó el correo**, que por defecto es hoy y puedes retroceder si la factura llegó antes.
 
 ### Archivos
 
@@ -405,6 +415,33 @@ Vuelve a desplegar para que se apliquen. Después, entra a *Facturas → Correos
 
 ---
 
+## 12b. Préstamos y servicios
+
+Además de las facturas de proveedores, el sistema lleva **todo lo que se paga mes a mes**: créditos del banco, planes de celular, luz, agua, internet, alquileres e impuestos. Están en *Préstamos y servicios*.
+
+### Préstamos del banco
+
+Se registra el préstamo (entidad, número de crédito, capital, TEA y fecha de desembolso) y después se carga su **cronograma**. Hay dos caminos:
+
+**Pegar del banco** — el recomendable. Se copian las filas del PDF o del Excel del banco y se pegan tal cual. Cada banco ordena las columnas distinto, así que el sistema reconoce cuál es cuál por la forma de los números: la cuota es la columna que casi no varía, el capital sube cuota a cuota, el interés baja, y el saldo es mucho mayor y siempre desciende. La propuesta se muestra en pantalla **para corregirla antes de guardar**, así nunca se guarda una asignación equivocada en silencio.
+
+Están probados los cuatro formatos que usa Transjer: BCP Crédito Negocios, Interbank Capital de Trabajo, Interbank Préstamo Fácil y Crédito Pyme. Dos detalles que el sistema resuelve solo:
+
+- El BCP imprime el saldo **antes** del desglose y el Préstamo Fácil **después** de la cuota. Se distingue por aritmética y se guarda siempre como "lo que queda después de pagar".
+- La columna de saldo nunca se confunde con la de la cuota, que es el error que haría cuadrar mal todo lo demás.
+
+**Calcular** — para no tipear 24 filas cuando no se tiene el papel a mano. Usa la TEA sobre días reales con año de 360, que es como liquidan los bancos peruanos, así que el interés cuadra al céntimo con Interbank y con el Crédito Pyme. Es un borrador: según cómo cobre el banco el primer período puede desviarse unos soles, y conviene pegar el cronograma real en cuanto se tenga.
+
+### Servicios de monto variable
+
+La luz o el celular por consumo llegan con un importe distinto cada mes. Se registra el servicio con su **día de pago** y se marca *El importe cambia cada mes*: el sistema crea los vencimientos del próximo año y la encargada anota el monto cuando llega el recibo, con el botón **Importe**.
+
+Las cuotas sin importe aparecen como *falta el recibo*, no se suman a los totales y el sistema avisa de cuántas hay pendientes. El botón **Extender un año** agrega otros doce meses cuando se acaban.
+
+### Calendario de pagos
+
+Junta en una sola lista, ordenada por fecha, **las facturas de proveedores y las cuotas de préstamos y servicios**. Es la vista que responde "cuánto tiene que salir de caja esta semana". Muestra primero lo vencido sin pagar, luego cada día con su total, y suma por separado cada moneda que aparezca.
+
 ## 13. Roles y permisos
 
 | Acción | Administrador | Jefe de almacén | Usuario | Finanzas |
@@ -424,11 +461,14 @@ Vuelve a desplegar para que se apliquen. Después, entra a *Facturas → Correos
 | Registrar y editar facturas | ✅ | — | — | ✅ |
 | Marcar pagos | ✅ | — | — | ✅ |
 | Gestionar proveedores | ✅ | — | — | ✅ |
+| Ver préstamos y servicios | ✅ | — | — | ✅ |
+| Registrar préstamos, servicios y cronogramas | ✅ | — | — | ✅ |
+| Marcar el pago de una cuota | ✅ | — | — | ✅ |
 | Configurar la lectura del correo | ✅ | — | — | — |
 
 - **Jefe de almacén**: manda en todo el módulo de EPP (productos, categorías, trabajadores, ajustes y anulaciones), pero no ve facturas, usuarios ni auditoría.
 - **Usuario**: el día a día del almacén — consulta, movimientos y entregas.
-- **Finanzas**: la encargada de pagos. Gestiona las facturas y no entra al almacén.
+- **Finanzas**: la encargada de pagos. Gestiona las facturas, los préstamos y los servicios, y no entra al almacén.
 
 Al elegir un rol en *Nuevo usuario*, el sistema explica en pantalla qué puede hacer.
 
@@ -460,7 +500,15 @@ Y en las facturas de proveedores:
 - **El importe total siempre es mayor a cero** y la moneda solo puede ser soles o dólares (lo impide la base de datos).
 - **Una factura pagada siempre tiene fecha de pago**, y una sin pagar nunca la tiene (también lo impide la base de datos).
 - **Ningún correo se pierde**: el que no se pueda registrar queda en la bandeja con sus archivos y el motivo.
-- **Los pagos son los viernes**: a cada factura le toca el viernes de la semana en que llegó, y si ese viernes pasa sin pagarse el pago se corre al siguiente, avisando de la reprogramación.
+- **Cada factura vence según su condición**: al contado, un día desde que llegó el correo; a crédito, una semana desde que el proveedor entregó la guía en físico. Una factura a crédito sin guía anotada no tiene fecha de pago, y el sistema lo dice en vez de inventarse una.
+
+Y en los préstamos y servicios:
+
+- **El cronograma del banco manda**: la cuota, las fechas y el saldo se guardan tal como los imprime el papel, no recalculados.
+- **Una cuota pagada está cerrada**: para corregirla hay que reabrirla, y queda en auditoría.
+- **No se reemplaza un cronograma con cuotas ya pagadas.** El sistema se niega y dice cuántas hay.
+- **Un préstamo se cierra solo** cuando se paga su última cuota, y vuelve a abrirse si se reabre esa cuota.
+- **Un servicio de monto variable puede tener cuotas sin importe**: son los meses cuyo recibo todavía no llegó. No se suman a los totales y el sistema avisa de cuántas faltan.
 
 ## 15. Estructura del proyecto
 
@@ -472,7 +520,7 @@ src/
     login/               Inicio de sesión
     (app)/               Páginas protegidas: dashboard, inventario, movimientos,
                          entregas, trabajadores, categorías, usuarios, auditoría, reportes,
-                         facturas, facturas/correos, proveedores
+                         facturas, facturas/correos, proveedores, obligaciones, calendario
     api/export/          Descarga de reportes (Excel, CSV, PDF)
     api/facturas/        Descarga de los archivos adjuntos de las facturas
     api/correo/graph/    Aviso instantáneo de Microsoft 365 (webhook)
@@ -481,8 +529,10 @@ src/
   components/            Interfaz: ui/ (base), layout/, inventory/, deliveries/…
   db/                    Esquema y conexión
   lib/                   Sesión, permisos, auditoría, validaciones, utilidades
+                         amortization.ts (cronogramas de préstamos y lectura del papel del banco)
   server/                Consultas, lógica de inventario, reportes y exportadores
                          invoice-*.ts (facturas), sunat-xml.ts (lectura del XML),
+                         obligation-queries.ts (préstamos, servicios y calendario de pagos),
                          graph.ts (Microsoft 365), storage.ts (archivos adjuntos)
   middleware.ts          Protección de rutas
 tests/                   Pruebas automáticas
@@ -509,7 +559,7 @@ Todo se usa desde `src/components/layout/brand.tsx`. Si la empresa cambia el log
 ## 16. Pruebas
 
 ```bash
-npm test          # XML de SUNAT, calendario de viernes y registro automático de correos
+npm test          # XML de SUNAT, plazos de pago, cronogramas de préstamos y correos
 ```
 
 Las pruebas de interfaz usan Playwright contra el sistema en marcha:
@@ -517,8 +567,11 @@ Las pruebas de interfaz usan Playwright contra el sistema en marcha:
 ```bash
 npm run build && npm start          # en otra terminal
 python3 tests/e2e-epp.py            # almacén: inventario, movimientos, entregas, permisos
-python3 tests/e2e-facturas.py       # facturas: registro, pagos, correos, permisos, móvil
+python3 tests/e2e-facturas.py       # facturas: registro, pagos, plazos, correos, permisos, móvil
+python3 tests/e2e-obligaciones.py   # plazos de contado y crédito, préstamos, servicios y calendario
 ```
+
+Si tu base no se llama `epp`, pásaselo: `E2E_DB=mibase python3 tests/e2e-facturas.py`.
 
 Las suites se pueden repetir las veces que haga falta: cada una limpia lo que crea. Necesitan la base con datos de prueba (`npm run db:seed:demo`).
 

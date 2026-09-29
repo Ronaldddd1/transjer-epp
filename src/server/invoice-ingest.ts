@@ -4,7 +4,7 @@ import { db } from "@/db";
 import { invoiceEmails } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { invoiceNumber } from "@/lib/utils";
+import { computePayDueDate, invoiceNumber } from "@/lib/utils";
 import {
   getAttachments, getMessage, listMessagesSince, type GraphAttachment, type GraphMessage, type MailboxConfig,
 } from "./graph";
@@ -128,6 +128,11 @@ export async function ingestMessage(config: MailboxConfig, messageId: string, re
         return { result: "duplicado" as const, reason };
       }
 
+      // La condición de pago sale de lo pactado con ese proveedor. Si es a crédito, la
+      // factura entra sin fecha límite: el plazo arranca cuando alguien anote la entrega
+      // física de la guía, que es lo que el sistema no puede saber por correo.
+      const recepcion = new Date(message.receivedDateTime);
+      const recepcionYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(recepcion);
       const invoice = await insertInvoice(tx, {
         ...docRef,
         issueDate: parsed.parsed.issueDate,
@@ -139,7 +144,14 @@ export async function ingestMessage(config: MailboxConfig, messageId: string, re
         description: parsed.parsed.description,
         grtNumber: parsed.parsed.grtNumber,
         source: "CORREO",
-        receivedAt: new Date(message.receivedDateTime),
+        receivedAt: recepcion,
+        paymentTerm: supplier.defaultPaymentTerm,
+        termDays: supplier.defaultTermDays,
+        payDueDate: computePayDueDate({
+          paymentTerm: supplier.defaultPaymentTerm,
+          termDays: supplier.defaultTermDays,
+          receptionYmd: recepcionYmd,
+        }),
       }, SYSTEM_USER);
 
       for (const file of files) {

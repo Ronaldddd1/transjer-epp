@@ -7,8 +7,8 @@ import { invoiceAttachments, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
-import { invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
+import { computePayDueDate, formatDate, invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
+import { guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
 import {
   assertNoDuplicate, customerWarning, deleteAttachment, findDuplicate, findOrCreateSupplier,
   insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
@@ -23,14 +23,67 @@ async function loadInvoice(id: string) {
   return row;
 }
 
+/** Fecha de llegada de una factura ya guardada, en horario de Lima. */
+function receptionYmd(row: { receivedAt: Date | null; createdAt: Date }) {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(row.receivedAt ?? row.createdAt);
+}
+
+/**
+ * Anota la entrega física de la guía de remisión. Es lo que hace arrancar el plazo de una
+ * factura a crédito: hasta que el proveedor entrega la guía en mano, no hay fecha de pago.
+ */
+export async function setGuideReceived(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.manage");
+    const { guideReceivedAt, notes } = guideReceivedSchema.parse(formToObject(formData));
+    if (guideReceivedAt > todayLima()) throw new BusinessError("La fecha de entrega no puede ser futura.");
+
+    const before = await loadInvoice(id);
+    if (before.status === "PAGADA") throw new BusinessError("La factura ya está pagada.");
+    if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
+    if (before.paymentTerm !== "CREDITO") {
+      throw new BusinessError("Solo las facturas a crédito esperan la entrega de la guía. Esta es al contado.");
+    }
+
+    const after = await db.transaction(async (tx) => {
+      const payDueDate = computePayDueDate({
+        paymentTerm: "CREDITO",
+        termDays: before.termDays,
+        receptionYmd: receptionYmd(before),
+        guideReceivedAt,
+      });
+      const [row] = await tx.update(supplierInvoices)
+        .set({ guideReceivedAt, payDueDate, notes: notes ?? before.notes })
+        .where(eq(supplierInvoices.id, id)).returning();
+      await logAudit({
+        user, action: "EDITAR", module: "FACTURAS", recordId: id,
+        description: `${user.name} anotó la entrega de la guía de la factura ${label(row)} el ${formatDate(guideReceivedAt)}. Vence el ${formatDate(payDueDate)}.`,
+        oldData: before, newData: row,
+      }, tx);
+      return row;
+    });
+    revalidatePath("/", "layout");
+    return { ok: true, message: `Guía anotada. La factura ${label(after)} vence el ${formatDate(after.payDueDate)}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
 export async function createInvoice(formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("invoices.manage");
     const { receivedDate, ...data } = invoiceSchema.parse(formToObject(formData));
+    const reception = receivedDate ?? todayLima();
     const invoice = await db.transaction(async (tx) => {
       const created = await insertInvoice(tx, {
         ...data,
-        receivedAt: limaDayStart(receivedDate ?? todayLima()),
+        receivedAt: limaDayStart(reception),
+        payDueDate: computePayDueDate({
+          paymentTerm: data.paymentTerm,
+          termDays: data.termDays,
+          receptionYmd: reception,
+          guideReceivedAt: data.guideReceivedAt,
+        }),
       }, user);
       await logAudit({
         user, action: "CREAR", module: "FACTURAS", recordId: created.id,
@@ -63,8 +116,20 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Act
         const dup = await findDuplicate(tx, data);
         if (dup && dup.id !== id) throw new BusinessError(`El comprobante ${label(data)} ya está registrado para ese proveedor.`);
       }
+      // El plazo se recalcula en cada edición: cambiar la condición, los días o la fecha
+      // de llegada mueve la fecha límite, y dejarla vieja llevaría a pagar tarde.
+      const reception = receivedDate ?? receptionYmd(before);
       const [row] = await tx.update(supplierInvoices)
-        .set(receivedDate ? { ...data, receivedAt: limaDayStart(receivedDate) } : data)
+        .set({
+          ...data,
+          ...(receivedDate ? { receivedAt: limaDayStart(receivedDate) } : {}),
+          payDueDate: computePayDueDate({
+            paymentTerm: data.paymentTerm,
+            termDays: data.termDays,
+            receptionYmd: reception,
+            guideReceivedAt: data.guideReceivedAt,
+          }),
+        })
         .where(eq(supplierInvoices.id, id)).returning();
       await logAudit({
         user, action: "EDITAR", module: "FACTURAS", recordId: id,

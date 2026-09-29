@@ -12,8 +12,10 @@ SHOTS = "/tmp/shots"
 fails = []
 
 def ok(name): print("OK  ", name)
+DB = os.environ.get("E2E_DB", "epp")
+
 def psql(q):
-    return subprocess.check_output(["su", "postgres", "-c", f'psql -d epp -tAc "{q}"']).decode().strip()
+    return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
 
 def toast(page, text):
     expect(page.get_by_role("status").filter(has_text=text)
@@ -63,11 +65,11 @@ def limpiar():
         "update suppliers set active=true",
     ]
     for q in sentencias:
-        subprocess.run(["su", "postgres", "-c", f'psql -q -d epp -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["su", "postgres", "-c", f'psql -q -d {DB} -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
 
 limpiar()
 hoy = psql("select (now() at time zone 'America/Lima')::date::text")
-viernes_actual = psql("select ((now() at time zone 'America/Lima')::date + ((5 - extract(isodow from (now() at time zone 'America/Lima')::date)::int + 7) % 7))::text")
+manana = psql("select ((now() at time zone 'America/Lima')::date + 1)::text")
 
 os.makedirs(SHOTS, exist_ok=True)
 os.makedirs("/tmp/e2e-files", exist_ok=True)
@@ -79,23 +81,25 @@ with sync_playwright() as p:
     ctx = b.new_context(viewport={"width": 1440, "height": 950}, accept_downloads=True)
     page = ctx.new_page()
     errors = []
-    page.on("pageerror", lambda e: errors.append(str(e)[:160]))
+    # Se anota en qué página apareció: un error suelto al final no dice dónde buscar.
+    page.on("pageerror", lambda e: errors.append(f"{page.url} → {str(e)[:160]}"))
 
     login(page, "admin", "Admin123!")
     m = page.get_by_role("dialog")
 
     # --- 1. El dashboard resume las facturas
-    for tarjeta in ["Facturas por pagar", "Reprogramadas", "Se pagan este viernes", "Próximas a pagar"]:
+    for tarjeta in ["Facturas por pagar", "Vencidas", "Vencen en 3 días", "Próximas a pagar"]:
         expect(page.get_by_text(tarjeta, exact=True)).to_be_visible()
-    ok("Dashboard muestra el resumen de facturas y la tanda del viernes")
+    ok("Dashboard resume las facturas por su fecha límite")
 
     # --- 2. Listado y resumen por moneda
     page.goto(BASE + "/facturas")
     expect(page.get_by_role("heading", name="Facturas de proveedores")).to_be_visible()
     expect(page.get_by_text("Pendientes de pago")).to_be_visible()
     filas = page.locator("tbody tr").count()
-    esperadas = int(psql("select count(*) from supplier_invoices"))
-    assert filas == esperadas, f"la tabla muestra {filas} facturas y en la base hay {esperadas}"
+    # La tabla pagina de 20 en 20: se compara contra lo que cabe en la primera página.
+    esperadas = min(int(psql("select count(*) from supplier_invoices")), 20)
+    assert filas == esperadas, f"la tabla muestra {filas} facturas y deberían verse {esperadas}"
     expect(page.get_by_role("row").filter(has_text="F002-0871").get_by_text("Vencida")).to_be_visible()
     ok("Listado con resumen, importes por moneda y aviso de vencidas")
 
@@ -195,48 +199,44 @@ with sync_playwright() as p:
     assert psql(f"select status from supplier_invoices where id='{inv_id}'") == "ANULADA"
     ok("Anular conserva el registro y su historial")
 
-    # --- 11b. Calendario de pago de los viernes
+    # --- 11b. Fecha límite de pago: contado y crédito
     page.goto(BASE + "/facturas?estado=PENDIENTE")
-    # La factura registrada hoy paga el viernes de esta semana, sin reprogramar
+    # Una factura al contado registrada hoy vence mañana.
     fila = page.get_by_role("row").filter(has_text="F001-3001")
-    expect(fila.get_by_text("Se paga este viernes")).to_be_visible()
-    expect(fila.get_by_text("Reprogramada")).to_have_count(0)
-    programado = psql("select ((coalesce(received_at, created_at) at time zone 'America/Lima')::date "
-                      "+ ((5 - extract(isodow from (coalesce(received_at, created_at) at time zone 'America/Lima')::date)::int + 7) % 7))::text "
-                      "from supplier_invoices where series='F001' and number='3001'")
-    assert programado == viernes_actual, (programado, viernes_actual)
+    expect(fila.get_by_text("Contado", exact=False)).to_be_visible()
+    limite = psql("select pay_due_date::text from supplier_invoices where series='F001' and number='3001'")
+    assert limite == manana, (limite, manana)
 
-    # Una factura vieja quedó reprogramada, con las semanas que lleva corriéndose
-    atrasadas = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' and "
-                         "((coalesce(received_at, created_at) at time zone 'America/Lima')::date "
-                         "+ ((5 - extract(isodow from (coalesce(received_at, created_at) at time zone 'America/Lima')::date)::int + 7) % 7)) "
-                         f"< '{viernes_actual}'::date"))
-    if atrasadas:
-        expect(page.get_by_text("Reprogramada", exact=False).first).to_be_visible()
-    page.screenshot(path=f"{SHOTS}/e2e-viernes.png", full_page=True)
+    # El filtro de vencidas trae exactamente las que pasaron su fecha.
+    vencidas = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
+                        "and pay_due_date < (now() at time zone 'America/Lima')::date"))
+    page.goto(BASE + "/facturas?vencidas=1")
+    assert page.locator("tbody tr").count() == vencidas, (page.locator("tbody tr").count(), vencidas)
 
-    # Filtros del calendario
-    page.goto(BASE + "/facturas?viernes=1")
-    enTanda = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' and "
-                       "greatest(((coalesce(received_at, created_at) at time zone 'America/Lima')::date "
-                       "+ ((5 - extract(isodow from (coalesce(received_at, created_at) at time zone 'America/Lima')::date)::int + 7) % 7)), "
-                       f"'{viernes_actual}'::date) = '{viernes_actual}'::date"))
-    assert page.locator("tbody tr").count() == enTanda, (page.locator("tbody tr").count(), enTanda)
-    expect(page.get_by_text("tanda del viernes")).to_be_visible()
-    page.goto(BASE + "/facturas?reprogramadas=1")
-    assert page.locator("tbody tr").count() == atrasadas, (page.locator("tbody tr").count(), atrasadas)
-    ok("Calendario de viernes: en fecha, reprogramadas y sus filtros")
+    # Y el de las que esperan la guía, las de crédito sin entrega anotada.
+    sin_guia = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
+                        "and payment_term='CREDITO' and guide_received_at is null"))
+    page.goto(BASE + "/facturas?singuia=1")
+    assert page.locator("tbody tr").count() == sin_guia, (page.locator("tbody tr").count(), sin_guia)
+    page.screenshot(path=f"{SHOTS}/e2e-plazos.png", full_page=True)
+    ok("Fecha límite de pago: contado vence al día siguiente y los filtros cuadran")
 
     # --- 12. Filtros
+    # Los recuentos se leen de la base en vez de escribirlos a mano: así la prueba sigue
+    # valiendo cuando cambian los datos de ejemplo.
     page.goto(BASE + "/facturas?estado=PAGADA")
-    assert page.locator("tbody tr").count() == 3
+    pagadas = int(psql("select count(*) from supplier_invoices where status='PAGADA'"))
+    assert page.locator("tbody tr").count() == pagadas, (page.locator("tbody tr").count(), pagadas)
     page.goto(BASE + "/facturas?vencidas=1")
     expect(page.get_by_role("row").filter(has_text="F002-0871")).to_be_visible()
-    assert page.locator("tbody tr").count() == 1
+    vencidas = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
+                        "and pay_due_date < (now() at time zone 'America/Lima')::date"))
+    assert page.locator("tbody tr").count() == vencidas, (page.locator("tbody tr").count(), vencidas)
     page.goto(BASE + "/facturas")
     page.get_by_role("searchbox").fill("20487654321")
     expect(page).to_have_url(re.compile("q=204"))
-    expect(page.locator("tbody tr")).to_have_count(3)
+    delProveedor = int(psql("select count(*) from supplier_invoices i join suppliers s on s.id=i.supplier_id where s.ruc='20487654321'"))
+    expect(page.locator("tbody tr")).to_have_count(delProveedor)
     ok("Filtros por estado, vencidas y búsqueda por RUC")
 
     # --- 13. Proveedores

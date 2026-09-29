@@ -16,7 +16,7 @@
     "db:clear-demo": "tsx scripts/clear-demo.ts",
     "db:studio": "drizzle-kit studio",
     "admin:create": "tsx scripts/create-admin.ts",
-    "test": "tsx tests/sunat-xml.test.ts && tsx tests/viernes.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts"
+    "test": "tsx tests/sunat-xml.test.ts && tsx tests/plazos.test.ts && tsx tests/amortizacion.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts && tsx --conditions=react-server tests/obligaciones.test.ts"
   },
   "dependencies": {
     "@fontsource/barlow": "^5.3.0",

@@ -213,7 +213,9 @@ export async function listCategories() {
   return db.select({
     id: categories.id, name: categories.name, description: categories.description, active: categories.active, isDemo: categories.isDemo,
     createdAt: categories.createdAt,
-    productCount: sql<number>`(select count(*)::int from ${products} where ${products.categoryId} = ${categories.id} and ${products.active})`,
+    // La columna de la tabla externa se escribe calificada a mano: dentro de la subconsulta,
+    // un `"id"` suelto lo resolvería Postgres contra products, no contra categories.
+    productCount: sql<number>`(select count(*)::int from ${products} p where p.category_id = ${sql.raw('"categories"."id"')} and p.active)`,
   }).from(categories).orderBy(asc(categories.name));
 }
 

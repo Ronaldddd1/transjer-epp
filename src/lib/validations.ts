@@ -108,6 +108,8 @@ export const supplierSchema = z.object({
   phone: z.string().trim().regex(/^[\d +()-]{0,20}$/, "Teléfono inválido").optional().transform((v) => (v ? v : null)),
   contactName: optionalText(120),
   notes: optionalText(1000),
+  defaultPaymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
+  defaultTermDays: intField("Los días de plazo").max(180, "El plazo no puede pasar de 180 días").default(1),
 });
 
 export const invoiceSchema = z.object({
@@ -118,8 +120,12 @@ export const invoiceSchema = z.object({
   issueDate: ymd,
   dueDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   serviceDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
-  /** Cuándo llegó la factura: define el viernes en que se paga. */
+  /** Cuándo llegó la factura: desde aquí corre el plazo de pago. */
   receivedDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  paymentTerm: z.enum(["CONTADO", "CREDITO"]),
+  termDays: intField("Los días de plazo").max(180, "El plazo no puede pasar de 180 días"),
+  /** Entrega física de la guía. Solo aplica a crédito; desde aquí corre el plazo. */
+  guideReceivedAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   currency: z.enum(["PEN", "USD"]),
   subtotal: optionalMoney("El subtotal"),
   igv: optionalMoney("El IGV"),
@@ -134,6 +140,90 @@ export const invoiceSchema = z.object({
   if (Number(d.total) <= 0) {
     ctx.addIssue({ code: "custom", path: ["total"], message: "El importe total debe ser mayor a 0" });
   }
+  if (d.paymentTerm === "CONTADO" && d.guideReceivedAt) {
+    ctx.addIssue({ code: "custom", path: ["guideReceivedAt"], message: "La entrega de guía solo aplica a las facturas a crédito" });
+  }
+  if (d.guideReceivedAt && d.guideReceivedAt < d.issueDate) {
+    ctx.addIssue({ code: "custom", path: ["guideReceivedAt"], message: "La guía no pudo entregarse antes de emitirse la factura" });
+  }
+});
+
+/** Anotar la entrega física de la guía: es lo que hace arrancar el plazo de una factura a crédito. */
+export const guideReceivedSchema = z.object({
+  guideReceivedAt: ymd,
+  notes: optionalText(500),
+});
+
+// ---------- Obligaciones periódicas ----------
+
+/** Una casilla marcada llega como "on"; sin marcar no llega. */
+const checkbox = z.preprocess((v) => v === "on" || v === "true" || v === true, z.boolean());
+
+const optionalInt = (label: string, min: number, max: number) =>
+  z.string().trim().optional().or(z.literal(""))
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^\d+$/.test(v), `${label} debe ser un número entero`)
+    .transform((v) => (v === null ? null : Number(v)))
+    .refine((v) => v === null || (v >= min && v <= max), `${label} debe estar entre ${min} y ${max}`);
+
+export const obligationSchema = z.object({
+  type: z.enum(["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"]),
+  name: requiredText("El nombre", 160),
+  creditor: requiredText("La entidad", 160),
+  reference: optionalText(80),
+  currency: z.enum(["PEN", "USD"]),
+  // Préstamos
+  principal: optionalMoney("El capital"),
+  annualRate: z.string().trim().optional().or(z.literal(""))
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^\d{1,3}(\.\d{1,3})?$/.test(v), "La tasa debe ser un porcentaje válido")
+    .refine((v) => v === null || Number(v) <= 200, "La tasa no puede pasar de 200 %")
+    .transform((v) => (v === null ? null : Number(v).toFixed(3))),
+  installmentsCount: optionalInt("El número de cuotas", 1, 360),
+  disbursedAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  // Servicios y alquileres
+  billingDay: optionalInt("El día de pago", 1, 28),
+  variableAmount: checkbox,
+  fixedAmount: optionalMoney("El importe"),
+  notes: optionalText(1000),
+}).superRefine((d, ctx) => {
+  if (d.type === "PRESTAMO" && !d.disbursedAt) {
+    ctx.addIssue({ code: "custom", path: ["disbursedAt"], message: "Un préstamo necesita su fecha de desembolso" });
+  }
+  if (d.type !== "PRESTAMO" && !d.billingDay) {
+    ctx.addIssue({ code: "custom", path: ["billingDay"], message: "Indica qué día del mes vence" });
+  }
+  if (d.type !== "PRESTAMO" && !d.variableAmount && !d.fixedAmount) {
+    ctx.addIssue({ code: "custom", path: ["fixedAmount"], message: "Indica el importe, o marca que cambia cada mes" });
+  }
+});
+
+/** Una fila del cronograma, tal como se guarda. */
+export const installmentRowSchema = z.object({
+  number: z.number().int().min(1).max(360),
+  dueDate: ymd,
+  principal: z.number().nullable(),
+  interest: z.number().nullable(),
+  insurance: z.number().nullable(),
+  total: z.number().positive("Cada cuota debe ser mayor a 0"),
+  balanceAfter: z.number().nullable().optional(),
+});
+
+export const scheduleSchema = z.object({
+  rows: z.array(installmentRowSchema).min(1, "El cronograma no tiene cuotas").max(360, "Máximo 360 cuotas"),
+});
+
+export const payInstallmentSchema = z.object({
+  paidAt: ymd,
+  paidAmount: money("El importe pagado"),
+  paymentReference: optionalText(120),
+  notes: optionalText(1000),
+});
+
+/** Anotar el importe del recibo de un servicio de monto variable. */
+export const installmentAmountSchema = z.object({
+  total: money("El importe"),
+  notes: optionalText(1000),
 });
 
 export const payInvoiceSchema = z.object({

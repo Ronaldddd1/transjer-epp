@@ -1,7 +1,7 @@
 "use client";
 
-import { Ban, CheckCircle2, RotateCcw, Undo2 } from "lucide-react";
-import { observeInvoice, payInvoice, reopenInvoice, restoreInvoice, voidInvoice } from "@/actions/invoices";
+import { Ban, CheckCircle2, FileCheck2, RotateCcw, Undo2 } from "lucide-react";
+import { observeInvoice, payInvoice, reopenInvoice, restoreInvoice, setGuideReceived, voidInvoice } from "@/actions/invoices";
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
@@ -18,6 +18,44 @@ export type InvoiceRef = {
 };
 
 const docLabel = (i: InvoiceRef) => `${i.series}-${i.number}`;
+
+/**
+ * Anota la entrega física de la guía de remisión.
+ * Es lo que hace arrancar el plazo de una factura a crédito: hasta que el proveedor la
+ * trae en mano, la factura no tiene fecha límite y no entra en la cola de pagos.
+ */
+export function GuideReceivedModal({ invoice, compact = false }: { invoice: InvoiceRef; compact?: boolean }) {
+  return (
+    <FormModal
+      title="Anotar entrega de la guía"
+      description="Desde esta fecha empieza a correr el plazo de pago de la factura."
+      submitLabel="Guardar"
+      size="sm"
+      action={(fd) => setGuideReceived(invoice.id, fd)}
+      trigger={(open) => (
+        <Button variant="outline" size={compact ? "sm" : "md"} onClick={open} title="Anotar entrega de la guía">
+          <FileCheck2 className="h-4 w-4" />
+          <span className={compact ? "sr-only lg:not-sr-only" : ""}>Anotar guía</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-steel-200 bg-steel-50 p-3 text-sm">
+            <dt className="text-steel-500">Comprobante</dt><dd className="font-medium">{docLabel(invoice)}</dd>
+            <dt className="text-steel-500">Proveedor</dt><dd className="font-medium">{invoice.supplierName}</dd>
+          </dl>
+          <Field label="Guía entregada el" name="guideReceivedAt" required error={errors.guideReceivedAt} hint="El día que el proveedor la trajo en físico.">
+            <Input name="guideReceivedAt" type="date" defaultValue={todayLima()} max={todayLima()} invalid={!!errors.guideReceivedAt} />
+          </Field>
+          <Field label="Observaciones" name="notes" error={errors.notes}>
+            <Textarea name="notes" maxLength={500} rows={2} placeholder="Quién la recibió, en qué estado llegó…" />
+          </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
 
 /** Ventana de registro de pago: la acción principal de la encargada. */
 export function PayInvoiceModal({ invoice, variant = "primary", compact = false }: { invoice: InvoiceRef; variant?: ButtonVariant; compact?: boolean }) {

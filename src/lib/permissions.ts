@@ -13,6 +13,7 @@ export const PERMISSIONS = [
   "invoices.view", "invoices.manage", "invoices.pay",
   "suppliers.manage",
   "invoices.mailbox",
+  "obligations.view", "obligations.manage", "obligations.pay",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -37,6 +38,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   FINANZAS: [
     "invoices.view", "invoices.manage", "invoices.pay",
     "suppliers.manage",
+    "obligations.view", "obligations.manage", "obligations.pay",
     "reports.view",
   ],
 };
@@ -52,7 +54,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   ADMIN: "Acceso total al sistema.",
   JEFE_ALMACEN: "Almacén completo: productos, categorías, trabajadores, ajustes y reportes. Sin usuarios ni facturas.",
   USUARIO: "Almacén: consulta el inventario, registra movimientos y entregas.",
-  FINANZAS: "Facturas de proveedores: registra, revisa y marca los pagos.",
+  FINANZAS: "Facturas de proveedores, préstamos y servicios: registra, revisa y marca los pagos.",
 };
 
 export function can(role: Role | undefined | null, permission: Permission): boolean {

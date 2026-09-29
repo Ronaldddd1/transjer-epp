@@ -1,42 +1,79 @@
-ACTUALIZACIÓN: TRANSJER GESTIÓN
+TRANSJER GESTIÓN — ACTUALIZACIÓN: PLAZOS DE PAGO, PRÉSTAMOS Y SERVICIOS
+=======================================================================
 
-Cambios incluidos:
-  1. El sistema ahora se llama "Transjer Gestión" (antes "EPP Transjer").
-  2. Logotipo oficial de Transjer en el login, el menú y el ícono del navegador.
-  3. Pantalla de inicio de sesión rediseñada, con estilo corporativo.
-  4. Nuevo rol "Jefe de almacén": manda en todo el módulo de EPP, sin acceso a
-     usuarios ni facturas.
-  5. Calendario de pago de los viernes: a cada factura le toca el viernes de la
-     semana en que llegó; si ese viernes pasa sin pagarse, se corre al siguiente
-     y el sistema avisa de la reprogramación.
-  6. Módulo de facturas de proveedores (por si no publicaste la versión anterior).
+QUÉ CAMBIÓ
+----------
 
-PASOS
------
-1) Copia el contenido de esta carpeta sobre tu proyecto, reemplazando los archivos.
+1. Se acabó el calendario de los viernes. Ahora cada factura vence en su propia fecha:
 
-2) BORRA este archivo, que ya no se usa (el ícono ahora es PNG):
-     public/icon.svg
+   CONTADO  vence 1 día después de que llega el correo.
+   CRÉDITO  vence 7 días después de que el proveedor entrega la guía EN FÍSICO.
+            Deben cumplirse las dos cosas —correo y guía—, así que el plazo arranca
+            en la más tardía. Sin guía anotada, la factura NO tiene fecha de pago y
+            el sistema lo dice: "Esperando la guía".
 
-3) Instala las dependencias:
-     npm install
+   La guía se anota desde la ficha de la factura, con el botón "Anotar guía".
+   Cada proveedor tiene su condición pactada, que se propone al registrar sus facturas.
 
-4) Con tu .env apuntando a la base de datos de PRODUCCIÓN:
-     npm run db:migrate
-   ESTE PASO ES OBLIGATORIO. Sin él, al asignar el rol "Jefe de almacén" dará
-   el error: invalid input value for enum role. Las migraciones 0002 y 0003 solo
-   AGREGAN tablas y roles: no modifican ni borran ningún dato existente.
+2. Sección nueva: PRÉSTAMOS Y SERVICIOS. Lleva todo lo que se paga mes a mes.
 
-5) Publica:
-     git add -A
-     git commit -m "Transjer Gestión: logo, calendario de viernes y rol de almacén"
-     git push
-   (Usa "git add -A" para que Git registre también el archivo borrado.)
+   Préstamos: se carga el cronograma del banco pegando las filas del PDF. Están
+   probados los cuatro formatos de Transjer (BCP, Interbank Capital de Trabajo,
+   Interbank Préstamo Fácil y Crédito Pyme). También puede calcularse a partir de
+   la TEA y el plazo, como borrador.
 
-6) Vercel despliega solo. Revisa en Vercel > Deployments que termine en "Ready".
+   Servicios de monto variable (luz, celular por consumo): se registra el día de
+   pago y el sistema crea los vencimientos del año. El monto se anota cuando llega
+   el recibo.
 
-LOGOTIPO
---------
-Los archivos oficiales están en public/ (logo.png, logo-blanco.png, logo-tj.png,
-icon.png). Si la empresa cambia el logotipo, reemplázalos respetando los nombres
-y no hay que tocar código.
+3. Sección nueva: CALENDARIO DE PAGOS. Junta las facturas y las cuotas de préstamos
+   y servicios en una sola lista ordenada por fecha, con lo vencido primero.
+
+QUÉ HACER PARA ACTUALIZAR
+-------------------------
+
+1. Reemplaza la carpeta del proyecto por la de este paquete (el proyecto COMPLETO,
+   no solo los archivos cambiados).
+
+2. En la carpeta del proyecto:
+
+       Remove-Item -Recurse -Force .next
+       npm install
+       npm run db:migrate
+
+   La migración es ADITIVA: no borra nada. Las facturas que ya estaban registradas
+   pasan a contado con un día de plazo, contado desde que llegaron.
+
+3. Pruébalo en tu máquina:
+
+       npm run dev
+
+   Verifica cuatro cosas:
+     - En Facturas, la columna dice "Vence" y cada fila muestra Contado o Crédito.
+     - Al registrar una factura a crédito sin guía, dice "Esperando la guía".
+     - En el menú aparecen "Préstamos y servicios" y "Calendario de pagos".
+     - Al cargar un cronograma pegado, la vista previa muestra las cuotas correctas.
+
+4. Publica:
+
+       git add -A
+       git commit -m "Transjer Gestion: plazos de pago, prestamos y servicios"
+       git push
+
+   Antes del push, revisa que .env NO aparezca en "git status".
+
+5. En Vercel no hace falta ninguna variable nueva.
+
+LO QUE HAY QUE CARGAR A MANO DESPUÉS
+------------------------------------
+
+- La condición pactada de cada proveedor (Proveedores → Editar). Por defecto todos
+  quedan al contado con 1 día.
+- Los cuatro préstamos del banco, con su cronograma.
+- Los servicios recurrentes: celulares, luz, agua, internet, alquileres.
+
+PRUEBAS
+-------
+
+    npm test                            (135 verificaciones)
+    python3 tests/e2e-obligaciones.py   (recorrido completo en el navegador)

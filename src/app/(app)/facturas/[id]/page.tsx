@@ -3,15 +3,15 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RemoveAttachmentButton, UploadAttachmentsModal } from "@/components/invoices/attachments";
-import { InvoiceReasonModal, PayInvoiceModal, RestoreInvoiceButton } from "@/components/invoices/invoice-actions";
+import { GuideReceivedModal, InvoiceReasonModal, PayInvoiceModal, RestoreInvoiceButton } from "@/components/invoices/invoice-actions";
 import { InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
-import { Badge, InvoiceStatusBadge, PaymentFridayBadge } from "@/components/ui/badge";
+import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { PageHeader, Panel } from "@/components/ui/page-header";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   ATTACHMENT_KIND_LABEL, cn, formatDate, formatDateTime, formatFileSize, formatMoney,
-  INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, invoiceNumber,
+  INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, invoiceNumber, PAYMENT_TERM_LABEL,
 } from "@/lib/utils";
 import { getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -70,7 +70,11 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               currency: invoice.currency, subtotal: invoice.subtotal, igv: invoice.igv, total: invoice.total,
               description: invoice.description, grtNumber: invoice.grtNumber, notes: invoice.notes,
               receptionDate: invoice.receptionDate,
+              paymentTerm: invoice.paymentTerm, termDays: invoice.termDays, guideReceivedAt: invoice.guideReceivedAt,
             }} />}
+            {canManage && editable && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && (
+              <GuideReceivedModal invoice={ref} />
+            )}
             {canManage && invoice.status === "PENDIENTE" && <InvoiceReasonModal invoice={ref} action="observe" />}
             {canManage && invoice.status === "OBSERVADA" && <RestoreInvoiceButton invoice={ref} />}
             {canPay && invoice.status === "PAGADA" && <InvoiceReasonModal invoice={ref} action="reopen" />}
@@ -80,13 +84,20 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <InvoiceStatusBadge status={invoice.status} dueDate={invoice.dueDate} />
+        <InvoiceStatusBadge status={invoice.status} dueDate={invoice.payDueDate} />
         <span className="font-display text-2xl font-bold text-ink">{formatMoney(invoice.total, invoice.currency)}</span>
-        {invoice.status === "PENDIENTE" && (
-          <PaymentFridayBadge scheduled={invoice.scheduledFriday} effective={invoice.effectiveFriday} />
-        )}
+        <PaymentTermBadge term={invoice.paymentTerm} termDays={invoice.termDays} />
+        {invoice.status === "PENDIENTE" && <DueBadge payDueDate={invoice.payDueDate} />}
         {invoice.isDemo && <Badge tone="neutral">Prueba</Badge>}
       </div>
+
+      {invoice.status === "PENDIENTE" && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && (
+        <p className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+          Esta factura es a crédito y todavía no tiene fecha de pago: el plazo de {invoice.termDays} día(s)
+          empieza a correr recién cuando el proveedor entregue la guía de remisión en físico.
+          {canManage && " Usa el botón «Anotar guía» cuando la traiga."}
+        </p>
+      )}
 
       {invoice.statusReason && invoice.status !== "PAGADA" && (
         <p className={cn(
@@ -112,7 +123,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               <Dato label="Total"><strong>{formatMoney(invoice.total, invoice.currency)}</strong></Dato>
               <Dato label="Guía de remisión">{invoice.grtNumber ?? "—"}</Dato>
               <Dato label="Origen">{INVOICE_SOURCE_LABEL[invoice.source]}</Dato>
-              <Dato label="Llegó el">{formatDate(invoice.receptionDate)}</Dato>
+              <Dato label="Llegó el correo">{formatDate(invoice.receptionDate)}</Dato>
+              <Dato label="Condición">{PAYMENT_TERM_LABEL[invoice.paymentTerm]} · {invoice.termDays} día(s)</Dato>
+              <Dato label="Guía entregada">{invoice.guideReceivedAt ? formatDate(invoice.guideReceivedAt) : "—"}</Dato>
+              <Dato label="Fecha límite de pago">
+                {invoice.payDueDate ? <strong>{formatDate(invoice.payDueDate)}</strong> : <span className="text-sky-800">Esperando la guía</span>}
+              </Dato>
               <Dato label="Registrada por">{invoice.createdByName ?? "—"}</Dato>
             </dl>
             {(invoice.description || invoice.notes) && (

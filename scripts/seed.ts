@@ -10,6 +10,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../src/db/schema";
+import { computePayDueDate } from "../src/lib/utils";
 
 const { users, categories, products, employees, inventoryMovements, eppDeliveries, auditLogs, suppliers, supplierInvoices } = schema;
 
@@ -134,27 +135,45 @@ async function main() {
     ["20487654321", "CARGA SEGURA PERU S.A.C.", "ventas@cargasegura.pe"],
   ];
   const createdSuppliers = await db.insert(suppliers).values(
-    demoSuppliers.map(([ruc, businessName, email]) => ({ ruc, businessName, email, isDemo: true })),
+    // El tercer proveedor trabaja a crédito: sus facturas esperan la guía en físico.
+    demoSuppliers.map(([ruc, businessName, email], i) => ({
+      ruc, businessName, email, isDemo: true,
+      defaultPaymentTerm: (i === 2 ? "CREDITO" : "CONTADO") as "CONTADO" | "CREDITO",
+      defaultTermDays: i === 2 ? 7 : 1,
+    })),
   ).returning();
 
-  // Mezcla de estados para ver el flujo completo: pendientes, vencidas, pagadas y observadas.
-  const demoInvoices: [number, string, string, number, number, string, string | null][] = [
-    // [proveedor, serie, número, díasDesdeLlegada, díasDePlazo, estado, motivo]
-    // Se mezclan recién llegadas (pagan el viernes de esta semana) con atrasadas (reprogramadas).
-    [0, "F001", "2589", 0, 30, "PENDIENTE", null],
-    [0, "F001", "2604", 1, 30, "PENDIENTE", null],
-    [1, "F002", "0871", 40, 15, "PENDIENTE", null],
-    [2, "F005", "1130", 12, 30, "PENDIENTE", null],
-    [1, "F002", "0844", 55, 30, "PAGADA", null],
-    [2, "F005", "1098", 48, 30, "PAGADA", null],
-    [0, "F001", "2501", 35, 30, "PAGADA", null],
-    [2, "F005", "1142", 8, 30, "OBSERVADA", "Falta la Guía de Remisión Transportista del servicio."],
+  // Mezcla de estados y condiciones para ver el flujo completo: al contado y a crédito,
+  // con y sin guía entregada, vencidas, pagadas y observadas.
+  type DemoInvoice = [
+    proveedor: number, serie: string, numero: string,
+    diasDesdeLlegada: number, plazoComprobante: number,
+    condicion: "CONTADO" | "CREDITO",
+    /** Hace cuántos días entregaron la guía. null = todavía no la traen. */
+    diasGuia: number | null,
+    estado: string, motivo: string | null,
+  ];
+  const demoInvoices: DemoInvoice[] = [
+    [0, "F001", "2589", 0, 30, "CONTADO", null, "PENDIENTE", null],
+    [0, "F001", "2604", 1, 30, "CONTADO", null, "PENDIENTE", null],
+    // Llegó hace 40 días y sigue sin pagarse: aparece vencida con todas sus letras.
+    [1, "F002", "0871", 40, 15, "CONTADO", null, "PENDIENTE", null],
+    // A crédito con la guía ya entregada: su plazo empezó a correr ese día.
+    [2, "F005", "1130", 12, 30, "CREDITO", 9, "PENDIENTE", null],
+    // A crédito sin guía: no tiene fecha de pago todavía, y el sistema lo dice.
+    [1, "F002", "0903", 5, 30, "CREDITO", null, "PENDIENTE", null],
+    [1, "F002", "0844", 55, 30, "CONTADO", null, "PAGADA", null],
+    [2, "F005", "1098", 48, 30, "CREDITO", 45, "PAGADA", null],
+    [0, "F001", "2501", 35, 30, "CONTADO", null, "PAGADA", null],
+    [2, "F005", "1142", 8, 30, "CONTADO", null, "OBSERVADA", "Falta la Guía de Remisión Transportista del servicio."],
   ];
   const addDays = (base: Date, n: number) => { const d = new Date(base); d.setDate(d.getDate() + n); return d; };
-  const invoiceRows = demoInvoices.map(([si, series, number, emitHace, plazo, status, motivo], idx) => {
+  const invoiceRows = demoInvoices.map(([si, series, number, emitHace, plazo, condicion, diasGuia, status, motivo], idx) => {
     const issue = daysAgo(emitHace);
     const subtotal = 850 + idx * 137.5;
     const igv = subtotal * 0.18;
+    const termDays = condicion === "CONTADO" ? 1 : 7;
+    const guia = diasGuia === null ? null : ymd(daysAgo(diasGuia));
     return {
       supplierId: createdSuppliers[si].id,
       docType: "FACTURA" as const,
@@ -168,6 +187,12 @@ async function main() {
       total: (subtotal + igv).toFixed(2),
       description: "Servicio de transporte de carga",
       grtNumber: `T00${si + 1}-${(1000 + idx).toString()}`,
+      paymentTerm: condicion,
+      termDays,
+      guideReceivedAt: guia,
+      payDueDate: computePayDueDate({
+        paymentTerm: condicion, termDays, receptionYmd: ymd(issue), guideReceivedAt: guia,
+      }),
       status: status as "PENDIENTE" | "PAGADA" | "OBSERVADA",
       paidAt: status === "PAGADA" ? ymd(addDays(issue, plazo - 3)) : null,
       paymentReference: status === "PAGADA" ? `Transferencia ${90000 + idx}` : null,

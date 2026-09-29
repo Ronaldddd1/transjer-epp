@@ -6,9 +6,16 @@ import { createInvoice, importInvoiceFromFiles, updateInvoice } from "@/actions/
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
-import { INVOICE_DOC_TYPE_LABEL, todayLima } from "@/lib/utils";
+import {
+  computePayDueDate, DEFAULT_TERM_DAYS, formatDate, INVOICE_DOC_TYPE_LABEL, todayLima,
+  type PaymentTermKey,
+} from "@/lib/utils";
 
-export type SupplierOption = { id: string; ruc: string; name: string };
+export type SupplierOption = {
+  id: string; ruc: string; name: string;
+  defaultPaymentTerm: PaymentTermKey;
+  defaultTermDays: number;
+};
 
 export type InvoiceFormValues = {
   id: string;
@@ -27,6 +34,9 @@ export type InvoiceFormValues = {
   grtNumber: string | null;
   notes: string | null;
   receptionDate: string;
+  paymentTerm: string;
+  termDays: number;
+  guideReceivedAt: string | null;
 };
 
 const IGV_RATE = 0.18;
@@ -36,6 +46,36 @@ export function InvoiceFormModal({ suppliers, invoice }: { suppliers: SupplierOp
   const [subtotal, setSubtotal] = useState(invoice?.subtotal ?? "");
   const [igv, setIgv] = useState(invoice?.igv ?? "");
   const [total, setTotal] = useState(invoice?.total ?? "");
+
+  // Condición de pago: decide desde cuándo corre el plazo y si hace falta la guía.
+  const [supplierId, setSupplierId] = useState(invoice?.supplierId ?? "");
+  const [term, setTerm] = useState<PaymentTermKey>((invoice?.paymentTerm as PaymentTermKey) ?? "CONTADO");
+  const [termDays, setTermDays] = useState(String(invoice?.termDays ?? DEFAULT_TERM_DAYS.CONTADO));
+  const [received, setReceived] = useState(invoice?.receptionDate ?? todayLima());
+  const [guide, setGuide] = useState(invoice?.guideReceivedAt ?? "");
+
+  /** Al elegir proveedor se propone lo pactado con él; se puede cambiar en esta factura. */
+  const onSupplier = (id: string) => {
+    setSupplierId(id);
+    if (editing) return;
+    const s = suppliers.find((x) => x.id === id);
+    if (!s) return;
+    setTerm(s.defaultPaymentTerm);
+    setTermDays(String(s.defaultTermDays));
+  };
+
+  const onTerm = (value: PaymentTermKey) => {
+    setTerm(value);
+    setTermDays(String(DEFAULT_TERM_DAYS[value]));
+    if (value === "CONTADO") setGuide("");
+  };
+
+  const vence = computePayDueDate({
+    paymentTerm: term,
+    termDays: Number(termDays) || 0,
+    receptionYmd: received || todayLima(),
+    guideReceivedAt: guide || null,
+  });
 
   /** Al escribir el subtotal se propone el IGV y el total; ambos se pueden corregir a mano. */
   const onSubtotal = (value: string) => {
@@ -66,7 +106,7 @@ export function InvoiceFormModal({ suppliers, invoice }: { suppliers: SupplierOp
       {({ errors }) => (
         <div className="grid gap-4 sm:grid-cols-6">
           <Field label="Proveedor" name="supplierId" required error={errors.supplierId} className="sm:col-span-6">
-            <Select name="supplierId" defaultValue={invoice?.supplierId ?? ""} invalid={!!errors.supplierId}>
+            <Select name="supplierId" value={supplierId} onChange={(e) => onSupplier(e.target.value)} invalid={!!errors.supplierId}>
               <option value="" disabled>{suppliers.length ? "Selecciona un proveedor…" : "No hay proveedores activos"}</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name} — RUC {s.ruc}</option>)}
             </Select>
@@ -87,12 +127,57 @@ export function InvoiceFormModal({ suppliers, invoice }: { suppliers: SupplierOp
           <Field label="Fecha de emisión" name="issueDate" required error={errors.issueDate} className="sm:col-span-2">
             <Input name="issueDate" type="date" defaultValue={invoice?.issueDate ?? todayLima()} invalid={!!errors.issueDate} />
           </Field>
-          <Field label="Llegó el" name="receivedDate" required error={errors.receivedDate} hint="Define el viernes en que se paga." className="sm:col-span-2">
-            <Input name="receivedDate" type="date" defaultValue={invoice?.receptionDate ?? todayLima()} max={todayLima()} invalid={!!errors.receivedDate} />
+          <Field label="Llegó el correo" name="receivedDate" required error={errors.receivedDate} hint="Desde aquí corre el plazo." className="sm:col-span-2">
+            <Input name="receivedDate" type="date" value={received} onChange={(e) => setReceived(e.target.value)} max={todayLima()} invalid={!!errors.receivedDate} />
           </Field>
-          <Field label="Vencimiento" name="dueDate" error={errors.dueDate} hint="Para avisar de las que ya vencieron." className="sm:col-span-2">
+          <Field label="Vencimiento del comprobante" name="dueDate" error={errors.dueDate} hint="El que dice la factura." className="sm:col-span-2">
             <Input name="dueDate" type="date" defaultValue={invoice?.dueDate ?? ""} invalid={!!errors.dueDate} />
           </Field>
+
+          {/* Condición de pago: contado corre desde el correo, crédito desde la guía en físico. */}
+          <div className="rounded-lg border border-steel-200 bg-steel-50 p-4 sm:col-span-6">
+            <div className="grid gap-4 sm:grid-cols-6">
+              <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm} className="sm:col-span-2">
+                <Select name="paymentTerm" value={term} onChange={(e) => onTerm(e.target.value as PaymentTermKey)}>
+                  <option value="CONTADO">Contado</option>
+                  <option value="CREDITO">Crédito</option>
+                </Select>
+              </Field>
+              <Field label="Días de plazo" name="termDays" required error={errors.termDays} className="sm:col-span-2">
+                <Input name="termDays" value={termDays} onChange={(e) => setTermDays(e.target.value)} inputMode="numeric" invalid={!!errors.termDays} />
+              </Field>
+              {term === "CREDITO" && (
+                <Field
+                  label="Guía entregada el"
+                  name="guideReceivedAt"
+                  error={errors.guideReceivedAt}
+                  hint="Cuando el proveedor la trajo en físico."
+                  className="sm:col-span-2"
+                >
+                  <Input name="guideReceivedAt" type="date" value={guide} onChange={(e) => setGuide(e.target.value)} max={todayLima()} invalid={!!errors.guideReceivedAt} />
+                </Field>
+              )}
+            </div>
+
+            <p className="mt-3 border-t border-steel-200 pt-3 text-sm">
+              {vence ? (
+                <>
+                  <span className="text-steel-600">Fecha límite de pago: </span>
+                  <strong className="text-ink">{formatDate(vence)}</strong>
+                  <span className="text-steel-500">
+                    {term === "CONTADO"
+                      ? ` · ${termDays} día(s) desde que llegó el correo`
+                      : ` · ${termDays} día(s) desde la entrega de la guía`}
+                  </span>
+                </>
+              ) : (
+                <span className="text-sky-800">
+                  A crédito, el plazo recién empieza cuando el proveedor entregue la guía en físico.
+                  Si todavía no la trae, deja la fecha vacía y anótala después desde la ficha de la factura.
+                </span>
+              )}
+            </p>
+          </div>
 
           <Field label="Moneda" name="currency" required error={errors.currency} className="sm:col-span-2">
             <Select name="currency" defaultValue={invoice?.currency ?? "PEN"}>

@@ -1,9 +1,9 @@
-import { AlertTriangle, CalendarClock, Mail } from "lucide-react";
+import { AlertTriangle, CalendarClock, FileClock, Mail } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
-import { Badge, InvoiceStatusBadge, PaymentFridayBadge } from "@/components/ui/badge";
+import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
@@ -13,7 +13,7 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_STATUS_LABEL,
-  invoiceNumber, nextFriday, pageParams, todayLima, type SearchParams,
+  invoiceNumber, pageParams, PAYMENT_TERM_LABEL, todayLima, type SearchParams,
 } from "@/lib/utils";
 import { countEmailsToReview, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -51,10 +51,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     { label: "Observadas", count: sum(observadas), detail: amounts(observadas), tone: "plain" as const },
   ];
 
-  // Lo que toca pagar en la tanda de esta semana.
-  const viernes = nextFriday(todayLima());
-  const deLaTanda = rows.filter((r) => r.status === "PENDIENTE" && r.effectiveFriday === viernes);
-  const reprogramadas = rows.filter((r) => r.status === "PENDIENTE" && r.effectiveFriday !== r.scheduledFriday);
+  // Lo urgente de esta página: lo que ya venció y lo que espera la guía para poder vencer.
+  const hoy = todayLima();
+  const vencidas = rows.filter((r) => r.status === "PENDIENTE" && !!r.payDueDate && r.payDueDate < hoy);
+  const sinGuia = rows.filter((r) => r.status === "PENDIENTE" && r.paymentTerm === "CREDITO" && !r.guideReceivedAt);
 
   return (
     <>
@@ -85,21 +85,22 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
         </Link>
       )}
 
-      {(deLaTanda.length > 0 || reprogramadas.length > 0) && (
+      {(vencidas.length > 0 || sinGuia.length > 0) && (
         <div className="mb-4 grid gap-2 sm:grid-cols-2">
-          {deLaTanda.length > 0 && (
-            <Link href="/facturas?viernes=1" className="flex items-center gap-3 rounded-lg border border-brand/60 bg-brand-soft px-4 py-3 text-sm text-[#7A5A00] hover:border-brand">
-              <CalendarClock className="h-5 w-5 shrink-0" aria-hidden />
+          {vencidas.length > 0 && (
+            <Link href="/facturas?vencidas=1" className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400">
+              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden />
               <span>
-                <strong>{deLaTanda.length} factura(s)</strong> se pagan este viernes {formatDate(viernes)}.
+                <strong>{vencidas.length} factura(s)</strong> pasaron su fecha límite de pago.
               </span>
             </Link>
           )}
-          {reprogramadas.length > 0 && (
-            <Link href="/facturas?reprogramadas=1" className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400">
-              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden />
+          {sinGuia.length > 0 && (
+            <Link href="/facturas?singuia=1" className="flex items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 hover:border-sky-400">
+              <FileClock className="h-5 w-5 shrink-0" aria-hidden />
               <span>
-                <strong>{reprogramadas.length} factura(s)</strong> pasaron su viernes sin pagarse y quedaron para la siguiente semana.
+                <strong>{sinGuia.length} factura(s)</strong> a crédito esperan que el proveedor entregue la guía en físico.
+                Hasta entonces su plazo no corre.
               </span>
             </Link>
           )}
@@ -122,6 +123,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           { type: "select", name: "estado", label: "Estado", allLabel: "Todos", options: Object.entries(INVOICE_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "proveedor", label: "Proveedor", options: suppliers.map((s) => ({ value: s.id, label: s.name })) },
           { type: "select", name: "tipo", label: "Tipo", allLabel: "Todos", options: Object.entries(INVOICE_DOC_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
+          { type: "select", name: "condicion", label: "Condición", allLabel: "Todas", options: Object.entries(PAYMENT_TERM_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "moneda", label: "Moneda", allLabel: "Todas", options: [{ value: "PEN", label: "Soles" }, { value: "USD", label: "Dólares" }] },
           { type: "select", name: "origen", label: "Origen", allLabel: "Todos", options: [{ value: "MANUAL", label: "Registro manual" }, { value: "CORREO", label: "Correo" }] },
           { type: "date", name: "from", label: "Emitida desde" },
@@ -135,7 +137,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             <Th>Comprobante</Th>
             <Th>Proveedor</Th>
             <Th className="hidden 2xl:table-cell">Emisión</Th>
-            <Th>Viernes de pago</Th>
+            <Th>Vence</Th>
             <Th className="text-right">Importe</Th>
             <Th>Estado</Th>
             <Th className="hidden 2xl:table-cell">Guía</Th>
@@ -152,7 +154,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             />
           )}
           {rows.map((i) => {
-            const vencida = i.status === "PENDIENTE" && !!i.dueDate && i.dueDate < todayLima();
             const ref = { id: i.id, series: i.series, number: i.number, currency: i.currency, total: i.total, supplierName: i.supplierName };
             return (
               <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
@@ -171,17 +172,19 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 2xl:table-cell">{formatDate(i.issueDate)}</Td>
                 <Td>
                   {i.status === "PENDIENTE" ? (
-                    <PaymentFridayBadge scheduled={i.scheduledFriday} effective={i.effectiveFriday} compact />
+                    <>
+                      <DueBadge payDueDate={i.payDueDate} compact />
+                      <p className="mt-1"><PaymentTermBadge term={i.paymentTerm} termDays={i.termDays} /></p>
+                    </>
                   ) : (
-                    <span className="whitespace-nowrap text-steel-500">{i.dueDate ? `Vencía ${formatDate(i.dueDate)}` : "—"}</span>
+                    <span className="whitespace-nowrap text-steel-500">{i.payDueDate ? `Vencía ${formatDate(i.payDueDate)}` : "—"}</span>
                   )}
-                  {vencida && <p className="mt-1 whitespace-nowrap text-xs text-red-700">Venció el {formatDate(i.dueDate)}</p>}
                 </Td>
                 <Td className={cn("whitespace-nowrap text-right font-display text-base font-bold tabular", i.status === "ANULADA" && "line-through")}>
                   {formatMoney(i.total, i.currency)}
                 </Td>
                 <Td>
-                  <InvoiceStatusBadge status={i.status} dueDate={i.dueDate} />
+                  <InvoiceStatusBadge status={i.status} dueDate={i.payDueDate} />
                   {i.statusReason && i.status !== "PAGADA" && (
                     <p className="mt-1 line-clamp-2 w-40 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
                   )}
@@ -210,25 +213,24 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
         </tbody>
       </TableShell>
 
-      {first(sp.viernes) === "1" && (
+      {first(sp.porvencer) === "1" && (
         <p className="mt-3 flex items-center gap-2 text-sm text-steel-500">
           <CalendarClock className="h-4 w-4 text-[#9A7000]" aria-hidden />
-          Mostrando solo lo que se paga en la tanda del viernes {formatDate(viernes)}.{" "}
+          Mostrando solo las facturas que vencen hoy o en los próximos tres días.{" "}
           <Link href="/facturas" className="underline">Ver todas</Link>
         </p>
       )}
-      {first(sp.reprogramadas) === "1" && (
+      {first(sp.singuia) === "1" && (
         <p className="mt-3 flex items-center gap-2 text-sm text-steel-500">
-          <AlertTriangle className="h-4 w-4 text-red-600" aria-hidden />
-          Mostrando solo las facturas que pasaron su viernes de pago.{" "}
+          <FileClock className="h-4 w-4 text-sky-700" aria-hidden />
+          Mostrando solo las facturas a crédito que esperan la entrega de la guía.{" "}
           <Link href="/facturas" className="underline">Ver todas</Link>
         </p>
       )}
       {first(sp.vencidas) === "1" && (
         <p className="mt-3 flex items-center gap-2 text-sm text-steel-500">
           <AlertTriangle className="h-4 w-4 text-red-600" aria-hidden />
-          Mostrando solo las facturas pendientes cuyo vencimiento ya pasó.
-          {" "}
+          Mostrando solo las facturas pendientes cuya fecha límite ya pasó.{" "}
           <Link href="/facturas" className="underline">Ver todas</Link>
         </p>
       )}

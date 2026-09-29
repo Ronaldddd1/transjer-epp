@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowLeftRight, BarChart3, Building2, ClipboardList, HardHat, LayoutDashboard, LogOut, Menu, PackageSearch, Receipt, ShieldCheck, Tags, Users, X,
+  ArrowLeftRight, BarChart3, Building2, CalendarDays, ClipboardList, HardHat, Landmark, LayoutDashboard, LogOut, Menu, PackageSearch, Receipt, ShieldCheck, Tags, Users, X,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
@@ -21,6 +21,8 @@ const MAIN_NAV: NavItem[] = [
   { href: "/entregas", label: "Entregas", icon: HardHat, permission: "deliveries.view" },
   { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
   { href: "/facturas", label: "Facturas", icon: Receipt, permission: "invoices.view" },
+  { href: "/obligaciones", label: "Préstamos y servicios", icon: Landmark, permission: "obligations.view" },
+  { href: "/calendario", label: "Calendario de pagos", icon: CalendarDays, permission: "invoices.view" },
   { href: "/reportes", label: "Reportes", icon: BarChart3, permission: "reports.view" },
 ];
 const SETTINGS_NAV: NavItem[] = [

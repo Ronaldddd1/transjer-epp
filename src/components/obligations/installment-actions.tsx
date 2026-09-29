@@ -1,0 +1,151 @@
+"use client";
+
+import { CalendarPlus, CheckCircle2, Coins, Undo2 } from "lucide-react";
+import {
+  extendSchedule, payInstallment, reopenInstallment, setInstallmentAmount, setObligationStatus,
+} from "@/actions/obligations";
+import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
+import { Field, Input, Textarea } from "@/components/ui/field";
+import { FormModal } from "@/components/ui/form-modal";
+import { formatDate, formatMoney, todayLima } from "@/lib/utils";
+
+export type InstallmentRef = {
+  id: string;
+  number: number;
+  dueDate: string;
+  total: string | null;
+  currency: string;
+  obligationName: string;
+};
+
+/** Registrar el pago de una cuota. */
+export function PayInstallmentModal({ installment, compact = false }: { installment: InstallmentRef; compact?: boolean }) {
+  return (
+    <FormModal
+      title={`Pagar cuota ${installment.number}`}
+      description="La cuota quedará marcada como pagada, con la fecha y el responsable."
+      submitLabel="Confirmar pago"
+      size="sm"
+      action={(fd) => payInstallment(installment.id, fd)}
+      trigger={(open) => (
+        <Button size={compact ? "sm" : "md"} onClick={open} title="Registrar pago">
+          <CheckCircle2 className="h-4 w-4" />
+          <span className={compact ? "sr-only lg:not-sr-only" : ""}>Pagar</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-steel-200 bg-steel-50 p-3 text-sm">
+            <dt className="text-steel-500">Obligación</dt><dd className="font-medium">{installment.obligationName}</dd>
+            <dt className="text-steel-500">Cuota</dt><dd className="font-medium">N.º {installment.number} · vence {formatDate(installment.dueDate)}</dd>
+            <dt className="text-steel-500">Programada</dt>
+            <dd className="font-display text-base font-bold">
+              {installment.total ? formatMoney(installment.total, installment.currency) : "sin importe"}
+            </dd>
+          </dl>
+          <Field label="Fecha de pago" name="paidAt" required error={errors.paidAt}>
+            <Input name="paidAt" type="date" defaultValue={todayLima()} max={todayLima()} invalid={!!errors.paidAt} />
+          </Field>
+          <Field
+            label="Importe pagado"
+            name="paidAmount"
+            required
+            error={errors.paidAmount}
+            hint="Se guarda lo que realmente salió de la cuenta, aunque difiera de la cuota."
+          >
+            <Input name="paidAmount" defaultValue={installment.total ?? ""} inputMode="decimal" invalid={!!errors.paidAmount} />
+          </Field>
+          <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación o transferencia.">
+            <Input name="paymentReference" maxLength={120} />
+          </Field>
+          <Field label="Observaciones" name="notes" error={errors.notes}>
+            <Textarea name="notes" maxLength={1000} rows={2} />
+          </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
+
+/** Anotar el importe del recibo de un servicio de monto variable. */
+export function SetAmountModal({ installment, compact = false }: { installment: InstallmentRef; compact?: boolean }) {
+  return (
+    <FormModal
+      title={`Importe de la cuota ${installment.number}`}
+      description="Anota lo que dice el recibo de este mes. Después se registra el pago."
+      submitLabel="Guardar importe"
+      size="sm"
+      action={(fd) => setInstallmentAmount(installment.id, fd)}
+      trigger={(open) => (
+        <Button variant="outline" size={compact ? "sm" : "md"} onClick={open} title="Anotar el importe del recibo">
+          <Coins className="h-4 w-4" />
+          <span className={compact ? "sr-only lg:not-sr-only" : ""}>Importe</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <p className="rounded-md border border-steel-200 bg-steel-50 p-3 text-sm text-steel-600">
+            {installment.obligationName} · vence {formatDate(installment.dueDate)}
+          </p>
+          <Field label="Importe del recibo" name="total" required error={errors.total}>
+            <Input name="total" defaultValue={installment.total ?? ""} inputMode="decimal" placeholder="382.50" invalid={!!errors.total} />
+          </Field>
+          <Field label="Observaciones" name="notes" error={errors.notes}>
+            <Textarea name="notes" maxLength={1000} rows={2} />
+          </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
+
+export function ReopenInstallmentButton({ installment }: { installment: InstallmentRef }) {
+  return (
+    <ConfirmButton
+      title={`Reabrir la cuota ${installment.number}`}
+      message="El pago registrado quedará sin efecto y la cuota vuelve a estar pendiente. Queda anotado en auditoría."
+      confirmLabel="Reabrir"
+      action={() => reopenInstallment(installment.id)}
+      triggerLabel={<><Undo2 className="h-4 w-4" /> Reabrir</>}
+      triggerTitle="Reabrir"
+      triggerVariant="ghost"
+    />
+  );
+}
+
+export function ExtendScheduleButton({ obligationId }: { obligationId: string }) {
+  return (
+    <ConfirmButton
+      title="Extender el calendario"
+      message="Se agregan los vencimientos mensuales del próximo año, para que sigan apareciendo en el calendario de pagos."
+      confirmLabel="Agregar"
+      action={() => extendSchedule(obligationId)}
+      triggerLabel={<><CalendarPlus className="h-4 w-4" /> Extender un año</>}
+      triggerTitle="Extender el calendario"
+      triggerVariant="outline"
+      confirmVariant="primary"
+    />
+  );
+}
+
+export function ObligationStatusButton({ id, status, name }: { id: string; status: string; name: string }) {
+  const cerrar = status === "ACTIVA";
+  return (
+    <ConfirmButton
+      title={cerrar ? `Cerrar "${name}"` : `Reactivar "${name}"`}
+      message={
+        cerrar
+          ? "Deja de aparecer en el calendario de pagos. Sus cuotas pendientes se quedan como están, por si hay que consultarlas."
+          : "Vuelve a aparecer en el calendario con sus cuotas pendientes."
+      }
+      confirmLabel={cerrar ? "Cerrar" : "Reactivar"}
+      action={() => setObligationStatus(id, cerrar ? "CERRADA" : "ACTIVA")}
+      triggerLabel={cerrar ? "Cerrar" : "Reactivar"}
+      triggerTitle={cerrar ? "Cerrar" : "Reactivar"}
+      triggerVariant="ghost"
+    />
+  );
+}

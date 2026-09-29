@@ -10,7 +10,7 @@ import { PageHeader, Panel } from "@/components/ui/page-header";
 import { StockMeter } from "@/components/ui/stock-meter";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cn, first, formatDate, formatDateTime, formatMoney, formatNumber, invoiceNumber, stockStatus, todayLima, type SearchParams } from "@/lib/utils";
+import { cn, dueInfo, first, formatDate, formatDateTime, formatMoney, formatNumber, invoiceNumber, stockStatus, todayLima, type SearchParams } from "@/lib/utils";
 import { getInvoiceSummary, listPendingInvoices } from "@/server/invoice-queries";
 import { getDashboard } from "@/server/queries";
 
@@ -100,16 +100,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               tone={invoices.pendingCount > 0 ? "alert" : "default"} href="/facturas?estado=PENDIENTE"
             />
             <Stat
-              label="Reprogramadas" value={invoices.rescheduledCount} icon={AlertTriangle}
-              sub={invoices.rescheduledCount > 0 ? "Su viernes pasó sin pagarse" : "Ninguna se pasó de su viernes"}
-              tone={invoices.rescheduledCount > 0 ? "alert" : "default"} href="/facturas?reprogramadas=1"
+              label="Vencidas" value={invoices.overdueCount} icon={AlertTriangle}
+              sub={invoices.overdueCount > 0 ? `Pasaron su fecha límite · ${formatMoney(invoices.overdueAmount)}` : "Ninguna se pasó de fecha"}
+              tone={invoices.overdueCount > 0 ? "alert" : "default"} href="/facturas?vencidas=1"
             />
             <Stat
-              label="Se pagan este viernes" value={invoices.friday.count} icon={CalendarClock}
-              sub={invoices.friday.count > 0
-                ? `${formatDate(invoices.friday.date)} · ${invoices.friday.amounts.map((a) => formatMoney(a.importe, a.currency)).join(" · ")}`
-                : `Nada programado para el ${formatDate(invoices.friday.date)}`}
-              tone={invoices.friday.count > 0 ? "alert" : "default"} href="/facturas?viernes=1"
+              label="Vencen en 3 días" value={invoices.dueSoon.count} icon={CalendarClock}
+              sub={invoices.dueSoon.count > 0
+                ? invoices.dueSoon.amounts.map((a) => formatMoney(a.importe, a.currency)).join(" · ")
+                : "Nada por vencer"}
+              tone={invoices.dueSoon.count > 0 ? "alert" : "default"} href="/facturas?porvencer=1"
             />
             <Stat
               label="Correos por revisar" value={invoices.emailsToReview} icon={Mail}
@@ -127,21 +127,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
             >
               <ul className="divide-y divide-steel-100">
                 {pendingInvoices.map((i) => {
-                  const corrida = i.effectiveFriday !== i.scheduledFriday;
+                  const info = dueInfo(i.payDueDate);
+                  const urgente = info.state === "VENCIDA" || info.state === "HOY";
                   return (
                     <li key={i.id} className="flex items-center gap-3 px-4 py-3">
                       <div className="min-w-0 flex-1">
                         <Link href={`/facturas/${i.id}`} className="truncate text-sm font-medium hover:underline">
                           {invoiceNumber(i.series, i.number)} · {i.supplierName}
                         </Link>
-                        <p className="text-xs text-steel-500">
-                          Se paga el viernes {formatDate(i.effectiveFriday)}
-                          {corrida && <span className="text-red-700"> · reprogramada desde el {formatDate(i.scheduledFriday)}</span>}
+                        <p className={cn("text-xs", urgente ? "text-red-700" : "text-steel-500")}>
+                          {info.label}
+                          {i.payDueDate && ` · ${formatDate(i.payDueDate)}`}
                         </p>
                       </div>
                       <div className="shrink-0 whitespace-nowrap text-right">
-                        <p className={cn("font-display font-bold tabular", corrida && "text-red-700")}>{formatMoney(i.total, i.currency)}</p>
-                        {corrida && <p className="text-xs font-semibold text-red-700">Reprogramada</p>}
+                        <p className={cn("font-display font-bold tabular", urgente && "text-red-700")}>{formatMoney(i.total, i.currency)}</p>
                       </div>
                     </li>
                   );

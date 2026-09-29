@@ -3,15 +3,17 @@ Prueba de regresión del sistema de EPP ya existente, para confirmar que el mód
 facturas no rompió nada. Requiere el servidor en http://localhost:3000 con datos de prueba.
     PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers python3 tests/e2e-epp.py
 """
-import re, subprocess
+import os, re, subprocess
 from playwright.sync_api import sync_playwright, expect
 
 expect.set_options(timeout=15000)
 BASE = "http://localhost:3000"
 
 def ok(name): print("OK  ", name)
+DB = os.environ.get("E2E_DB", "epp")
+
 def psql(q):
-    return subprocess.check_output(["su", "postgres", "-c", f'psql -d epp -tAc "{q}"']).decode().strip()
+    return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
 def toast(page, text):
     expect(page.get_by_role("status").filter(has_text=text)
            .or_(page.get_by_role("alert").filter(has_text=text)).first).to_be_visible(timeout=10000)
@@ -29,7 +31,7 @@ def limpiar():
         "delete from users where username in ('almacen2','jalmacen')",
     ]
     for q in sentencias:
-        subprocess.run(["su", "postgres", "-c", f'psql -q -d epp -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
+        subprocess.run(["su", "postgres", "-c", f'psql -q -d {DB} -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
 
 limpiar()
 

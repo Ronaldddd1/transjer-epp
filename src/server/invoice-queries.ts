@@ -10,20 +10,21 @@ import { first, isYmd, type SearchParamsRecord } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 
-/**
- * Fecha en que llegó la factura, en horario de Lima. Es la base del calendario de pago:
- * Transjer paga los viernes, y a cada factura le toca el viernes de la semana en que llegó.
- */
+/** Fecha en que llegó la factura, en horario de Lima. Desde aquí corre el plazo de pago. */
 const reception = sql`((coalesce(${supplierInvoices.receivedAt}, ${supplierInvoices.createdAt}) at time zone 'America/Lima')::date)`;
 
-/** Viernes que le corresponde según su llegada: el primer viernes en esa fecha o después. */
-const scheduledFriday = sql`(${reception} + ((5 - extract(isodow from ${reception})::int + 7) % 7))`;
+/** Hoy en Lima. Las fechas límite se comparan siempre contra esto, no contra UTC. */
+const today = sql`((now() at time zone 'America/Lima')::date)`;
 
-/** El viernes de esta semana (o el de hoy, si hoy es viernes), en horario de Lima. */
-const thisFriday = sql`((now() at time zone 'America/Lima')::date + ((5 - extract(isodow from (now() at time zone 'America/Lima')::date)::int + 7) % 7))`;
+/**
+ * Drizzle escribe `${tabla.columna}` dentro de un sql`` crudo como `"columna"`, sin el
+ * nombre de la tabla. Dentro de una subconsulta correlacionada eso se resuelve contra la
+ * tabla interna: `a.invoice_id = ${laFactura}` comparaba el adjunto consigo
+ * mismo y el contador daba siempre cero. Hay que calificar la columna a mano.
+ */
+const laFactura = sql.raw('"supplier_invoices"."id"');
+const elProveedor = sql.raw('"suppliers"."id"');
 
-/** Viernes en que realmente se pagará: si el programado ya pasó, se corre al de esta semana. */
-const effectiveFriday = sql`greatest(${scheduledFriday}, ${thisFriday})`;
 const payer = alias(users, "payer");
 const creator = alias(users, "creator");
 
@@ -36,12 +37,14 @@ export type InvoiceFilters = {
   source?: "MANUAL" | "CORREO";
   from?: string;
   to?: string;
-  /** Solo las pendientes cuyo vencimiento ya pasó. */
+  /** Solo las pendientes cuya fecha límite de pago ya pasó. */
   overdue?: boolean;
-  /** Solo las pendientes que se pagan en la tanda de este viernes. */
-  thisFriday?: boolean;
-  /** Solo las pendientes cuyo viernes de pago ya pasó y quedaron reprogramadas. */
-  rescheduled?: boolean;
+  /** Solo las pendientes que vencen hoy o en los próximos tres días. */
+  dueSoon?: boolean;
+  /** Solo las de crédito que aún esperan la entrega física de la guía. */
+  awaitingGuide?: boolean;
+  /** Solo contado o solo crédito. */
+  paymentTerm?: "CONTADO" | "CREDITO";
 };
 
 const STATUSES: InvoiceStatus[] = ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"];
@@ -54,7 +57,9 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
   const source = first(sp.origen);
   const from = first(sp.from);
   const to = first(sp.to);
+  const paymentTerm = first(sp.condicion);
   return {
+    paymentTerm: paymentTerm === "CONTADO" || paymentTerm === "CREDITO" ? paymentTerm : undefined,
     q: first(sp.q)?.trim() || undefined,
     supplierId: first(sp.proveedor) || undefined,
     status: status && STATUSES.includes(status) ? status : undefined,
@@ -64,8 +69,8 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
     overdue: first(sp.vencidas) === "1" || undefined,
-    thisFriday: first(sp.viernes) === "1" || undefined,
-    rescheduled: first(sp.reprogramadas) === "1" || undefined,
+    dueSoon: first(sp.porvencer) === "1" || undefined,
+    awaitingGuide: first(sp.singuia) === "1" || undefined,
   };
 }
 
@@ -78,14 +83,22 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
     f.source ? eq(supplierInvoices.source, f.source) : undefined,
     f.from ? gte(supplierInvoices.issueDate, f.from) : undefined,
     f.to ? lte(supplierInvoices.issueDate, f.to) : undefined,
+    f.paymentTerm ? eq(supplierInvoices.paymentTerm, f.paymentTerm) : undefined,
     f.overdue
-      ? and(eq(supplierInvoices.status, "PENDIENTE"), sql`${supplierInvoices.dueDate} < current_date`)
+      ? and(eq(supplierInvoices.status, "PENDIENTE"), sql`${supplierInvoices.payDueDate} < ${today}`)
       : undefined,
-    f.thisFriday
-      ? and(eq(supplierInvoices.status, "PENDIENTE"), sql`${effectiveFriday} = ${thisFriday}`)
+    f.dueSoon
+      ? and(
+          eq(supplierInvoices.status, "PENDIENTE"),
+          sql`${supplierInvoices.payDueDate} between ${today} and ${today} + 3`,
+        )
       : undefined,
-    f.rescheduled
-      ? and(eq(supplierInvoices.status, "PENDIENTE"), sql`${scheduledFriday} < ${thisFriday}`)
+    f.awaitingGuide
+      ? and(
+          eq(supplierInvoices.status, "PENDIENTE"),
+          eq(supplierInvoices.paymentTerm, "CREDITO"),
+          sql`${supplierInvoices.guideReceivedAt} is null`,
+        )
       : undefined,
     f.q
       ? or(
@@ -121,6 +134,10 @@ const invoiceColumns = {
   statusReason: supplierInvoices.statusReason,
   source: supplierInvoices.source,
   receivedAt: supplierInvoices.receivedAt,
+  paymentTerm: supplierInvoices.paymentTerm,
+  termDays: supplierInvoices.termDays,
+  guideReceivedAt: supplierInvoices.guideReceivedAt,
+  payDueDate: supplierInvoices.payDueDate,
   notes: supplierInvoices.notes,
   isDemo: supplierInvoices.isDemo,
   createdAt: supplierInvoices.createdAt,
@@ -129,10 +146,8 @@ const invoiceColumns = {
   supplierName: suppliers.businessName,
   paidByName: payer.name,
   createdByName: creator.name,
-  attachmentCount: sql<number>`(select count(*)::int from ${invoiceAttachments} a where a.invoice_id = ${supplierInvoices.id})`,
+  attachmentCount: sql<number>`(select count(*)::int from ${invoiceAttachments} a where a.invoice_id = ${laFactura})`,
   receptionDate: sql<string>`${reception}::text`,
-  scheduledFriday: sql<string>`${scheduledFriday}::text`,
-  effectiveFriday: sql<string>`${effectiveFriday}::text`,
 };
 
 export async function listInvoices(f: InvoiceFilters, limit = 20, offset = 0) {
@@ -227,10 +242,12 @@ export async function listSuppliers(opts: { q?: string; active?: boolean } = {},
       phone: suppliers.phone,
       contactName: suppliers.contactName,
       notes: suppliers.notes,
+      defaultPaymentTerm: suppliers.defaultPaymentTerm,
+      defaultTermDays: suppliers.defaultTermDays,
       active: suppliers.active,
       isDemo: suppliers.isDemo,
-      invoiceCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${suppliers.id})`,
-      pendingCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${suppliers.id} and i.status = 'PENDIENTE')`,
+      invoiceCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${elProveedor})`,
+      pendingCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${elProveedor} and i.status = 'PENDIENTE')`,
     }).from(suppliers).where(where).orderBy(asc(suppliers.businessName)).limit(limit).offset(offset),
     db.select({ total: count() }).from(suppliers).where(where),
   ]);
@@ -238,8 +255,14 @@ export async function listSuppliers(opts: { q?: string; active?: boolean } = {},
 }
 
 export async function getSupplierOptions() {
-  return db.select({ id: suppliers.id, ruc: suppliers.ruc, name: suppliers.businessName, active: suppliers.active })
-    .from(suppliers).where(eq(suppliers.active, true)).orderBy(asc(suppliers.businessName));
+  return db.select({
+    id: suppliers.id,
+    ruc: suppliers.ruc,
+    name: suppliers.businessName,
+    active: suppliers.active,
+    defaultPaymentTerm: suppliers.defaultPaymentTerm,
+    defaultTermDays: suppliers.defaultTermDays,
+  }).from(suppliers).where(eq(suppliers.active, true)).orderBy(asc(suppliers.businessName));
 }
 
 // ---------- Bandeja de correos ----------
@@ -332,7 +355,8 @@ export async function listEmailAttachments(emailId: string) {
 // ---------- Resumen para el dashboard ----------
 
 export async function getInvoiceSummary() {
-  const [byStatus, [overdue], [friday], [rescheduled], toReview] = await Promise.all([
+  const pendiente = eq(supplierInvoices.status, "PENDIENTE");
+  const [byStatus, [overdue], [dueSoon], [awaiting], toReview] = await Promise.all([
     db.select({
       status: supplierInvoices.status,
       currency: supplierInvoices.currency,
@@ -340,19 +364,22 @@ export async function getInvoiceSummary() {
       importe: sql<string>`coalesce(sum(${supplierInvoices.total}), 0)::text`,
     }).from(supplierInvoices).where(ne(supplierInvoices.status, "ANULADA"))
       .groupBy(supplierInvoices.status, supplierInvoices.currency),
-    db.select({ total: count() }).from(supplierInvoices)
-      .where(and(eq(supplierInvoices.status, "PENDIENTE"), sql`${supplierInvoices.dueDate} < current_date`)),
-    // Tanda de este viernes: lo que hay que pagar esta semana.
+    // Vencidas: su fecha límite ya pasó y siguen sin pagarse.
+    db.select({
+      total: count(),
+      importe: sql<string>`coalesce(sum(${supplierInvoices.total}) filter (where ${supplierInvoices.currency} = 'PEN'), 0)::text`,
+    }).from(supplierInvoices)
+      .where(and(pendiente, sql`${supplierInvoices.payDueDate} < ${today}`)),
+    // Vencen hoy o en los próximos tres días.
     db.select({
       total: count(),
       importe: sql<string>`coalesce(sum(${supplierInvoices.total}) filter (where ${supplierInvoices.currency} = 'PEN'), 0)::text`,
       importeUsd: sql<string>`coalesce(sum(${supplierInvoices.total}) filter (where ${supplierInvoices.currency} = 'USD'), 0)::text`,
-      fecha: sql<string>`${thisFriday}::text`,
     }).from(supplierInvoices)
-      .where(and(eq(supplierInvoices.status, "PENDIENTE"), sql`${effectiveFriday} = ${thisFriday}`)),
-    // Reprogramadas: su viernes pasó sin pagarse.
+      .where(and(pendiente, sql`${supplierInvoices.payDueDate} between ${today} and ${today} + 3`)),
+    // A crédito, esperando que el proveedor entregue la guía en físico.
     db.select({ total: count() }).from(supplierInvoices)
-      .where(and(eq(supplierInvoices.status, "PENDIENTE"), sql`${scheduledFriday} < ${thisFriday}`)),
+      .where(and(pendiente, eq(supplierInvoices.paymentTerm, "CREDITO"), sql`${supplierInvoices.guideReceivedAt} is null`)),
     countEmailsToReview(),
   ]);
 
@@ -362,15 +389,15 @@ export async function getInvoiceSummary() {
     pendingCount: pendientes.reduce((s, r) => s + r.cantidad, 0),
     pendingByCurrency: pendientes.map((r) => ({ currency: r.currency, importe: r.importe })),
     overdueCount: overdue?.total ?? 0,
-    friday: {
-      date: friday?.fecha ?? null,
-      count: friday?.total ?? 0,
+    overdueAmount: overdue?.importe ?? "0",
+    dueSoon: {
+      count: dueSoon?.total ?? 0,
       amounts: [
-        { currency: "PEN", importe: friday?.importe ?? "0" },
-        { currency: "USD", importe: friday?.importeUsd ?? "0" },
+        { currency: "PEN", importe: dueSoon?.importe ?? "0" },
+        { currency: "USD", importe: dueSoon?.importeUsd ?? "0" },
       ].filter((a) => Number(a.importe) > 0),
     },
-    rescheduledCount: rescheduled?.total ?? 0,
+    awaitingGuideCount: awaiting?.total ?? 0,
     emailsToReview: toReview,
   };
 }
@@ -381,17 +408,18 @@ export async function listPendingInvoices(limit = 6) {
     id: supplierInvoices.id,
     series: supplierInvoices.series,
     number: supplierInvoices.number,
-    dueDate: supplierInvoices.dueDate,
     issueDate: supplierInvoices.issueDate,
     currency: supplierInvoices.currency,
     total: supplierInvoices.total,
     supplierName: suppliers.businessName,
-    scheduledFriday: sql<string>`${scheduledFriday}::text`,
-    effectiveFriday: sql<string>`${effectiveFriday}::text`,
+    paymentTerm: supplierInvoices.paymentTerm,
+    guideReceivedAt: supplierInvoices.guideReceivedAt,
+    payDueDate: supplierInvoices.payDueDate,
   })
     .from(supplierInvoices)
     .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
     .where(eq(supplierInvoices.status, "PENDIENTE"))
-    .orderBy(sql`${effectiveFriday} asc`, sql`${supplierInvoices.dueDate} asc nulls last`, asc(supplierInvoices.issueDate))
+    // Primero lo que vence antes; las que esperan guía no tienen fecha y van al final.
+    .orderBy(sql`${supplierInvoices.payDueDate} asc nulls last`, asc(supplierInvoices.issueDate))
     .limit(limit);
 }
