@@ -34,6 +34,9 @@ export function MovementModal({ products, type, productId, defaultOpen, trigger 
   const router = useRouter();
   const pathname = usePathname();
   const [selected, setSelected] = useState(productId ?? "");
+  // Al cerrar vuelve a su estado inicial: si no, el siguiente movimiento abre con el
+  // producto del anterior ya elegido y es fácil registrarlo sobre el que no era.
+  const limpiar = () => setSelected(productId ?? "");
   const product = products.find((p) => p.id === selected);
   const Icon = ICONS[type];
 
@@ -47,8 +50,11 @@ export function MovementModal({ products, type, productId, defaultOpen, trigger 
       }
       submitLabel={TITLES[type]}
       defaultOpen={defaultOpen}
-      onClosed={() => defaultOpen && router.replace(pathname, { scroll: false })}
       action={createMovement}
+      onClosed={() => {
+        limpiar();
+        if (defaultOpen) router.replace(pathname, { scroll: false });
+      }}
       trigger={(open) => (
         <Button variant={variant} size={trigger === "compact" ? "sm" : "md"} onClick={open} title={TITLES[type]} aria-label={trigger === "compact" ? TITLES[type] : undefined}>
           <Icon className="h-4 w-4" />

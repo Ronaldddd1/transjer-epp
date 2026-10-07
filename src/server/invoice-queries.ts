@@ -4,7 +4,7 @@ import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
-  type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
+  type DetractionStatus, type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
 } from "@/db/schema";
 import { first, isYmd, type SearchParamsRecord } from "@/lib/utils";
 
@@ -45,10 +45,15 @@ export type InvoiceFilters = {
   awaitingGuide?: boolean;
   /** Solo contado o solo crédito. */
   paymentTerm?: "CONTADO" | "CREDITO";
+  /** Estado del depósito de la detracción. */
+  detraction?: DetractionStatus;
+  /** Cliente de Transjer para el que se hizo el flete. */
+  client?: string;
 };
 
 const STATUSES: InvoiceStatus[] = ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"];
 const DOC_TYPES: InvoiceDocType[] = ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"];
+const DETRACTION_STATUSES: DetractionStatus[] = ["NO_APLICA", "PENDIENTE", "EN_PROCESO", "PAGADA", "OBSERVADA"];
 
 export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
   const status = first(sp.estado) as InvoiceStatus | undefined;
@@ -58,7 +63,10 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
   const from = first(sp.from);
   const to = first(sp.to);
   const paymentTerm = first(sp.condicion);
+  const detraction = first(sp.detraccion) as DetractionStatus | undefined;
   return {
+    detraction: detraction && DETRACTION_STATUSES.includes(detraction) ? detraction : undefined,
+    client: first(sp.cliente) || undefined,
     paymentTerm: paymentTerm === "CONTADO" || paymentTerm === "CREDITO" ? paymentTerm : undefined,
     q: first(sp.q)?.trim() || undefined,
     supplierId: first(sp.proveedor) || undefined,
@@ -84,6 +92,9 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
     f.from ? gte(supplierInvoices.issueDate, f.from) : undefined,
     f.to ? lte(supplierInvoices.issueDate, f.to) : undefined,
     f.paymentTerm ? eq(supplierInvoices.paymentTerm, f.paymentTerm) : undefined,
+    // Una factura anulada no genera depósito, así que no estorba en la lista de detracciones.
+    f.detraction ? and(eq(supplierInvoices.detractionStatus, f.detraction), ne(supplierInvoices.status, "ANULADA")) : undefined,
+    f.client ? eq(supplierInvoices.clientName, f.client) : undefined,
     f.overdue
       ? and(eq(supplierInvoices.status, "PENDIENTE"), sql`${supplierInvoices.payDueDate} < ${today}`)
       : undefined,
@@ -108,6 +119,9 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
           ilike(suppliers.ruc, like(f.q)),
           ilike(supplierInvoices.grtNumber, like(f.q)),
           ilike(supplierInvoices.description, like(f.q)),
+          ilike(supplierInvoices.plate, like(f.q)),
+          ilike(supplierInvoices.clientName, like(f.q)),
+          ilike(supplierInvoices.detractionReceipt, like(f.q)),
         )
       : undefined,
   );
@@ -134,6 +148,21 @@ const invoiceColumns = {
   statusReason: supplierInvoices.statusReason,
   source: supplierInvoices.source,
   receivedAt: supplierInvoices.receivedAt,
+  contactName: supplierInvoices.contactName,
+  plate: supplierInvoices.plate,
+  clientName: supplierInvoices.clientName,
+  originCity: supplierInvoices.originCity,
+  destinationCity: supplierInvoices.destinationCity,
+  volumeM3: supplierInvoices.volumeM3,
+  weightTn: supplierInvoices.weightTn,
+  advances: supplierInvoices.advances,
+  detractionRate: supplierInvoices.detractionRate,
+  detractionAmount: supplierInvoices.detractionAmount,
+  detractionStatus: supplierInvoices.detractionStatus,
+  detractionPaidAt: supplierInvoices.detractionPaidAt,
+  detractionReceipt: supplierInvoices.detractionReceipt,
+  detractionOperation: supplierInvoices.detractionOperation,
+  detractionNotes: supplierInvoices.detractionNotes,
   paymentTerm: supplierInvoices.paymentTerm,
   termDays: supplierInvoices.termDays,
   guideReceivedAt: supplierInvoices.guideReceivedAt,
@@ -422,4 +451,63 @@ export async function listPendingInvoices(limit = 6) {
     // Primero lo que vence antes; las que esperan guía no tienen fecha y van al final.
     .orderBy(sql`${supplierInvoices.payDueDate} asc nulls last`, asc(supplierInvoices.issueDate))
     .limit(limit);
+}
+
+// ---------- Detracciones ----------
+
+/**
+ * Resumen para quien lleva las detracciones: cuánto falta depositar y cuánto ya se depositó.
+ * Las facturas anuladas quedan fuera, y las operaciones que no llegan al umbral de S/ 400
+ * tampoco cuentan porque no generan depósito.
+ */
+export async function getDetractionSummary() {
+  const vigentes = ne(supplierInvoices.status, "ANULADA");
+  const porEstado = await db.select({
+    status: supplierInvoices.detractionStatus,
+    currency: supplierInvoices.currency,
+    cantidad: count(),
+    importe: sql<string>`coalesce(sum(${supplierInvoices.detractionAmount}), 0)::text`,
+  }).from(supplierInvoices)
+    .where(and(vigentes, ne(supplierInvoices.detractionStatus, "NO_APLICA")))
+    .groupBy(supplierInvoices.detractionStatus, supplierInvoices.currency);
+
+  const [vencidas] = await db.select({
+    total: count(),
+    importe: sql<string>`coalesce(sum(${supplierInvoices.detractionAmount}), 0)::text`,
+  }).from(supplierInvoices)
+    .where(and(
+      vigentes,
+      inArray(supplierInvoices.detractionStatus, ["PENDIENTE", "EN_PROCESO"]),
+      // El depósito se hace dentro del mes siguiente a la emisión; a partir de ahí urge.
+      sql`${supplierInvoices.issueDate} < ${today} - 30`,
+    ));
+
+  const suma = (estados: DetractionStatus[]) =>
+    porEstado.filter((r) => estados.includes(r.status))
+      .reduce((s, r) => ({ cantidad: s.cantidad + r.cantidad, importe: s.importe + Number(r.importe) }), { cantidad: 0, importe: 0 });
+
+  return {
+    porEstado,
+    pendientes: suma(["PENDIENTE", "EN_PROCESO"]),
+    pagadas: suma(["PAGADA"]),
+    observadas: suma(["OBSERVADA"]),
+    total: suma(["PENDIENTE", "EN_PROCESO", "PAGADA", "OBSERVADA"]),
+    atrasadas: { cantidad: vencidas?.total ?? 0, importe: Number(vencidas?.importe ?? 0) },
+  };
+}
+
+/** Clientes de Transjer que aparecen en las facturas, para el desplegable de filtros. */
+export async function getClientOptions() {
+  const rows = await db.selectDistinct({ name: supplierInvoices.clientName })
+    .from(supplierInvoices)
+    .where(sql`${supplierInvoices.clientName} is not null and ${supplierInvoices.clientName} <> ''`)
+    .orderBy(asc(supplierInvoices.clientName));
+  return rows.map((r) => r.name!).filter(Boolean);
+}
+
+/** Proveedores a los que todavía les falta el RUC, para avisar en la pantalla. */
+export async function countSuppliersWithoutRuc() {
+  const [row] = await db.select({ total: count() }).from(suppliers)
+    .where(and(eq(suppliers.active, true), sql`${suppliers.ruc} is null`));
+  return row?.total ?? 0;
 }

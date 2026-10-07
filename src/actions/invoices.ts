@@ -7,11 +7,11 @@ import { invoiceAttachments, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { computePayDueDate, formatDate, invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
-import { guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
+import { computePayDueDate, detractionFor, DETRACTION_STATUS_LABEL, DETRACTION_THRESHOLD, formatDate, formatMoney, invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
+import { detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
 import {
-  assertNoDuplicate, customerWarning, deleteAttachment, findDuplicate, findOrCreateSupplier,
-  insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
+  assertNoDuplicate, customerWarning, deleteAttachment, detractionFields, findDuplicate,
+  findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
 } from "@/server/invoice-service";
 import { activeDriver, maxBytesFor } from "@/server/storage";
 
@@ -73,7 +73,13 @@ export async function createInvoice(formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("invoices.manage");
     const { receivedDate, ...data } = invoiceSchema.parse(formToObject(formData));
-    const reception = receivedDate ?? todayLima();
+    // Sin esta fecha el plazo de pago se calculaba desde hoy sin decírselo a nadie: una
+    // factura que llegó la semana pasada vencía una semana tarde. El formulario la pide
+    // con asterisco, así que el servidor también la exige.
+    if (!receivedDate) {
+      throw new BusinessError("Indica cuándo llegó el correo con la factura: desde esa fecha corre el plazo de pago.");
+    }
+    const reception = receivedDate;
     const invoice = await db.transaction(async (tx) => {
       const created = await insertInvoice(tx, {
         ...data,
@@ -119,9 +125,14 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Act
       // El plazo se recalcula en cada edición: cambiar la condición, los días o la fecha
       // de llegada mueve la fecha límite, y dejarla vieja llevaría a pagar tarde.
       const reception = receivedDate ?? receptionYmd(before);
+      // Si el importe cambió, la detracción se recalcula. Pero una ya depositada no se
+      // toca: el dinero está en el Banco de la Nación y reescribir la cifra haría que el
+      // sistema dejara de cuadrar con la constancia.
+      const recalcular = before.detractionStatus !== "PAGADA" && data.total !== before.total;
       const [row] = await tx.update(supplierInvoices)
         .set({
           ...data,
+          ...(recalcular ? detractionFields(data.total, data.currency) : {}),
           ...(receivedDate ? { receivedAt: limaDayStart(receivedDate) } : {}),
           payDueDate: computePayDueDate({
             paymentTerm: data.paymentTerm,
@@ -424,4 +435,65 @@ export async function supplierOptions() {
   await requireActionUser("invoices.view");
   return db.select({ id: suppliers.id, ruc: suppliers.ruc, name: suppliers.businessName })
     .from(suppliers).where(eq(suppliers.active, true));
+}
+
+/**
+ * Registra el estado y el depósito de la detracción.
+ *
+ * Es la única acción del rol de Detracciones: quien la ejerce no registra facturas ni paga
+ * proveedores, solo da cuenta del 4 % que va al Banco de la Nación. El monto no se escribe
+ * a mano: sale del importe de la factura, que es lo que evita las diferencias de un sol que
+ * tenía el control en Excel.
+ */
+export async function setDetraction(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("detractions.manage");
+    const data = detractionSchema.parse(formToObject(formData));
+    if (data.detractionPaidAt && data.detractionPaidAt > todayLima()) {
+      throw new BusinessError("La fecha del depósito no puede ser futura.");
+    }
+
+    const before = await loadInvoice(id);
+    if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
+
+    const calculo = detractionFor(before.total, Number(before.detractionRate), before.currency);
+    if (!calculo.applies && data.detractionStatus !== "NO_APLICA") {
+      throw new BusinessError(
+        `Esta operación es de ${formatMoney(before.total, before.currency)} y no supera los S/ ${DETRACTION_THRESHOLD}, así que no se detrae.`,
+      );
+    }
+    if (calculo.applies && data.detractionStatus === "NO_APLICA") {
+      throw new BusinessError("Esta operación sí supera el umbral: la detracción no se puede marcar como no aplicable.");
+    }
+    if (data.detractionStatus === "PAGADA" && !data.detractionReceipt) {
+      throw new BusinessError("Para dar una detracción por pagada hace falta el número de constancia.");
+    }
+
+    const after = await db.transaction(async (tx) => {
+      const [row] = await tx.update(supplierInvoices).set({
+        detractionStatus: data.detractionStatus,
+        detractionAmount: calculo.amount.toFixed(2),
+        detractionPaidAt: data.detractionPaidAt,
+        detractionReceipt: data.detractionReceipt,
+        detractionOperation: data.detractionOperation,
+        detractionNotes: data.detractionNotes,
+        detractionBy: user.id,
+      }).where(eq(supplierInvoices.id, id)).returning();
+
+      await logAudit({
+        user, action: "EDITAR", module: "DETRACCIONES", recordId: id,
+        description: `${user.name} dejó la detracción de la factura ${label(row)} como ${DETRACTION_STATUS_LABEL[data.detractionStatus].toLowerCase()}`
+          + (data.detractionStatus === "PAGADA"
+            ? `: ${formatMoney(row.detractionAmount, row.currency)} depositados el ${formatDate(data.detractionPaidAt)}, constancia ${data.detractionReceipt}.`
+            : "."),
+        oldData: before, newData: row,
+      }, tx);
+      return row;
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true, message: `Detracción de ${label(after)}: ${DETRACTION_STATUS_LABEL[data.detractionStatus].toLowerCase()}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
 }

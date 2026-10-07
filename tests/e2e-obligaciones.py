@@ -15,6 +15,11 @@ PASS = os.environ.get("E2E_PASS", "Admin123!")
 DB = os.environ.get("E2E_DB", "epp")
 
 
+def psql(q):
+    """Una consulta de lectura contra la base de la prueba."""
+    return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
+
+
 def limpiar():
     """Borra lo que dejaron corridas anteriores de esta misma prueba, y solo eso."""
     for q in [
@@ -42,6 +47,13 @@ PRESTAMO = f"Préstamo BCP capital de trabajo {SELLO}"
 SERVICIO = f"Claro flota {SELLO}"
 # RUC propio de cada corrida: con uno fijo, la segunda vez el alta fallaría por duplicado.
 RUC = "20" + SELLO.rjust(9, "1")[:9]
+
+def fecha(page, campo, iso):
+    """Escribe una fecha en el campo visible, que ahora va en día/mes/año."""
+    a, m, d = iso.split("-")
+    page.fill(f"input#{campo}", f"{d}/{m}/{a}")
+    page.wait_for_timeout(120)
+
 
 def proveedor_opcion(page):
     """La opción del desplegable que corresponde al proveedor de esta corrida."""
@@ -116,8 +128,8 @@ def main():
 
         page.fill("input[name=series]", "F049")
         page.fill("input[name=number]", N_CREDITO)
-        page.fill("input[name=issueDate]", hoy.isoformat())
-        page.fill("input[name=receivedDate]", hoy.isoformat())
+        fecha(page, "issueDate", hoy.isoformat())
+        fecha(page, "receivedDate", hoy.isoformat())
         page.fill("input[name=subtotal]", "753.35")
         page.wait_for_timeout(200)
         check("el IGV se calcula solo",
@@ -135,7 +147,7 @@ def main():
               "empieza a correr recién cuando el proveedor entregue la guía" in page.content())
         page.click("button:has-text('Anotar guía')")
         entrega = hoy.isoformat()
-        page.fill("input[name=guideReceivedAt]", entrega)
+        fecha(page, "guideReceivedAt", entrega)
         enviar(page, "Guardar")
         # El aviso emergente ya trae la fecha, así que leer el contenido de inmediato podría
         # dar por buena la página vieja. Se espera a que el botón desaparezca: eso solo pasa
@@ -158,7 +170,7 @@ def main():
         check("el formulario ya anuncia la fecha límite", manana in page.content(), manana)
         page.fill("input[name=series]", "F049")
         page.fill("input[name=number]", N_CONTADO)
-        page.fill("input[name=issueDate]", hoy.isoformat())
+        fecha(page, "issueDate", hoy.isoformat())
         page.fill("input[name=total]", "500.00")
         enviar(page, "Registrar factura")
         check("la factura al contado queda registrada", f"F049-{N_CONTADO}" in page.content())
@@ -172,7 +184,7 @@ def main():
         page.fill("input[name=reference]", "100-191-0000-30000006902184")
         page.fill("input[name=principal]", "250000.00")
         page.fill("input[name=annualRate]", "16.00")
-        page.fill("input[name=disbursedAt]", "2025-01-16")
+        fecha(page, "disbursedAt", "2025-01-16")
         enviar(page, "Registrar")
         check("el préstamo queda registrado", PRESTAMO in page.content())
         check("avisa que falta el cronograma", "no tiene cronograma" in page.content() or "Sin cronograma" in page.content())
@@ -192,7 +204,7 @@ def main():
         # --- Pagar una cuota ---
         page.locator("button:has-text('Pagar')").first.click()
         page.wait_for_timeout(600)
-        page.fill("input[name=paidAt]", hoy.isoformat())
+        fecha(page, "paidAt", hoy.isoformat())
         enviar(page, "Confirmar pago")
         check("la cuota queda pagada", "1 de 4 cuotas pagadas" in page.content(), page.content()[:0])
         # El BCP imprime el saldo ANTES de la cuota; tras pagar la primera, lo que queda
@@ -220,6 +232,114 @@ def main():
         page.fill("input[name=total]", "382.50")
         enviar(page, "Guardar importe")
         check("el importe del recibo queda anotado", "382.50" in page.content())
+
+        # --- Servicio que arranca en una fecha concreta ---
+        # Antes el calendario siempre empezaba este mes: un servicio que arranca el mes que
+        # viene, o uno que viene atrasado, no se podía registrar tal cual.
+        from datetime import date as _date
+        arranque = "2027-03-20"
+        page.goto(f"{BASE}/obligaciones")
+        page.click("text=Nueva obligación")
+        page.select_option("select[name=type]", "ALQUILER")
+        page.fill("input[name=name]", f"{SERVICIO} local")
+        page.fill("input[name=creditor]", "Arrendador")
+        page.locator("input#firstDueDate").fill("20/03/2027")
+        page.wait_for_timeout(400)
+        check("el día de pago sale solo de la fecha",
+              page.input_value("input[name=billingDay]") == "20",
+              page.input_value("input[name=billingDay]"))
+        page.locator("label:has-text('El importe cambia cada mes') input[type=checkbox]").uncheck()
+        page.wait_for_timeout(300)
+        page.fill("input[name=fixedAmount]", "1800")
+        enviar(page, "Registrar")
+
+        primera = psql(f"select min(i.due_date)::text from obligation_installments i "
+                       f"join obligations o on o.id = i.obligation_id where o.name = '{SERVICIO} local'")
+        check("la primera cuota del servicio vence en la fecha indicada", primera == arranque, primera)
+        check("y no arranca este mes como antes", primera > _date.today().isoformat())
+
+        # --- Editar la fecha rehace el calendario ---
+        # El fallo era este: se guardaba la fecha nueva y los vencimientos seguían donde
+        # estaban, así que la pantalla mostraba las fechas viejas.
+        page.click(f"a:has-text('{SERVICIO} local')")
+        page.wait_for_timeout(1200)
+        page.locator("button:has-text('Editar')").first.click()
+        page.wait_for_timeout(700)
+        page.locator("input#firstDueDate").fill("31/05/2027")
+        page.wait_for_timeout(400)
+        check("el día de pago acepta el 31", page.input_value("input[name=billingDay]") == "31",
+              page.input_value("input[name=billingDay]"))
+        enviar(page, "Guardar cambios")
+
+        primera = psql(f"select min(i.due_date)::text from obligation_installments i "
+                       f"join obligations o on o.id = i.obligation_id where o.name = '{SERVICIO} local'")
+        check("al cambiar la fecha se rehacen los vencimientos", primera == "2027-05-31", primera)
+        febrero = psql(f"select count(*) from obligation_installments i "
+                       f"join obligations o on o.id = i.obligation_id "
+                       f"where o.name = '{SERVICIO} local' and i.due_date = '2028-02-29'")
+        check("el día 31 cae en el último día de febrero", febrero == "1", febrero)
+
+        # --- Vigencia ---
+        page.locator("button:has-text('Editar')").first.click()
+        page.wait_for_timeout(700)
+        page.locator("input#endsAt").fill("31/10/2027")
+        enviar(page, "Guardar cambios")
+
+        ultima = psql(f"select max(i.due_date)::text from obligation_installments i "
+                      f"join obligations o on o.id = i.obligation_id where o.name = '{SERVICIO} local'")
+        check("la vigencia corta el calendario", ultima == "2027-10-31", ultima)
+        check("la ficha muestra la vigencia", "Vigencia" in page.content())
+
+        page.locator("button:has-text('Editar')").first.click()
+        page.wait_for_timeout(700)
+        page.locator("input#endsAt").fill("01/01/2027")
+        page.locator("div.fixed.inset-0.z-50").locator("button:has-text('Guardar cambios')").last.click()
+        page.wait_for_timeout(1500)
+        check("no acepta una vigencia anterior a la primera cuota",
+              "no puede terminar antes" in page.content(), page.content()[:0])
+        page.locator("div.fixed.inset-0.z-50").locator("button:has-text('Cancelar')").last.click()
+        page.wait_for_timeout(600)
+
+        # --- Eliminar lo registrado por error ---
+        check("un servicio sin pagos ofrece eliminarse",
+              page.locator("button:has-text('Eliminar')").count() > 0)
+        page.locator("button:has-text('Eliminar')").first.click()
+        page.wait_for_timeout(500)
+        page.locator("div.fixed.inset-0.z-50").locator("button:has-text('Eliminar')").last.click()
+        page.wait_for_timeout(2000)
+        check("el servicio desaparece de la base",
+              psql(f"select count(*) from obligations where name = '{SERVICIO} local'") == "0")
+        check("y se lleva su cronograma",
+              psql("select count(*) from obligation_installments i "
+                   "left join obligations o on o.id = i.obligation_id where o.id is null") == "0")
+        check("queda constancia en auditoría",
+              int(psql("select count(*) from audit_logs where module = 'OBLIGACIONES' and action = 'ELIMINAR'")) > 0)
+
+        # --- Con pagos registrados no se borra: se anula ---
+        page.goto(f"{BASE}/obligaciones")
+        page.click(f"a:has-text('{PRESTAMO}')")
+        page.wait_for_timeout(1200)
+        check("un préstamo con cuotas pagadas no ofrece eliminar",
+              page.locator("button:has-text('Eliminar')").count() == 0)
+        check("en su lugar ofrece anular", page.locator("button:has-text('Anular')").count() > 0)
+
+        # --- El listado va partido por tipo ---
+        page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
+        cuerpo = page.content()
+        check("hay una tabla de préstamos", "Préstamos</h3>" in cuerpo or ">Préstamos<" in cuerpo, cuerpo[:0])
+        check("y otra de servicios", ">Servicios<" in cuerpo)
+        check("el plural está bien escrito", "Alquilers" not in cuerpo)
+        check("cada tabla dice cuánto falta pagar", "falta pagar" in cuerpo)
+        # Las columnas propias de cada tipo: el préstamo muestra capital y tasa, el
+        # servicio el día de pago. Antes era una sola tabla con una columna "Tipo".
+        prestamos = page.locator("section, div").filter(has_text="Crédito bancario con cronograma").last.inner_text()
+        check("la tabla de préstamos muestra capital y TEA", "Capital" in prestamos and "TEA" in prestamos, prestamos[:150])
+        check("y cuántas cuotas van pagadas", "Cuotas" in prestamos)
+        servicios = page.locator("section, div").filter(has_text="Celular, luz, agua").last.inner_text()
+        check("la tabla de servicios muestra el día de pago", "Vence cada mes" in servicios, servicios[:150])
+        check("la de servicios no habla de capital ni de TEA", "TEA" not in servicios, servicios[:150])
+        check("ya no existe la columna Tipo repetida en cada fila",
+              page.locator("th", has_text="Tipo").count() == 0)
 
         # --- Calendario unificado ---
         page.goto(f"{BASE}/calendario?dias=60")

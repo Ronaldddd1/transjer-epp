@@ -3,6 +3,7 @@ import { MovementModal } from "@/components/inventory/movement-modal";
 import { MovementBadge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -37,6 +38,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Se
           : "Historial de entradas, salidas y ajustes. Cada registro guarda el stock antes y después."}
         actions={
           <>
+            <ExportTable tabla="movimientos" />
             {canMove && <MovementModal products={products} type="ENTRADA" variant="primary" defaultOpen={openType === "ENTRADA"} productId={filteredProduct?.id} />}
             {canMove && <MovementModal products={products} type="SALIDA" defaultOpen={openType === "SALIDA"} productId={filteredProduct?.id} />}
             {canAdjust && <MovementModal products={products} type="AJUSTE" variant="ghost" defaultOpen={openType === "AJUSTE"} productId={filteredProduct?.id} />}

@@ -1,16 +1,19 @@
+import { BarChart3 } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DeliveryModal } from "@/components/deliveries/delivery-modal";
 import { VoidDeliveryModal } from "@/components/deliveries/void-delivery-modal";
 import { VoidedNote } from "@/components/ui/badge";
+import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cn, first, formatDate, pageParams, todayLima, type SearchParams } from "@/lib/utils";
-import { DELIVERY_STATE_LABEL, getEmployeeOptions, getProductOptions, listDeliveries, readFilters } from "@/server/queries";
+import { DELIVERY_STATE_LABEL, getCategoryOptions, getEmployeeOptions, getProductOptions, listDeliveries, readFilters } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Entrega de EPP" };
 
@@ -23,10 +26,11 @@ export default async function DeliveriesPage({ searchParams }: { searchParams: S
   const canVoid = can(user.role, "deliveries.void");
   const cols = canVoid ? 10 : 9;
 
-  const [{ rows, total }, employees, products] = await Promise.all([
+  const [{ rows, total }, employees, products, categories] = await Promise.all([
     listDeliveries(f, pageSize, offset),
     getEmployeeOptions(),
     getProductOptions(),
+    getCategoryOptions(),
   ]);
 
   return (
@@ -34,15 +38,24 @@ export default async function DeliveriesPage({ searchParams }: { searchParams: S
       <PageHeader
         title="Entrega de EPP"
         description="Registro de los equipos entregados a trabajadores y conductores."
-        actions={canCreate && (
-          <DeliveryModal employees={employees} products={products} today={todayLima()} userName={user.name} defaultOpen={first(sp.nuevo) === "1"} />
-        )}
+        actions={
+          <>
+            <ExportTable tabla="entregas" />
+            <ButtonLink href="/entregas/resumen" variant="outline">
+              <BarChart3 className="h-4 w-4" /> Ver resumen
+            </ButtonLink>
+            {canCreate && (
+              <DeliveryModal employees={employees} products={products} today={todayLima()} userName={user.name} defaultOpen={first(sp.nuevo) === "1"} />
+            )}
+          </>
+        }
       />
       <FilterBar
         searchPlaceholder="Buscar trabajador, DNI o EPP"
         filters={[
           { type: "select", name: "employee", label: "Trabajador", options: employees.map((e) => ({ value: e.id, label: `${e.lastName}, ${e.firstName}` })) },
           { type: "select", name: "product", label: "EPP", options: products.map((p) => ({ value: p.id, label: `${p.name}${p.size ? ` (${p.size})` : ""}` })) },
+          { type: "select", name: "category", label: "Categoría", options: categories.map((c) => ({ value: c.id, label: c.name })) },
           { type: "date", name: "from", label: "Desde" },
           { type: "date", name: "to", label: "Hasta" },
           { type: "select", name: "estado", label: "Estado", allLabel: "Todas", options: Object.entries(DELIVERY_STATE_LABEL).map(([value, label]) => ({ value, label })) },

@@ -5,6 +5,7 @@ import { PasswordModal, UserFormModal } from "@/components/admin/user-form-modal
 import { Badge } from "@/components/ui/badge";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { ROLE_LABELS } from "@/lib/permissions";
@@ -21,7 +22,7 @@ export default async function UsersPage() {
       <PageHeader
         title="Usuarios"
         description="Personas con acceso al sistema. Administrador gestiona todo; Usuario consulta y registra movimientos y entregas."
-        actions={<UserFormModal />}
+        actions={<><ExportTable tabla="usuarios" /><UserFormModal /></>}
       />
       <TableShell>
         <thead>

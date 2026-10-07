@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db, type Tx } from "@/db";
 import {
   invoiceAttachments, supplierInvoices, suppliers,
@@ -8,7 +8,7 @@ import {
 import { BusinessError } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { computePayDueDate, DEFAULT_TERM_DAYS, invoiceNumber } from "@/lib/utils";
+import { computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_RATE, invoiceNumber, normalizeSupplierName } from "@/lib/utils";
 import { putFile, removeFile, safeName } from "./storage";
 import { detectAttachmentKind, parseSunatXml, XmlParseError, type ParsedInvoice } from "./sunat-xml";
 
@@ -39,6 +39,15 @@ export type InvoiceInput = {
   guideReceivedAt?: string | null;
   /** Fecha límite ya calculada; null mientras una factura a crédito espera su guía. */
   payDueDate?: string | null;
+  // Datos del servicio de transporte
+  contactName?: string | null;
+  plate?: string | null;
+  clientName?: string | null;
+  originCity?: string | null;
+  destinationCity?: string | null;
+  volumeM3?: string | null;
+  weightTn?: string | null;
+  advances?: string | null;
 };
 
 /** Evita registrar dos veces el mismo comprobante del mismo proveedor. */
@@ -65,6 +74,19 @@ export async function assertNoDuplicate(tx: Tx | typeof db, input: Pick<InvoiceI
   }
 }
 
+/**
+ * Valores de detracción que corresponden a un importe, listos para guardar.
+ * Una operación por debajo del umbral queda en "No aplica" con monto cero, que es como
+ * figuraba en el control en Excel.
+ */
+export function detractionFields(total: string | number, currency = "PEN") {
+  const d = detractionFor(total, DETRACTION_RATE, currency);
+  return {
+    detractionAmount: d.amount.toFixed(2),
+    detractionStatus: (d.applies ? "PENDIENTE" : "NO_APLICA") as "PENDIENTE" | "NO_APLICA",
+  };
+}
+
 /** Busca el proveedor por RUC; si no existe, lo crea con los datos del comprobante. */
 export async function findOrCreateSupplier(
   tx: Tx,
@@ -73,6 +95,27 @@ export async function findOrCreateSupplier(
 ) {
   const [existing] = await tx.select().from(suppliers).where(eq(suppliers.ruc, data.ruc)).limit(1);
   if (existing) return { supplier: existing, created: false };
+
+  /**
+   * Los proveedores que vienen del control en Excel entraron sin RUC, porque esa hoja no lo
+   * anotaba. Cuando llega una factura electrónica suya, el XML sí trae el RUC: si el nombre
+   * coincide, se completa en vez de crear un duplicado. La comparación ignora mayúsculas,
+   * tildes y la forma societaria, porque en la hoja el mismo proveedor aparecía escrito de
+   * varias maneras ("Corporacion dyj Rusal sac" y "CORPORACION DYJ RUSAL SAC").
+   */
+  const sinRuc = await tx.select().from(suppliers).where(isNull(suppliers.ruc));
+  const parecido = sinRuc.find((s) => normalizeSupplierName(s.businessName) === normalizeSupplierName(data.businessName));
+  if (parecido) {
+    const [actualizado] = await tx.update(suppliers)
+      .set({ ruc: data.ruc })
+      .where(eq(suppliers.id, parecido.id)).returning();
+    await logAudit({
+      user, action: "EDITAR", module: "PROVEEDORES", recordId: parecido.id,
+      description: `Se completó el RUC ${data.ruc} de ${parecido.businessName} a partir del XML de su comprobante.`,
+      oldData: parecido, newData: actualizado,
+    }, tx);
+    return { supplier: actualizado, created: false };
+  }
 
   const [created] = await tx.insert(suppliers).values({
     ruc: data.ruc,
@@ -114,6 +157,17 @@ export async function insertInvoice(
     termDays: input.termDays ?? DEFAULT_TERM_DAYS[input.paymentTerm ?? "CONTADO"],
     guideReceivedAt: input.guideReceivedAt ?? null,
     payDueDate: input.payDueDate ?? null,
+    contactName: input.contactName ?? null,
+    plate: input.plate ?? null,
+    clientName: input.clientName ?? null,
+    originCity: input.originCity ?? null,
+    destinationCity: input.destinationCity ?? null,
+    volumeM3: input.volumeM3 ?? null,
+    weightTn: input.weightTn ?? null,
+    advances: input.advances ?? null,
+    // La detracción se calcula sola a partir del importe: 4 % del total con IGV, redondeado
+    // al sol más próximo, y "no aplica" cuando la operación no supera los S/ 400.
+    ...detractionFields(input.total, input.currency),
     createdBy: user?.id ?? null,
     isDemo: extra.isDemo ?? false,
   }).returning();

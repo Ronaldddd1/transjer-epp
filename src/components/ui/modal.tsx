@@ -25,10 +25,19 @@ export function Modal({ open, onClose, title, description, children, footer, siz
   const panelRef = useRef<HTMLDivElement>(null);
   const hydrated = useHydrated();
 
+  /**
+   * `onClose` llega como función nueva en cada render del formulario que abre el modal.
+   * Si estuviera en las dependencias del efecto, este se repetiría con cada tecla y el foco
+   * saltaría al primer campo: había que escribir número por número. Se guarda en una
+   * referencia para que el efecto solo dependa de si el modal está abierto.
+   */
+  const alCerrar = useRef(onClose);
+  alCerrar.current = onClose;
+
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && alCerrar.current();
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
     const first = panelRef.current?.querySelector<HTMLElement>("input:not([type=hidden]), select, textarea, button[data-autofocus]");
@@ -38,7 +47,7 @@ export function Modal({ open, onClose, title, description, children, footer, siz
       document.body.style.overflow = "";
       previous?.focus?.();
     };
-  }, [open, onClose, hydrated]);
+  }, [open, hydrated]);
 
   if (!open || !hydrated) return null;
 

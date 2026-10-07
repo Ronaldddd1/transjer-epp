@@ -7,6 +7,7 @@ import { Badge, DemoBadge } from "@/components/ui/badge";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -30,7 +31,7 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Se
       <PageHeader
         title="Proveedores"
         description="Empresas de transporte que emiten facturas a Transjer."
-        actions={<SupplierFormModal />}
+        actions={<><ExportTable tabla="proveedores" /><SupplierFormModal /></>}
       />
       <FilterBar
         searchPlaceholder="Buscar razón social o RUC"

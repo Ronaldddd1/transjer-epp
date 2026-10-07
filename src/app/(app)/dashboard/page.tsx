@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock, HardHat, Mail, Package, Receipt } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, Boxes, CalendarClock, HardHat, Landmark, Mail, Package, Receipt, Undo2, Wallet } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { MovementsChart } from "@/components/dashboard/movements-chart";
@@ -11,8 +11,9 @@ import { StockMeter } from "@/components/ui/stock-meter";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cn, dueInfo, first, formatDate, formatDateTime, formatMoney, formatNumber, invoiceNumber, stockStatus, todayLima, type SearchParams } from "@/lib/utils";
-import { getInvoiceSummary, listPendingInvoices } from "@/server/invoice-queries";
-import { getDashboard } from "@/server/queries";
+import { getDetractionSummary, getInvoiceSummary, listPendingInvoices } from "@/server/invoice-queries";
+import { debtByType } from "@/server/obligation-queries";
+import { getDashboard, pendingReturnsCount } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -60,10 +61,16 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const period: PeriodKey = periodParam && periodParam in PERIODS ? (periodParam as PeriodKey) : "mes";
   const showInventory = can(user.role, "products.view");
   const showInvoices = can(user.role, "invoices.view");
-  const [d, invoices, pendingInvoices] = await Promise.all([
+  const showDetractions = can(user.role, "detractions.view");
+  const showObligations = can(user.role, "obligations.view");
+  const showDeliveries = can(user.role, "deliveries.view");
+  const [d, invoices, pendingInvoices, detracciones, deuda, devoluciones] = await Promise.all([
     showInventory ? getDashboard(periodRange(period)) : null,
     showInvoices ? getInvoiceSummary() : null,
     showInvoices ? listPendingInvoices(6) : [],
+    showDetractions ? getDetractionSummary() : null,
+    showObligations ? debtByType() : null,
+    showDeliveries ? pendingReturnsCount() : null,
   ]);
   const denied = first(sp.denied) === "1";
 
@@ -89,6 +96,21 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-2.5 text-sm text-red-700">
           Tu rol no tiene acceso a esa sección.
         </p>
+      )}
+
+      {/* El EPP de un cesado se reclama al momento o no se reclama nunca, así que el aviso
+          va arriba del panel y no escondido entre las tarjetas. */}
+      {devoluciones && devoluciones.trabajadores > 0 && (
+        <Link
+          href="/devoluciones"
+          className="mb-4 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400"
+        >
+          <Undo2 className="h-5 w-5 shrink-0" aria-hidden />
+          <span>
+            <strong>{devoluciones.trabajadores} trabajador(es) cesado(s)</strong> tienen{" "}
+            {formatNumber(devoluciones.unidades)} unidad(es) de EPP sin devolver.
+          </span>
+        </Link>
       )}
 
       {showInvoices && invoices && (
@@ -118,6 +140,42 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               href={can(user.role, "invoices.manage") ? "/facturas/correos?estado=REVISAR" : undefined}
             />
           </div>
+
+          {(detracciones || deuda) && (
+            <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-4">
+              {detracciones && (
+                <>
+                  <Stat
+                    label="Detracciones por depositar" value={detracciones.pendientes.cantidad} icon={Landmark}
+                    sub={formatMoney(detracciones.pendientes.importe.toFixed(2))}
+                    tone={detracciones.pendientes.cantidad > 0 ? "alert" : "default"}
+                    href="/detracciones?detraccion=PENDIENTE"
+                  />
+                  <Stat
+                    label="Detracciones atrasadas" value={detracciones.atrasadas.cantidad} icon={AlertTriangle}
+                    sub={detracciones.atrasadas.cantidad > 0 ? `${formatMoney(detracciones.atrasadas.importe.toFixed(2))} · más de 30 días` : "Todo al día"}
+                    tone={detracciones.atrasadas.cantidad > 0 ? "alert" : "default"}
+                    href="/detracciones?detraccion=PENDIENTE"
+                  />
+                </>
+              )}
+              {deuda && (
+                <>
+                  <Stat
+                    label="Cuotas por pagar" value={deuda.total.cuotas} icon={Wallet}
+                    sub={formatMoney(deuda.total.importe.toFixed(2))}
+                    href="/obligaciones"
+                  />
+                  <Stat
+                    label="Cuotas vencidas" value={deuda.total.vencidas} icon={CalendarClock}
+                    sub={deuda.total.vencidas > 0 ? "préstamos y servicios" : "nada vencido"}
+                    tone={deuda.total.vencidas > 0 ? "alert" : "default"}
+                    href="/calendario"
+                  />
+                </>
+              )}
+            </div>
+          )}
 
           {pendingInvoices.length > 0 && (
             <Panel

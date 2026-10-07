@@ -69,6 +69,9 @@ def limpiar():
 
 limpiar()
 hoy = psql("select (now() at time zone 'America/Lima')::date::text")
+# El campo de fecha se escribe como lo ve el usuario, en día/mes/año. Rellenarlo en ISO
+# dejaba la fecha vacía sin que se notara, porque el servidor asumía hoy en silencio.
+hoy_es = "/".join(reversed(hoy.split("-")))
 manana = psql("select ((now() at time zone 'America/Lima')::date + 1)::text")
 
 os.makedirs(SHOTS, exist_ok=True)
@@ -100,7 +103,12 @@ with sync_playwright() as p:
     # La tabla pagina de 20 en 20: se compara contra lo que cabe en la primera página.
     esperadas = min(int(psql("select count(*) from supplier_invoices")), 20)
     assert filas == esperadas, f"la tabla muestra {filas} facturas y deberían verse {esperadas}"
+    # Se busca por su número: con el histórico importado, esa factura ya no cabe en la
+    # primera página y antes la prueba daba por perdido algo que sí estaba.
+    page.get_by_role("searchbox").fill("0871")
+    page.wait_for_timeout(800)
     expect(page.get_by_role("row").filter(has_text="F002-0871").get_by_text("Vencida")).to_be_visible()
+    page.goto(BASE + "/facturas")
     ok("Listado con resumen, importes por moneda y aviso de vencidas")
 
     # --- 3. Registro manual con validación
@@ -110,8 +118,8 @@ with sync_playwright() as p:
     prov = psql("select id from suppliers where ruc='20548392117'")
     m.locator("#supplierId").select_option(prov)
     m.locator("#series").fill("F001"); m.locator("#number").fill("3001")
-    m.locator("#issueDate").fill("2026-09-10"); m.locator("#dueDate").fill("2026-10-10")
-    m.locator("#receivedDate").fill(hoy)
+    m.locator("#issueDate").fill("10/09/2026"); m.locator("#dueDate").fill("10/10/2026")
+    m.locator("#receivedDate").fill(hoy_es)
     m.locator("#subtotal").fill("1000")
     expect(m.locator("#igv")).to_have_value("180.00")
     expect(m.locator("#total")).to_have_value("1180.00")
@@ -225,23 +233,25 @@ with sync_playwright() as p:
     # Los recuentos se leen de la base en vez de escribirlos a mano: así la prueba sigue
     # valiendo cuando cambian los datos de ejemplo.
     page.goto(BASE + "/facturas?estado=PAGADA")
-    pagadas = int(psql("select count(*) from supplier_invoices where status='PAGADA'"))
+    pagadas = min(int(psql("select count(*) from supplier_invoices where status='PAGADA'")), 20)
     assert page.locator("tbody tr").count() == pagadas, (page.locator("tbody tr").count(), pagadas)
-    page.goto(BASE + "/facturas?vencidas=1")
+    page.goto(BASE + "/facturas?vencidas=1&q=0871")
     expect(page.get_by_role("row").filter(has_text="F002-0871")).to_be_visible()
-    vencidas = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
-                        "and pay_due_date < (now() at time zone 'America/Lima')::date"))
+    page.goto(BASE + "/facturas?vencidas=1")
+    vencidas = min(int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
+                            "and pay_due_date < (now() at time zone 'America/Lima')::date")), 20)
     assert page.locator("tbody tr").count() == vencidas, (page.locator("tbody tr").count(), vencidas)
     page.goto(BASE + "/facturas")
     page.get_by_role("searchbox").fill("20487654321")
     expect(page).to_have_url(re.compile("q=204"))
-    delProveedor = int(psql("select count(*) from supplier_invoices i join suppliers s on s.id=i.supplier_id where s.ruc='20487654321'"))
+    delProveedor = min(int(psql("select count(*) from supplier_invoices i join suppliers s on s.id=i.supplier_id where s.ruc='20487654321'")), 20)
     expect(page.locator("tbody tr")).to_have_count(delProveedor)
     ok("Filtros por estado, vencidas y búsqueda por RUC")
 
     # --- 13. Proveedores
-    page.goto(BASE + "/proveedores")
+    page.goto(BASE + "/proveedores?q=PRUEBA+E2E")
     expect(page.get_by_role("row").filter(has_text="TRANSPORTES PRUEBA E2E")).to_be_visible()
+    page.goto(BASE + "/proveedores")
     page.get_by_role("button", name="Nuevo proveedor").click()
     m.locator("#ruc").fill("123")
     m.locator("#businessName").fill("PROVEEDOR MAL RUC")
@@ -253,6 +263,9 @@ with sync_playwright() as p:
     ok("Proveedores: alta con validación del RUC")
 
     # --- 14. No se desactiva un proveedor con facturas pendientes
+    # Con el histórico importado hay decenas de proveedores: se busca el de la prueba.
+    page.goto(BASE + "/proveedores?q=TRANSPORTES+ABC")
+    page.wait_for_timeout(600)
     fila = page.get_by_role("row").filter(has_text="TRANSPORTES ABC")
     fila.get_by_title("Desactivar").click()
     page.get_by_role("button", name="Desactivar", exact=True).last.click()

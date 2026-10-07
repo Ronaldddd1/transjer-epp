@@ -4,6 +4,7 @@ import { Pencil, UserPlus } from "lucide-react";
 import { createEmployee, updateEmployee } from "@/actions/employees";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 
 type EmployeeData = {
@@ -39,7 +40,7 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
             <Input name="dni" inputMode="numeric" maxLength={12} defaultValue={employee?.dni} invalid={!!errors.dni} />
           </Field>
           <Field label="Fecha de ingreso" name="hireDate" error={errors.hireDate}>
-            <Input name="hireDate" type="date" defaultValue={employee?.hireDate ?? ""} />
+            <DateInput name="hireDate" defaultValue={employee?.hireDate ?? ""} />
           </Field>
           <Field label="Nombres" name="firstName" required error={errors.firstName}>
             <Input name="firstName" defaultValue={employee?.firstName} invalid={!!errors.firstName} maxLength={80} />

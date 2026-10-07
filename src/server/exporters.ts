@@ -7,7 +7,8 @@ import type { Report } from "./reports";
 
 const META = (r: Report) => `Transjer Operador Logístico S.A.C. — ${r.title}`;
 
-export function toCsv(report: Report) {
+export function toCsv(entrada: Report | Report[]) {
+  const report = Array.isArray(entrada) ? entrada[0] : entrada;
   const esc = (v: string | number) => {
     const s = String(v ?? "");
     return /[",\n;]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
@@ -20,11 +21,34 @@ export function toCsv(report: Report) {
   return "\uFEFF" + lines.join("\r\n");
 }
 
-export async function toXlsx(report: Report, filtersText: string, generatedBy: string) {
+/** Un nombre de hoja válido para Excel: sin los caracteres que prohíbe y de 31 letras como mucho. */
+function nombreDeHoja(titulo: string, usados: Set<string>) {
+  const base = titulo.replace("Reporte de ", "").replace(/[\\/?*[\]:]/g, " ").trim().slice(0, 31) || "Hoja";
+  let nombre = base;
+  let n = 2;
+  while (usados.has(nombre)) nombre = `${base.slice(0, 28)} ${n++}`;
+  usados.add(nombre);
+  return nombre;
+}
+
+/**
+ * Excel con una hoja por tabla.
+ *
+ * Varias pantallas muestran más de una tabla a la vez —el resumen de EPP trae una por
+ * producto y otra por trabajador— y separarlas en dos archivos obligaría a cruzarlas a mano.
+ */
+export async function toXlsx(report: Report | Report[], filtersText: string, generatedBy: string) {
+  const reports = Array.isArray(report) ? report : [report];
   const wb = new ExcelJS.Workbook();
   wb.creator = "Transjer Gestión";
   wb.created = new Date();
-  const ws = wb.addWorksheet(report.title.replace("Reporte de ", "").slice(0, 31), { views: [{ state: "frozen", ySplit: 5 }] });
+  const usados = new Set<string>();
+  for (const r of reports) hoja(wb, r, filtersText, generatedBy, usados);
+  return Buffer.from(await wb.xlsx.writeBuffer());
+}
+
+function hoja(wb: ExcelJS.Workbook, report: Report, filtersText: string, generatedBy: string, usados: Set<string>) {
+  const ws = wb.addWorksheet(nombreDeHoja(report.title, usados), { views: [{ state: "frozen", ySplit: 5 }] });
   const lastCol = report.columns.length;
 
   ws.mergeCells(1, 1, 1, lastCol);
@@ -57,12 +81,14 @@ export async function toXlsx(report: Report, filtersText: string, generatedBy: s
       cell.border = { bottom: { style: "hair", color: { argb: "FFE1E1E5" } } };
     });
   });
-  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5 + report.rows.length, column: lastCol } };
-
-  return Buffer.from(await wb.xlsx.writeBuffer());
+  // El autofiltro necesita al menos la fila de encabezados; con la tabla vacía Excel se queja.
+  if (report.rows.length > 0) {
+    ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5 + report.rows.length, column: lastCol } };
+  }
 }
 
-export function toPdf(report: Report, filtersText: string, generatedBy: string) {
+export function toPdf(entrada: Report | Report[], filtersText: string, generatedBy: string) {
+  const report = Array.isArray(entrada) ? entrada[0] : entrada;
   const doc = new jsPDF({ orientation: report.columns.length > 8 ? "landscape" : "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
 

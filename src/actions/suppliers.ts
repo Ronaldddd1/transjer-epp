@@ -9,7 +9,9 @@ import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { supplierSchema } from "@/lib/validations";
 
-async function assertUniqueRuc(ruc: string, exceptId?: string) {
+async function assertUniqueRuc(ruc: string | null, exceptId?: string) {
+  // Sin RUC no hay nada que comprobar: varios proveedores pueden estar pendientes de él.
+  if (!ruc) return;
   const conditions = [eq(suppliers.ruc, ruc)];
   if (exceptId) conditions.push(ne(suppliers.id, exceptId));
   const [dup] = await db.select({ id: suppliers.id, name: suppliers.businessName }).from(suppliers).where(and(...conditions));
@@ -24,7 +26,7 @@ export async function createSupplier(formData: FormData): Promise<ActionResult> 
     const [row] = await db.insert(suppliers).values(data).returning();
     await logAudit({
       user, action: "CREAR", module: "PROVEEDORES", recordId: row.id,
-      description: `${user.name} registró al proveedor ${row.businessName} (RUC ${row.ruc}).`, newData: row,
+      description: `${user.name} registró al proveedor ${row.businessName}${row.ruc ? ` (RUC ${row.ruc})` : " (sin RUC todavía)"}.`, newData: row,
     });
     revalidatePath("/", "layout");
     return { ok: true, message: "Proveedor registrado correctamente." };

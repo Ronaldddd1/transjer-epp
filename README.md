@@ -23,7 +23,10 @@ Sistema web con dos áreas de trabajo:
 10. [Actualizar el sistema](#10-actualizar-el-sistema)
 11. [Facturas de proveedores](#11-facturas-de-proveedores)
 12. [Lectura automática del correo](#12-lectura-automática-del-correo)
+11b. [Datos del servicio y detracciones](#11b-datos-del-servicio-y-detracciones)
+11c. [Resumen de EPP entregados](#11c-resumen-de-epp-entregados)
 12b. [Préstamos y servicios](#12b-préstamos-y-servicios)
+12c. [Exportar a Excel](#12c-exportar-a-excel)
 13. [Roles y permisos](#13-roles-y-permisos)
 14. [Reglas de negocio](#14-reglas-de-negocio)
 15. [Estructura del proyecto](#15-estructura-del-proyecto)
@@ -340,6 +343,62 @@ En *Configuración → Proveedores* se gestionan las empresas que facturan. El R
 
 ---
 
+## 11b. Datos del servicio y detracciones
+
+Cada factura puede guardar, además del comprobante, **los datos del flete**: cliente, placa,
+contacto, origen, destino, volumen, peso y los adelantos entregados al transportista. Es lo
+que se controlaba en la hoja de cálculo y lo que permite saber después qué viaje se está
+pagando. Todo es opcional y está en el bloque *Datos del servicio de transporte* del
+formulario.
+
+### La detracción del 4 %
+
+El sistema la calcula solo, y por eso conviene entender la regla:
+
+- Se aplica el **4 % sobre el importe total con IGV**, no sobre la base.
+- Solo cuando la operación **supera los S/ 400**. Por debajo figura como *No aplica*, igual
+  que en la hoja de cálculo, donde esas filas decían "N/A".
+- El depósito se hace **sin decimales**, redondeando al sol más próximo: si la fracción llega
+  a 0.5 sube, y si no, se suprime (R.S. 183-2004/SUNAT, quinta disposición final).
+- Solo se calcula sobre facturas **en soles**. El depósito en el Banco de la Nación se hace en
+  soles, así que una factura en dólares queda como *No aplica* y se trata a mano.
+
+Ejemplo: una factura de S/ 4,838 detrae **S/ 194** (193.52 redondeado) y al proveedor se le
+pagan S/ 4,644.
+
+> **Esto corrige un error que venía de la hoja.** Allí el monto se escribía a mano y por eso
+> no seguía ninguna regla: de 154 filas, 99 estaban redondeadas hacia arriba, 30 hacia abajo y
+> solo 25 cuadraban. Dos facturas idénticas de S/ 4,956 figuraban con 198 y con 199.
+
+### La pantalla de detracciones
+
+En *Proveedores → Detracciones* está el trabajo de quien deposita: arriba, cuánto falta
+depositar y cuánto ya se depositó; en la lista, cada factura con su monto. Por defecto solo
+se ven las pendientes, que es la tarea del día, y hay un aviso rojo cuando alguna lleva más
+de 30 días desde la emisión sin depositarse.
+
+Al registrar un depósito se pide el **número de constancia** del Banco de la Nación; sin él,
+una detracción no se puede dar por pagada. El monto nunca se escribe: sale del importe de la
+factura.
+
+### El rol de Detracciones
+
+Existe un rol propio para esta tarea. Quien lo tiene **ve las facturas y gestiona los
+depósitos, y nada más**: no registra facturas, no paga proveedores, no entra al almacén ni a
+la configuración. Su menú lateral muestra solo lo suyo.
+
+## 11c. Resumen de EPP entregados
+
+En *Almacén → Resumen de EPP* se ve de un vistazo cuánto salió de cada EPP y quién lo
+recibió, sin entrar trabajador por trabajador. Trae dos tablas —por tipo de EPP, con el stock
+actual al lado, y por trabajador— y totales arriba, todo con los mismos filtros del listado
+(trabajador, EPP, categoría y rango de fechas), así que los números siempre cuadran con lo
+que se está viendo.
+
+Las entregas anuladas no se cuentan: devolvieron su stock, y sumarlas mostraría unidades que
+nunca salieron del almacén. El listado de entregas una por una y el historial de cada
+trabajador siguen igual que antes.
+
 ## 12. Lectura automática del correo
 
 Cuando está activada, cada factura que llega a `facturas@transjer.com` se registra sola y aparece en *Facturas* como pendiente de pago. La encargada solo revisa y marca el pago.
@@ -442,33 +501,74 @@ Las cuotas sin importe aparecen como *falta el recibo*, no se suman a los totale
 
 Junta en una sola lista, ordenada por fecha, **las facturas de proveedores y las cuotas de préstamos y servicios**. Es la vista que responde "cuánto tiene que salir de caja esta semana". Muestra primero lo vencido sin pagar, luego cada día con su total, y suma por separado cada moneda que aparezca.
 
+## 12c. Exportar a Excel
+
+Toda tabla del sistema se puede bajar. El botón **Exportar** está arriba a la derecha de cada
+pantalla y ofrece tres formatos: **Excel** (.xlsx, para seguir trabajando con los datos),
+**CSV** y **PDF**.
+
+Lo que se descarga es **lo que se está viendo**: el archivo arrastra los filtros de la
+pantalla, así que si la lista está filtrada por proveedor y por fechas, el Excel trae esas
+filas y no la tabla entera. La paginación no cuenta: aunque en pantalla se vean 20 filas, el
+archivo trae todas las que pasan el filtro.
+
+Cada Excel lleva arriba el nombre de la empresa, los filtros que se aplicaron, quién lo generó
+y cuándo, y un resumen con los totales. Los importes van como números, no como texto, así que
+se pueden sumar en la hoja. Las pantallas con más de una tabla —el resumen de EPP— salen con
+**una hoja por tabla** en el mismo archivo.
+
+Tablas que se pueden exportar:
+
+| Pantalla | Qué trae |
+|---|---|
+| Inventario | Stock de cada EPP con su estado |
+| Movimientos | Entradas, salidas y ajustes con el stock antes y después |
+| Entrega de EPP | Cada entrega con su trabajador, motivo y responsable |
+| Resumen de EPP | Dos hojas: por tipo de EPP y por trabajador |
+| Trabajadores | Datos y entregas recibidas |
+| Facturas | Comprobante, servicio de transporte, importes, detracción y pago |
+| Detracciones | Monto, estado, constancia y número de operación |
+| Proveedores | Datos, condición pactada y facturas pendientes |
+| Buzón de correo | Qué llegó y qué pasó con cada correo |
+| Préstamos y servicios | Avance, saldo y lo que falta pagar |
+| Cronograma | Las cuotas de un préstamo, con capital, interés y saldo |
+| Calendario de pagos | Facturas y cuotas juntas, ordenadas por fecha |
+| Categorías | Con cuántos productos tiene cada una |
+| Usuarios | Nombre, rol y estado. Las contraseñas no salen nunca |
+| Auditoría | Quién hizo cada cambio y cuándo |
+
+Cada tabla exige el permiso de su módulo: la encargada de detracciones puede bajarse su lista,
+pero si intenta la de trabajadores el sistema se lo niega.
+
 ## 13. Roles y permisos
 
-| Acción | Administrador | Jefe de almacén | Usuario | Finanzas |
-|---|:---:|:---:|:---:|:---:|
-| Ver dashboard, inventario, movimientos, entregas y trabajadores | ✅ | ✅ | ✅ | — |
-| Registrar entregas de EPP | ✅ | ✅ | ✅ | — |
-| Registrar entradas y salidas | ✅ | ✅ | ✅ | — |
-| Registrar ajustes de inventario | ✅ | ✅ | — | — |
-| Anular entregas | ✅ | ✅ | — | — |
-| Crear, editar y eliminar productos | ✅ | ✅ | — | — |
-| Gestionar trabajadores | ✅ | ✅ | — | — |
-| Gestionar categorías | ✅ | ✅ | — | — |
-| Gestionar usuarios | ✅ | — | — | — |
-| Ver auditoría | ✅ | — | — | — |
-| Ver y exportar reportes | ✅ | ✅ | — | ✅ |
-| Ver facturas de proveedores | ✅ | — | — | ✅ |
-| Registrar y editar facturas | ✅ | — | — | ✅ |
-| Marcar pagos | ✅ | — | — | ✅ |
-| Gestionar proveedores | ✅ | — | — | ✅ |
-| Ver préstamos y servicios | ✅ | — | — | ✅ |
-| Registrar préstamos, servicios y cronogramas | ✅ | — | — | ✅ |
-| Marcar el pago de una cuota | ✅ | — | — | ✅ |
-| Configurar la lectura del correo | ✅ | — | — | — |
+| Acción | Administrador | Jefe de almacén | Usuario | Finanzas | Detracciones |
+|---|:---:|:---:|:---:|:---:|:---:|
+| Ver dashboard, inventario, movimientos, entregas y trabajadores | ✅ | ✅ | ✅ | — | — |
+| Registrar entregas de EPP | ✅ | ✅ | ✅ | — | — |
+| Registrar entradas y salidas | ✅ | ✅ | ✅ | — | — |
+| Registrar ajustes de inventario | ✅ | ✅ | — | — | — |
+| Anular entregas | ✅ | ✅ | — | — | — |
+| Crear, editar y eliminar productos | ✅ | ✅ | — | — | — |
+| Gestionar trabajadores | ✅ | ✅ | — | — | — |
+| Gestionar categorías | ✅ | ✅ | — | — | — |
+| Gestionar usuarios | ✅ | — | — | — | — |
+| Ver auditoría | ✅ | — | — | — | — |
+| Ver y exportar reportes | ✅ | ✅ | — | ✅ | — |
+| Ver facturas de proveedores | ✅ | — | — | ✅ | ✅ |
+| Registrar y editar facturas | ✅ | — | — | ✅ | — |
+| Marcar pagos | ✅ | — | — | ✅ | — |
+| Gestionar proveedores | ✅ | — | — | ✅ | — |
+| Ver y registrar detracciones | ✅ | — | — | ✅ | ✅ |
+| Ver préstamos y servicios | ✅ | — | — | ✅ | — |
+| Registrar préstamos, servicios y cronogramas | ✅ | — | — | ✅ | — |
+| Marcar el pago de una cuota | ✅ | — | — | ✅ | — |
+| Configurar la lectura del correo | ✅ | — | — | — | — |
 
 - **Jefe de almacén**: manda en todo el módulo de EPP (productos, categorías, trabajadores, ajustes y anulaciones), pero no ve facturas, usuarios ni auditoría.
 - **Usuario**: el día a día del almacén — consulta, movimientos y entregas.
 - **Finanzas**: la encargada de pagos. Gestiona las facturas, los préstamos y los servicios, y no entra al almacén.
+- **Detracciones**: solo los depósitos del 4 % al Banco de la Nación. Ve las facturas para saber sobre qué deposita, y nada más.
 
 Al elegir un rol en *Nuevo usuario*, el sistema explica en pantalla qué puede hacer.
 
@@ -491,6 +591,7 @@ Los permisos se validan **en el servidor** en cada página, acción y exportaci�
 - **Estados de stock**: *Disponible* (por encima del mínimo), *⚠️ Stock bajo* (igual o por debajo del mínimo) y *🔴 Agotado* (cero).
 - **Auditoría**: cada creación, edición, eliminación, movimiento e inicio de sesión queda registrado con el usuario, la fecha, la acción y los datos anteriores y nuevos. Las contraseñas nunca se guardan en la auditoría.
 - **Zona horaria**: todas las fechas se muestran en hora de Lima (UTC−5).
+- **Las fechas se escriben en día/mes/año**, siempre, sin depender del idioma del navegador. Se teclean los números seguidos y las barras se ponen solas; el calendario sigue disponible en el icono de la derecha. Una fecha que no existe (31 de abril, 29 de febrero de un año no bisiesto) se rechaza en el momento.
 
 Y en las facturas de proveedores:
 
@@ -514,13 +615,15 @@ Y en los préstamos y servicios:
 
 ```
 drizzle/                 Migraciones SQL
-scripts/                 migrate, seed, clear-demo, create-admin
+scripts/                 migrate, seed, clear-demo, create-admin, import-facturas
+datos/                   facturas-historico.csv (el control en Excel, ya exportado)
 src/
   app/
     login/               Inicio de sesión
     (app)/               Páginas protegidas: dashboard, inventario, movimientos,
                          entregas, trabajadores, categorías, usuarios, auditoría, reportes,
-                         facturas, facturas/correos, proveedores, obligaciones, calendario
+                         facturas, facturas/correos, proveedores, detracciones,
+                         obligaciones, calendario, entregas/resumen
     api/export/          Descarga de reportes (Excel, CSV, PDF)
     api/facturas/        Descarga de los archivos adjuntos de las facturas
     api/correo/graph/    Aviso instantáneo de Microsoft 365 (webhook)
@@ -559,7 +662,7 @@ Todo se usa desde `src/components/layout/brand.tsx`. Si la empresa cambia el log
 ## 16. Pruebas
 
 ```bash
-npm test          # XML de SUNAT, plazos de pago, cronogramas de préstamos y correos
+npm test          # XML de SUNAT, plazos, fechas, detracciones, cronogramas y correos
 ```
 
 Las pruebas de interfaz usan Playwright contra el sistema en marcha:
@@ -569,6 +672,8 @@ npm run build && npm start          # en otra terminal
 python3 tests/e2e-epp.py            # almacén: inventario, movimientos, entregas, permisos
 python3 tests/e2e-facturas.py       # facturas: registro, pagos, plazos, correos, permisos, móvil
 python3 tests/e2e-obligaciones.py   # plazos de contado y crédito, préstamos, servicios y calendario
+python3 tests/e2e-detracciones.py   # fechas, resumen de EPP, servicio de transporte, detracciones y menú
+python3 tests/e2e-exportar.py       # que cada tabla se baje en Excel y el archivo cuadre con la base
 ```
 
 Si tu base no se llama `epp`, pásaselo: `E2E_DB=mibase python3 tests/e2e-facturas.py`.

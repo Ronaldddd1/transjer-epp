@@ -1,21 +1,23 @@
-import { AlertTriangle, CalendarClock, FileClock, Mail } from "lucide-react";
+import { AlertTriangle, Building2, CalendarClock, FileClock, Mail } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
+import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
-import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
+import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_STATUS_LABEL,
-  invoiceNumber, pageParams, PAYMENT_TERM_LABEL, todayLima, type SearchParams,
+  DETRACTION_STATUS_LABEL, invoiceNumber, pageParams, PAYMENT_TERM_LABEL, todayLima, type SearchParams,
 } from "@/lib/utils";
-import { countEmailsToReview, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
+import { countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Facturas de proveedores" };
@@ -27,14 +29,16 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const f = readInvoiceFilters(sp);
   const canManage = can(user.role, "invoices.manage");
   const canPay = can(user.role, "invoices.pay");
-  const cols = canManage || canPay ? 9 : 8;
+  const cols = canManage || canPay ? 10 : 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, suppliers, emailsToReview] = await Promise.all([
+  const [{ rows, total }, totals, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
     listInvoices(f, pageSize, offset),
     invoiceTotals(f),
     getSupplierOptions(),
+    getClientOptions(),
     countEmailsToReview(),
+    canManage ? countSuppliersWithoutRuc() : Promise.resolve(0),
   ]);
 
   // Resumen de lo que se está viendo, separado por moneda.
@@ -61,16 +65,22 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
       <PageHeader
         title="Facturas de proveedores"
         description="Facturas recibidas por servicios de transporte. Marca aquí los pagos realizados."
-        actions={canManage && (
+        actions={
           <>
-            <ButtonLink href="/facturas/correos" variant="ghost">
-              <Mail className="h-4 w-4" /> Correos
-              {emailsToReview > 0 && <span className="ml-1 rounded bg-brand px-1.5 text-xs font-bold text-ink">{emailsToReview}</span>}
-            </ButtonLink>
-            <ImportInvoiceModal maxMb={maxMb} />
-            <InvoiceFormModal suppliers={suppliers} />
+            <ExportTable tabla="facturas" />
+            {canManage && (
+              <>
+                <ButtonLink href="/facturas/correos" variant="ghost">
+                  <Mail className="h-4 w-4" /> Correos
+                  {emailsToReview > 0 && <span className="ml-1 rounded bg-brand px-1.5 text-xs font-bold text-ink">{emailsToReview}</span>}
+                </ButtonLink>
+                <ImportInvoiceModal maxMb={maxMb} />
+                <ImportSheetModal />
+                <InvoiceFormModal suppliers={suppliers} clients={clients} />
+              </>
+            )}
           </>
-        )}
+        }
       />
 
       {emailsToReview > 0 && canManage && (
@@ -81,6 +91,19 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           <Mail className="h-5 w-5 shrink-0" aria-hidden />
           <span>
             <strong>{emailsToReview} correo(s)</strong> llegaron al buzón y no se pudieron registrar solos. Revísalos para no perder ninguna factura.
+          </span>
+        </Link>
+      )}
+
+      {sinRuc > 0 && (
+        <Link
+          href="/proveedores"
+          className="mb-4 flex items-center gap-3 rounded-lg border border-steel-300 bg-steel-50 px-4 py-3 text-sm text-steel-700 hover:border-steel-400"
+        >
+          <Building2 className="h-5 w-5 shrink-0 text-steel-400" aria-hidden />
+          <span>
+            <strong>{sinRuc} proveedor(es)</strong> todavía no tienen RUC. Se completa solo cuando llegue
+            una factura suya con el XML, o puedes escribirlo a mano desde Proveedores.
           </span>
         </Link>
       )}
@@ -123,6 +146,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           { type: "select", name: "estado", label: "Estado", allLabel: "Todos", options: Object.entries(INVOICE_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "proveedor", label: "Proveedor", options: suppliers.map((s) => ({ value: s.id, label: s.name })) },
           { type: "select", name: "tipo", label: "Tipo", allLabel: "Todos", options: Object.entries(INVOICE_DOC_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
+          { type: "select", name: "cliente", label: "Cliente", options: clients.map((c) => ({ value: c, label: c })) },
+          { type: "select", name: "detraccion", label: "Detracción", allLabel: "Todas", options: Object.entries(DETRACTION_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "condicion", label: "Condición", allLabel: "Todas", options: Object.entries(PAYMENT_TERM_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "moneda", label: "Moneda", allLabel: "Todas", options: [{ value: "PEN", label: "Soles" }, { value: "USD", label: "Dólares" }] },
           { type: "select", name: "origen", label: "Origen", allLabel: "Todos", options: [{ value: "MANUAL", label: "Registro manual" }, { value: "CORREO", label: "Correo" }] },
@@ -140,6 +165,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             <Th>Vence</Th>
             <Th className="text-right">Importe</Th>
             <Th>Estado</Th>
+            <Th className="hidden 2xl:table-cell">Detracción</Th>
             <Th className="hidden 2xl:table-cell">Guía</Th>
             <Th className="hidden 2xl:table-cell">Pago</Th>
             {(canManage || canPay) && <Th className="text-right">Acciones</Th>}
@@ -167,7 +193,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                 </Td>
                 <Td>
                   <p className="font-medium">{i.supplierName}</p>
-                  <p className="text-xs text-steel-500">RUC {i.supplierRuc}</p>
+                  <p className="text-xs text-steel-500">{i.supplierRuc ? `RUC ${i.supplierRuc}` : "RUC pendiente"}</p>
+                  {(i.clientName || i.plate) && (
+                    <p className="text-xs text-steel-500">
+                      {[i.clientName, i.plate, i.destinationCity].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
                 </Td>
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 2xl:table-cell">{formatDate(i.issueDate)}</Td>
                 <Td>
@@ -187,6 +218,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                   <InvoiceStatusBadge status={i.status} dueDate={i.payDueDate} />
                   {i.statusReason && i.status !== "PAGADA" && (
                     <p className="mt-1 line-clamp-2 w-40 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
+                  )}
+                </Td>
+                <Td className="hidden 2xl:table-cell">
+                  <DetractionBadge status={i.detractionStatus} />
+                  {i.detractionStatus !== "NO_APLICA" && (
+                    <p className="mt-1 whitespace-nowrap text-xs text-steel-500">{formatMoney(i.detractionAmount, i.currency)}</p>
                   )}
                 </Td>
                 <Td className="hidden whitespace-nowrap text-steel-600 2xl:table-cell">{i.grtNumber ?? "—"}</Td>

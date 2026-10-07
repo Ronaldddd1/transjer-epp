@@ -1,13 +1,15 @@
 "use client";
 
 import { FilePlus2, RefreshCw, XCircle } from "lucide-react";
+import { useState } from "react";
 import { createInvoiceFromEmail, discardEmail, retryEmail } from "@/actions/mailbox";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { SupplierOption } from "@/components/invoices/invoice-form-modal";
-import { INVOICE_DOC_TYPE_LABEL, todayLima } from "@/lib/utils";
+import { DEFAULT_TERM_DAYS, INVOICE_DOC_TYPE_LABEL, todayLima, type PaymentTermKey } from "@/lib/utils";
 
 export function RetryEmailButton({ id, subject }: { id: string; subject: string }) {
   return (
@@ -51,8 +53,29 @@ export function DiscardEmailModal({ id, subject }: { id: string; subject: string
   );
 }
 
-/** Registro manual de una factura cuyo correo no traía el XML legible. */
+/**
+ * Registro manual de una factura cuyo correo no traía el XML legible.
+ *
+ * Lleva la condición de pago igual que el alta normal. Faltaba, y como el servidor sí la
+ * exige, el formulario devolvía «revisa los campos marcados» sin marcar ninguno: no había
+ * forma de registrar una factura desde el buzón.
+ */
 export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId: string; subject: string; suppliers: SupplierOption[] }) {
+  const [term, setTerm] = useState<PaymentTermKey>("CONTADO");
+  const [termDays, setTermDays] = useState(String(DEFAULT_TERM_DAYS.CONTADO));
+
+  const onSupplier = (id: string) => {
+    const s = suppliers.find((x) => x.id === id);
+    if (!s) return;
+    setTerm(s.defaultPaymentTerm);
+    setTermDays(String(s.defaultTermDays));
+  };
+
+  const onTerm = (value: PaymentTermKey) => {
+    setTerm(value);
+    setTermDays(String(DEFAULT_TERM_DAYS[value]));
+  };
+
   return (
     <FormModal
       title="Registrar factura del correo"
@@ -70,7 +93,7 @@ export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId
         <div className="grid gap-4 sm:grid-cols-6">
           <p className="text-sm text-steel-600 sm:col-span-6">Correo: <strong className="text-ink">{subject}</strong></p>
           <Field label="Proveedor" name="supplierId" required error={errors.supplierId} className="sm:col-span-6">
-            <Select name="supplierId" defaultValue="" invalid={!!errors.supplierId}>
+            <Select name="supplierId" defaultValue="" onChange={(e) => onSupplier(e.target.value)} invalid={!!errors.supplierId}>
               <option value="" disabled>Selecciona un proveedor…</option>
               {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name} — RUC {s.ruc}</option>)}
             </Select>
@@ -87,10 +110,10 @@ export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId
             <Input name="number" maxLength={12} inputMode="numeric" placeholder="2589" invalid={!!errors.number} />
           </Field>
           <Field label="Fecha de emisión" name="issueDate" required error={errors.issueDate} className="sm:col-span-2">
-            <Input name="issueDate" type="date" defaultValue={todayLima()} invalid={!!errors.issueDate} />
+            <DateInput name="issueDate" defaultValue={todayLima()} required invalid={!!errors.issueDate} />
           </Field>
           <Field label="Vencimiento" name="dueDate" error={errors.dueDate} className="sm:col-span-2">
-            <Input name="dueDate" type="date" invalid={!!errors.dueDate} />
+            <DateInput name="dueDate" invalid={!!errors.dueDate} />
           </Field>
           <Field label="Moneda" name="currency" required error={errors.currency} className="sm:col-span-2">
             <Select name="currency" defaultValue="PEN">
@@ -103,6 +126,22 @@ export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId
           </Field>
           <Field label="Guía de remisión (GRT)" name="grtNumber" error={errors.grtNumber} className="sm:col-span-3">
             <Input name="grtNumber" maxLength={40} />
+          </Field>
+          <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm} className="sm:col-span-3">
+            <Select name="paymentTerm" value={term} onChange={(e) => onTerm(e.target.value as PaymentTermKey)}>
+              <option value="CONTADO">Contado</option>
+              <option value="CREDITO">Crédito</option>
+            </Select>
+          </Field>
+          <Field
+            label="Días de plazo"
+            name="termDays"
+            required
+            error={errors.termDays}
+            hint={term === "CONTADO" ? "Desde que llegó el correo." : "Desde que llegue la guía en físico."}
+            className="sm:col-span-3"
+          >
+            <Input name="termDays" value={termDays} onChange={(e) => setTermDays(e.target.value)} inputMode="numeric" maxLength={3} invalid={!!errors.termDays} />
           </Field>
           <Field label="Concepto del servicio" name="description" error={errors.description} className="sm:col-span-6">
             <Input name="description" maxLength={250} placeholder="Servicio de transporte Lima - Trujillo" />

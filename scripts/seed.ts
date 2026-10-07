@@ -10,7 +10,7 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
 import * as schema from "../src/db/schema";
-import { computePayDueDate } from "../src/lib/utils";
+import { computePayDueDate, detractionFor } from "../src/lib/utils";
 
 const { users, categories, products, employees, inventoryMovements, eppDeliveries, auditLogs, suppliers, supplierInvoices } = schema;
 
@@ -134,14 +134,20 @@ async function main() {
     ["20601234567", "LOGISTICA DEL NORTE E.I.R.L.", "admin@lognorte.pe"],
     ["20487654321", "CARGA SEGURA PERU S.A.C.", "ventas@cargasegura.pe"],
   ];
-  const createdSuppliers = await db.insert(suppliers).values(
-    // El tercer proveedor trabaja a crédito: sus facturas esperan la guía en físico.
-    demoSuppliers.map(([ruc, businessName, email], i) => ({
+  // Si un proveedor de ejemplo ya existe —porque quedó de una corrida anterior con facturas
+  // reales colgando— se reutiliza en vez de fallar: el seed es una comodidad, no debe frenar.
+  const createdSuppliers: (typeof suppliers.$inferSelect)[] = [];
+  for (const [i, [ruc, businessName, email]] of demoSuppliers.entries()) {
+    const [existente] = await db.select().from(suppliers).where(eq(suppliers.ruc, ruc)).limit(1);
+    if (existente) { createdSuppliers.push(existente); continue; }
+    const [nuevo] = await db.insert(suppliers).values({
       ruc, businessName, email, isDemo: true,
+      // El tercer proveedor trabaja a crédito: sus facturas esperan la guía en físico.
       defaultPaymentTerm: (i === 2 ? "CREDITO" : "CONTADO") as "CONTADO" | "CREDITO",
       defaultTermDays: i === 2 ? 7 : 1,
-    })),
-  ).returning();
+    }).returning();
+    createdSuppliers.push(nuevo);
+  }
 
   // Mezcla de estados y condiciones para ver el flujo completo: al contado y a crédito,
   // con y sin guía entregada, vencidas, pagadas y observadas.
@@ -173,6 +179,8 @@ async function main() {
     const subtotal = 850 + idx * 137.5;
     const igv = subtotal * 0.18;
     const termDays = condicion === "CONTADO" ? 1 : 7;
+    const moneda = idx === 3 ? "USD" : "PEN";
+    const detraccion = detractionFor((subtotal + igv).toFixed(2), undefined, moneda);
     const guia = diasGuia === null ? null : ymd(daysAgo(diasGuia));
     return {
       supplierId: createdSuppliers[si].id,
@@ -181,7 +189,7 @@ async function main() {
       issueDate: ymd(issue),
       dueDate: ymd(addDays(issue, plazo)),
       serviceDate: ymd(daysAgo(emitHace + 2)),
-      currency: idx === 3 ? "USD" : "PEN",
+      currency: moneda,
       subtotal: subtotal.toFixed(2),
       igv: igv.toFixed(2),
       total: (subtotal + igv).toFixed(2),
@@ -193,6 +201,9 @@ async function main() {
       payDueDate: computePayDueDate({
         paymentTerm: condicion, termDays, receptionYmd: ymd(issue), guideReceivedAt: guia,
       }),
+      // Las facturas de ejemplo nacen con su detracción calculada, como las de verdad.
+      detractionAmount: detraccion.amount.toFixed(2),
+      detractionStatus: (detraccion.applies ? "PENDIENTE" : "NO_APLICA") as "PENDIENTE" | "NO_APLICA",
       status: status as "PENDIENTE" | "PAGADA" | "OBSERVADA",
       paidAt: status === "PAGADA" ? ymd(addDays(issue, plazo - 3)) : null,
       paymentReference: status === "PAGADA" ? `Transferencia ${90000 + idx}` : null,
@@ -203,7 +214,7 @@ async function main() {
       isDemo: true,
     };
   });
-  await db.insert(supplierInvoices).values(invoiceRows);
+  await db.insert(supplierInvoices).values(invoiceRows).onConflictDoNothing();
 
   await db.insert(auditLogs).values({
     userId: admin.id, userName: admin.name, action: "CREAR", module: "PRODUCTOS",

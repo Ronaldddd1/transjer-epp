@@ -4,6 +4,7 @@ import { CategoryFormModal } from "@/components/admin/category-form-modal";
 import { Badge, DemoBadge } from "@/components/ui/badge";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
@@ -19,7 +20,7 @@ export default async function CategoriesPage() {
       <PageHeader
         title="Categorías de EPP"
         description="Agrupan los productos del inventario. Una categoría desactivada no aparece al registrar nuevos EPP."
-        actions={<CategoryFormModal />}
+        actions={<><ExportTable tabla="categorias" /><CategoryFormModal /></>}
       />
       <TableShell>
         <thead>

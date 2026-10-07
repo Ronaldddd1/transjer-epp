@@ -25,6 +25,9 @@ def login(page, user, pw):
 def limpiar():
     """Deja la base como recién sembrada, para que la prueba se pueda repetir."""
     sentencias = [
+        # Las devoluciones van primero: apuntan al movimiento de entrada que las repuso, y
+        # sin borrarlas la limpieza de movimientos choca contra esa referencia.
+        "delete from epp_returns where product_id in (select id from products where code='REG-001')",
         "delete from epp_deliveries where product_id in (select id from products where code='REG-001')",
         "delete from inventory_movements where product_id in (select id from products where code='REG-001')",
         "delete from products where code='REG-001'",
@@ -151,10 +154,12 @@ with sync_playwright() as p:
     up = uctx.new_page()
     login(up, "almacen2", "Almacen456!")
     nav = up.get_by_role("navigation")
-    expect(nav.get_by_role("link", name="Inventario")).to_be_visible()
-    expect(nav.get_by_role("link", name="Entregas")).to_be_visible()
-    for oculto in ["Facturas", "Proveedores", "Usuarios", "Auditoría", "Reportes"]:
-        expect(nav.get_by_role("link", name=oculto)).to_have_count(0)
+    # El menú va por secciones que se pueden contraer, así que se comprueba por destino y no
+    # por si el enlace está a la vista en ese momento.
+    for visible in ["/inventario", "/entregas"]:
+        assert nav.locator(f"a[href='{visible}']").count() > 0, f"falta {visible} en el menú"
+    for oculto in ["/facturas", "/proveedores", "/usuarios", "/auditoria", "/reportes", "/detracciones"]:
+        assert nav.locator(f"a[href='{oculto}']").count() == 0, f"{oculto} no debería verse"
     up.goto(BASE + "/facturas")
     expect(up).to_have_url(re.compile("denied=1"))
     up.goto(BASE + "/proveedores")
@@ -179,10 +184,10 @@ with sync_playwright() as p:
     jp = jctx.new_page()
     login(jp, "jalmacen", "Almacen789!")
     jnav = jp.get_by_role("navigation")
-    for visible in ["Inventario", "Movimientos", "Entregas", "Trabajadores", "Reportes", "Categorías"]:
-        expect(jnav.get_by_role("link", name=visible)).to_be_visible()
-    for oculto in ["Facturas", "Proveedores", "Usuarios", "Auditoría"]:
-        expect(jnav.get_by_role("link", name=oculto)).to_have_count(0)
+    for visible in ["/inventario", "/movimientos", "/entregas", "/trabajadores", "/reportes", "/categorias"]:
+        assert jnav.locator(f"a[href='{visible}']").count() > 0, f"falta {visible} en el menú"
+    for oculto in ["/facturas", "/proveedores", "/usuarios", "/auditoria", "/detracciones"]:
+        assert jnav.locator(f"a[href='{oculto}']").count() == 0, f"{oculto} no debería verse"
     # Puede lo que el rol Usuario no puede
     jp.goto(BASE + "/inventario")
     expect(jp.get_by_role("button", name="Nuevo EPP")).to_be_visible()

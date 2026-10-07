@@ -6,6 +6,7 @@ import { MailboxPanel } from "@/components/invoices/mailbox-panel";
 import { EmailStatusBadge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -55,6 +56,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
       <PageHeader
         title="Correos de facturas"
         description="Todo lo que llega al buzón queda aquí. Los correos con el XML del comprobante se registran solos."
+        actions={<ExportTable tabla="correos" />}
       />
 
       <MailboxPanel status={status} canConfigure={can(user.role, "invoices.mailbox")} />

@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import {
-  dueInfo, EMAIL_STATUS_LABEL, formatDate, INSTALLMENT_STATUS_LABEL, INVOICE_STATUS_LABEL,
-  OBLIGATION_STATUS_LABEL, PAYMENT_TERM_LABEL, STOCK_STATUS_LABEL, todayLima,
-  type DueState, type StockStatus,
+  DETRACTION_STATUS_LABEL, dueInfo, EMAIL_STATUS_LABEL, formatDate, INSTALLMENT_STATUS_LABEL, INVOICE_STATUS_LABEL,
+  OBLIGATION_STATUS_LABEL, PAYMENT_TERM_LABEL, RETURN_CONDITION_LABEL, STOCK_STATUS_LABEL, todayLima,
+  type DueState, type ReturnConditionKey, type StockStatus,
 } from "@/lib/utils";
 
 const tones = {
@@ -46,6 +46,24 @@ export function DemoBadge() {
   return <Badge tone="neutral" className="font-medium">Prueba</Badge>;
 }
 
+/** En qué estado volvió un EPP devuelto. */
+export function ReturnConditionBadge({ condition }: { condition: string }) {
+  const map: Record<string, BadgeTone> = { REUTILIZABLE: "green", DESCARTADO: "neutral", NO_DEVUELTO: "red" };
+  return <Badge tone={map[condition] ?? "neutral"}>{RETURN_CONDITION_LABEL[condition as ReturnConditionKey] ?? condition}</Badge>;
+}
+
+/**
+ * Estado del trabajador frente al EPP: activo, cesado al día o cesado debiendo.
+ * El pendiente manda sobre el cese, porque es lo que alguien tiene que resolver.
+ */
+export function EmployeeStateBadge({ active, terminatedAt, pendiente = 0 }: {
+  active: boolean; terminatedAt: string | null; pendiente?: number;
+}) {
+  if (terminatedAt && pendiente > 0) return <Badge tone="red">Cesado · debe EPP</Badge>;
+  if (terminatedAt) return <Badge tone="neutral">Cesado {formatDate(terminatedAt)}</Badge>;
+  return active ? <Badge tone="green">Activo</Badge> : <Badge>Inactivo</Badge>;
+}
+
 /** Marca de entrega anulada con quién, cuándo y por qué. */
 export function VoidedNote({ voidedAt, voidedByName, voidReason }: { voidedAt: Date | string; voidedByName: string | null; voidReason: string | null }) {
   return (
@@ -74,6 +92,23 @@ export function InvoiceStatusBadge({ status, dueDate }: { status: string; dueDat
       </Badge>
       {overdue && <Badge tone="red">Vencida</Badge>}
     </span>
+  );
+}
+
+const DETRACTION_TONE: Record<string, BadgeTone> = {
+  NO_APLICA: "neutral",
+  PENDIENTE: "yellow",
+  EN_PROCESO: "blue",
+  PAGADA: "green",
+  OBSERVADA: "red",
+};
+
+/** Estado del depósito del 4 % en el Banco de la Nación. */
+export function DetractionBadge({ status }: { status: string }) {
+  return (
+    <Badge tone={DETRACTION_TONE[status] ?? "neutral"}>
+      {DETRACTION_STATUS_LABEL[status as keyof typeof DETRACTION_STATUS_LABEL] ?? status}
+    </Badge>
   );
 }
 

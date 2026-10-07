@@ -12,7 +12,7 @@ import {
 /** Contenido binario de un adjunto (solo se usa con el modo de almacenamiento "db"). */
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
-export const roleEnum = pgEnum("role", ["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN"]);
+export const roleEnum = pgEnum("role", ["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES"]);
 export const movementTypeEnum = pgEnum("movement_type", ["ENTRADA", "SALIDA", "AJUSTE"]);
 /** Facturas de proveedores por servicios de transporte. */
 export const invoiceDocTypeEnum = pgEnum("invoice_doc_type", ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"]);
@@ -26,6 +26,22 @@ export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FAC
  *   CREDITO  el plazo corre desde que además llega físicamente la guía de remisión.
  */
 export const paymentTermEnum = pgEnum("payment_term", ["CONTADO", "CREDITO"]);
+
+/**
+ * Estado de la detracción del 4 % que se deposita en el Banco de la Nación.
+ * NO_APLICA es para las operaciones por debajo del umbral de S/ 400, que no se detraen.
+ */
+export const detractionStatusEnum = pgEnum("detraction_status", [
+  "NO_APLICA", "PENDIENTE", "EN_PROCESO", "PAGADA", "OBSERVADA",
+]);
+
+/**
+ * En qué estado vuelve un EPP cuando el trabajador lo entrega.
+ *   REUTILIZABLE  sirve para otro trabajador, así que regresa al stock.
+ *   DESCARTADO    volvió, pero gastado o roto: se da de baja y no regresa al stock.
+ *   NO_DEVUELTO   el trabajador no lo entregó. Queda registrado para dar cuenta de la pérdida.
+ */
+export const returnConditionEnum = pgEnum("return_condition", ["REUTILIZABLE", "DESCARTADO", "NO_DEVUELTO"]);
 
 /** Obligaciones periódicas: préstamos bancarios, servicios, alquileres e impuestos. */
 export const obligationTypeEnum = pgEnum("obligation_type", ["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"]);
@@ -91,9 +107,19 @@ export const employees = pgTable("employees", {
   hireDate: date("hire_date"),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
+  /**
+   * Cese del trabajador. Se guarda aparte de `active` porque desactivar y cesar no son lo
+   * mismo: un trabajador se puede desactivar por licencia, y solo el cese obliga a que
+   * devuelva el EPP que tiene a su cargo.
+   */
+  terminatedAt: date("terminated_at"),
+  terminationReason: varchar("termination_reason", { length: 160 }),
   isDemo: boolean("is_demo").notNull().default(false),
   ...timestamps,
-}, (t) => [index("employees_active_lastname_idx").on(t.active, t.lastName)]);
+}, (t) => [
+  index("employees_active_lastname_idx").on(t.active, t.lastName),
+  index("employees_terminated_idx").on(t.terminatedAt),
+]);
 
 export const inventoryMovements = pgTable("inventory_movements", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -139,6 +165,37 @@ export const eppDeliveries = pgTable("epp_deliveries", {
   index("deliveries_date_idx").on(t.deliveryDate),
 ]);
 
+/**
+ * Devolución de EPP: lo que el trabajador entrega de vuelta, normalmente al cesar.
+ *
+ * No es lo contrario de una entrega ni la anula: la entrega ocurrió y sigue en el historial.
+ * Esto registra que el EPP volvió, y en qué estado. Solo lo que vuelve reutilizable suma
+ * stock otra vez, y ese movimiento de ENTRADA queda vinculado para poder rastrearlo.
+ *
+ * Lo que un trabajador tiene a su cargo = entregas vigentes − devoluciones.
+ */
+export const eppReturns = pgTable("epp_returns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  employeeId: uuid("employee_id").notNull().references(() => employees.id),
+  productId: uuid("product_id").notNull().references(() => products.id),
+  quantity: integer("quantity").notNull(),
+  size: varchar("size", { length: 20 }),
+  returnDate: date("return_date").notNull(),
+  condition: returnConditionEnum("condition").notNull(),
+  /** Solo existe cuando el EPP volvió reutilizable y por tanto regresó al stock. */
+  movementId: uuid("movement_id").unique().references(() => inventoryMovements.id),
+  reason: varchar("reason", { length: 120 }).notNull(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  notes: text("notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  check("returns_quantity_positive", sql`${t.quantity} > 0`),
+  check("returns_movement_consistent", sql`(${t.condition} = 'REUTILIZABLE') = (${t.movementId} is not null)`),
+  index("returns_employee_idx").on(t.employeeId, t.returnDate),
+  index("returns_product_idx").on(t.productId),
+  index("returns_date_idx").on(t.returnDate),
+]);
+
 
 // ---------------------------------------------------------------------------
 // Facturas de proveedores (Administración y Finanzas)
@@ -146,7 +203,12 @@ export const eppDeliveries = pgTable("epp_deliveries", {
 
 export const suppliers = pgTable("suppliers", {
   id: uuid("id").primaryKey().defaultRandom(),
-  ruc: varchar("ruc", { length: 11 }).notNull().unique(),
+  /**
+   * El RUC llega con el XML del comprobante electrónico. Los proveedores que vienen del
+   * control en Excel se registran solo con su nombre y el RUC queda pendiente: por eso
+   * admite nulo y el sistema avisa de los que faltan.
+   */
+  ruc: varchar("ruc", { length: 11 }).unique(),
   businessName: varchar("business_name", { length: 200 }).notNull(),
   tradeName: varchar("trade_name", { length: 200 }),
   email: varchar("email", { length: 160 }),
@@ -162,7 +224,7 @@ export const suppliers = pgTable("suppliers", {
   ...timestamps,
 }, (t) => [
   index("suppliers_active_name_idx").on(t.active, t.businessName),
-  check("suppliers_ruc_format", sql`${t.ruc} ~ '^[0-9]{11}$'`),
+  check("suppliers_ruc_format", sql`${t.ruc} is null or ${t.ruc} ~ '^[0-9]{11}$'`),
   check("suppliers_term_days_range", sql`${t.defaultTermDays} between 0 and 180`),
 ]);
 
@@ -183,6 +245,33 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   description: varchar("description", { length: 250 }),
   /** Guía de Remisión Transportista asociada al servicio. */
   grtNumber: varchar("grt_number", { length: 40 }),
+  // --- Datos del servicio de transporte, tal como se controlaban en el Excel ---
+  /** Quién coordinó el servicio con el transportista. */
+  contactName: varchar("contact_name", { length: 120 }),
+  /** Placa del vehículo. Admite dos cuando el viaje fue con tractor y carreta. */
+  plate: varchar("plate", { length: 24 }),
+  /** Cliente de Transjer para el que se hizo el flete. */
+  clientName: varchar("client_name", { length: 120 }),
+  originCity: varchar("origin_city", { length: 80 }),
+  destinationCity: varchar("destination_city", { length: 120 }),
+  volumeM3: numeric("volume_m3", { precision: 8, scale: 2 }),
+  weightTn: numeric("weight_tn", { precision: 8, scale: 2 }),
+  /** Pagos a cuenta hechos al transportista antes de cancelar la factura. */
+  advances: numeric("advances", { precision: 14, scale: 2 }),
+
+  // --- Detracción del 4 % al Banco de la Nación ---
+  detractionRate: numeric("detraction_rate", { precision: 5, scale: 2 }).notNull().default("4.00"),
+  /** Monto a depositar, en soles enteros. Cero cuando la operación no llega al umbral. */
+  detractionAmount: numeric("detraction_amount", { precision: 14, scale: 2 }),
+  detractionStatus: detractionStatusEnum("detraction_status").notNull().default("PENDIENTE"),
+  detractionPaidAt: date("detraction_paid_at"),
+  /** Número de constancia del depósito. */
+  detractionReceipt: varchar("detraction_receipt", { length: 40 }),
+  /** Número de operación bancaria. */
+  detractionOperation: varchar("detraction_operation", { length: 40 }),
+  detractionBy: uuid("detraction_by").references(() => users.id),
+  detractionNotes: text("detraction_notes"),
+
   /** Condición de pago: contado cuenta desde el correo, crédito desde la entrega de la guía. */
   paymentTerm: paymentTermEnum("payment_term").notNull().default("CONTADO"),
   /** Días de plazo desde que empieza a correr el tiempo. */
@@ -215,6 +304,12 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   index("invoices_issue_date_idx").on(t.issueDate),
   index("invoices_pay_due_idx").on(t.status, t.payDueDate),
   check("invoices_term_days_range", sql`${t.termDays} between 0 and 180`),
+  index("invoices_detraction_idx").on(t.detractionStatus, t.detractionPaidAt),
+  index("invoices_client_idx").on(t.clientName),
+  check("invoices_detraction_rate_range", sql`${t.detractionRate} between 0 and 100`),
+  check("invoices_detraction_amount_positive", sql`${t.detractionAmount} is null or ${t.detractionAmount} >= 0`),
+  // Una detracción pagada siempre guarda su fecha de depósito, y una sin pagar nunca la tiene.
+  check("invoices_detraction_paid_consistent", sql`(${t.detractionStatus} = 'PAGADA') = (${t.detractionPaidAt} is not null)`),
   check("invoices_total_positive", sql`${t.total} > 0`),
   check("invoices_currency_valid", sql`${t.currency} in ('PEN','USD')`),
   // Una factura pagada siempre guarda su fecha de pago, y viceversa.
@@ -296,8 +391,23 @@ export const obligations = pgTable("obligations", {
   disbursedAt: date("disbursed_at"),
 
   // --- Solo servicios y alquileres ---
-  /** Día del mes en que vence. */
+  /**
+   * Día del mes en que vence, del 1 al 31. En los meses que no llegan a ese día el
+   * vencimiento cae en el último: un servicio que vence el 31 vence el 28 en febrero.
+   */
   billingDay: integer("billing_day"),
+  /**
+   * Cuándo vence la primera cuota. Permite registrar un servicio que arranca el mes que
+   * viene, o uno que empezó meses atrás y hay que poner al día. Si está vacío, los
+   * vencimientos arrancan este mes en el día de pago, que es como funcionaba antes.
+   */
+  firstDueDate: date("first_due_date"),
+  /**
+   * Hasta cuándo rige el contrato. Pasada esa fecha no se generan más vencimientos, así
+   * que un alquiler a plazo fijo deja de aparecer en el calendario cuando toca y no sigue
+   * acumulando cuotas que nadie va a pagar.
+   */
+  endsAt: date("ends_at"),
   /** El importe cambia cada mes (luz, celular por consumo). */
   variableAmount: boolean("variable_amount").notNull().default(false),
   /** Importe cuando no varía (alquiler, plan fijo). */
@@ -312,7 +422,8 @@ export const obligations = pgTable("obligations", {
   index("obligations_status_type_idx").on(t.status, t.type),
   index("obligations_creditor_idx").on(t.creditor),
   check("obligations_currency_valid", sql`${t.currency} in ('PEN','USD')`),
-  check("obligations_billing_day_range", sql`${t.billingDay} is null or ${t.billingDay} between 1 and 28`),
+  check("obligations_billing_day_range", sql`${t.billingDay} is null or ${t.billingDay} between 1 and 31`),
+  check("obligations_vigencia_coherente", sql`${t.endsAt} is null or ${t.firstDueDate} is null or ${t.endsAt} >= ${t.firstDueDate}`),
   check("obligations_principal_positive", sql`${t.principal} is null or ${t.principal} > 0`),
 ]);
 
@@ -377,6 +488,13 @@ export const productsRelations = relations(products, ({ one, many }) => ({
 export const employeesRelations = relations(employees, ({ many }) => ({
   deliveries: many(eppDeliveries),
   movements: many(inventoryMovements),
+  returns: many(eppReturns),
+}));
+export const eppReturnsRelations = relations(eppReturns, ({ one }) => ({
+  employee: one(employees, { fields: [eppReturns.employeeId], references: [employees.id] }),
+  product: one(products, { fields: [eppReturns.productId], references: [products.id] }),
+  movement: one(inventoryMovements, { fields: [eppReturns.movementId], references: [inventoryMovements.id] }),
+  user: one(users, { fields: [eppReturns.userId], references: [users.id] }),
 }));
 export const movementsRelations = relations(inventoryMovements, ({ one }) => ({
   product: one(products, { fields: [inventoryMovements.productId], references: [products.id] }),
@@ -427,8 +545,11 @@ export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
 export type InvoiceEmailStatus = (typeof invoiceEmailStatusEnum.enumValues)[number];
 export type AttachmentKind = (typeof attachmentKindEnum.enumValues)[number];
 export type PaymentTerm = (typeof paymentTermEnum.enumValues)[number];
+export type DetractionStatus = (typeof detractionStatusEnum.enumValues)[number];
 export type Obligation = typeof obligations.$inferSelect;
 export type ObligationInstallment = typeof obligationInstallments.$inferSelect;
 export type ObligationType = (typeof obligationTypeEnum.enumValues)[number];
 export type ObligationStatus = (typeof obligationStatusEnum.enumValues)[number];
 export type InstallmentStatus = (typeof installmentStatusEnum.enumValues)[number];
+export type EppReturn = typeof eppReturns.$inferSelect;
+export type ReturnCondition = (typeof returnConditionEnum.enumValues)[number];

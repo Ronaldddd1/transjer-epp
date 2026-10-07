@@ -1,39 +1,70 @@
-TRANSJER GESTIÓN — ACTUALIZACIÓN: PLAZOS DE PAGO, PRÉSTAMOS Y SERVICIOS
-=======================================================================
+TRANSJER GESTIÓN — DETRACCIONES, SERVICIO DE TRANSPORTE Y RESUMEN DE EPP
+=========================================================================
 
 QUÉ CAMBIÓ
 ----------
 
-1. Se acabó el calendario de los viernes. Ahora cada factura vence en su propia fecha:
+1. LAS FECHAS. El campo de fecha ya no depende del idioma del navegador. Se escribe
+   en día/mes/año, las barras se ponen solas, el foco no salta a otro campo y el
+   calendario sigue disponible en el icono de la derecha. Una fecha que no existe
+   (31 de abril) se rechaza al momento.
 
-   CONTADO  vence 1 día después de que llega el correo.
-   CRÉDITO  vence 7 días después de que el proveedor entrega la guía EN FÍSICO.
-            Deben cumplirse las dos cosas —correo y guía—, así que el plazo arranca
-            en la más tardía. Sin guía anotada, la factura NO tiene fecha de pago y
-            el sistema lo dice: "Esperando la guía".
+   Esto arreglaba un riesgo real: con el navegador en inglés el campo mostraba
+   mm/dd/aaaa, así que escribir 03/10/2026 pensando en el 3 de octubre registraba
+   el 10 de marzo.
 
-   La guía se anota desde la ficha de la factura, con el botón "Anotar guía".
-   Cada proveedor tiene su condición pactada, que se propone al registrar sus facturas.
+2. RESUMEN DE EPP (Almacén → Resumen de EPP). Cuánto salió de cada EPP y quién lo
+   recibió, en dos tablas con totales, sin entrar trabajador por trabajador. El
+   listado de entregas y el historial de cada trabajador siguen igual.
 
-2. Sección nueva: PRÉSTAMOS Y SERVICIOS. Lleva todo lo que se paga mes a mes.
+3. DATOS DEL SERVICIO en las facturas: cliente, placa, contacto, origen, destino,
+   volumen, peso y adelantos. Es lo que se controlaba en el Excel.
 
-   Préstamos: se carga el cronograma del banco pegando las filas del PDF. Están
-   probados los cuatro formatos de Transjer (BCP, Interbank Capital de Trabajo,
-   Interbank Préstamo Fácil y Crédito Pyme). También puede calcularse a partir de
-   la TEA y el plazo, como borrador.
+4. DETRACCIONES (Proveedores → Detracciones). El 4 % se calcula solo: sobre el total
+   con IGV, redondeado al sol más próximo, y "no aplica" por debajo de S/ 400.
+   Pantalla propia con el resumen de lo pendiente y lo depositado, aviso de las que
+   llevan más de 30 días, y un rol nuevo para quien solo lleva esa tarea.
 
-   Servicios de monto variable (luz, celular por consumo): se registra el día de
-   pago y el sistema crea los vencimientos del año. El monto se anota cuando llega
-   el recibo.
+5. MENÚ POR SECCIONES: Almacén, Proveedores, Finanzas, Reportes y Administración.
+   Cada una se contrae. Solo se ven las secciones donde el rol tiene algo que hacer.
 
-3. Sección nueva: CALENDARIO DE PAGOS. Junta las facturas y las cuotas de préstamos
-   y servicios en una sola lista ordenada por fecha, con lo vencido primero.
+6. DEUDA POR TIPO en Préstamos y servicios: cuánto se debe de cada tipo y a quién.
 
-QUÉ HACER PARA ACTUALIZAR
--------------------------
+7. DASHBOARD con detracciones por depositar, atrasadas, cuotas por pagar y vencidas.
 
-1. Reemplaza la carpeta del proyecto por la de este paquete (el proyecto COMPLETO,
-   no solo los archivos cambiados).
+8. EXPORTAR A EXCEL en todas las tablas. El botón "Exportar" está arriba a la derecha
+   de cada pantalla y ofrece Excel, CSV y PDF. Lo que se baja es lo que se está viendo:
+   el archivo arrastra los filtros de la pantalla, y trae todas las filas aunque en
+   pantalla solo se vean 20. El resumen de EPP sale con una hoja por tabla.
+
+   Son quince tablas: inventario, movimientos, entregas, resumen de EPP, trabajadores,
+   facturas, detracciones, proveedores, buzón de correo, préstamos y servicios,
+   cronograma, calendario de pagos, categorías, usuarios y auditoría.
+
+   Cada una exige el permiso de su módulo: la encargada de detracciones se baja la suya
+   y no la de trabajadores. Las contraseñas no salen en ningún archivo.
+
+
+LO QUE HAY QUE SABER ANTES DE ACTUALIZAR
+----------------------------------------
+
+LA DETRACCIÓN DEL EXCEL ESTABA MAL CALCULADA. Era una columna escrita a mano: de
+154 filas, 99 estaban redondeadas hacia arriba, 30 hacia abajo y solo 25 cuadraban.
+Dos facturas idénticas de S/ 4,956 figuraban con 198 y con 199. En total se depositaron
+29 soles de más. El sistema aplica la regla de SUNAT, así que de aquí en adelante los
+montos van a salir distintos a los que venían saliendo. Para las que ya se depositaron,
+la importación conserva el monto del Excel, porque es el que dice la constancia.
+
+EL EXCEL NO TRAE RUC. Los 33 proveedores se crean solo con su nombre y el RUC queda
+pendiente. Se completa solo cuando llegue una factura electrónica suya con el XML; el
+sistema reconoce el proveedor aunque el nombre esté escrito distinto. También se puede
+escribir a mano desde Proveedores.
+
+
+PASOS PARA ACTUALIZAR
+---------------------
+
+1. Reemplaza la carpeta del proyecto por la de este paquete (el proyecto COMPLETO).
 
 2. En la carpeta del proyecto:
 
@@ -41,39 +72,50 @@ QUÉ HACER PARA ACTUALIZAR
        npm install
        npm run db:migrate
 
-   La migración es ADITIVA: no borra nada. Las facturas que ya estaban registradas
-   pasan a contado con un día de plazo, contado desde que llegaron.
+   La migración es ADITIVA. A las facturas que ya existen les calcula la detracción.
 
-3. Pruébalo en tu máquina:
+3. Importa el histórico del Excel (158 filas). Primero en simulación, para ver qué
+   va a pasar sin tocar nada:
 
-       npm run dev
+       npm run import:facturas -- --simular
 
-   Verifica cuatro cosas:
-     - En Facturas, la columna dice "Vence" y cada fila muestra Contado o Crédito.
-     - Al registrar una factura a crédito sin guía, dice "Esperando la guía".
-     - En el menú aparecen "Préstamos y servicios" y "Calendario de pagos".
-     - Al cargar un cronograma pegado, la vista previa muestra las cuotas correctas.
+   Si el resumen te cuadra, hazlo de verdad:
 
-4. Publica:
+       npm run import:facturas
+
+   Se puede repetir: lo ya importado se reconoce y se salta.
+
+   De las 158 filas entran 155. Las otras 3 no tienen importe en la hoja
+   (R & K Logistic E001-1257, Transp Cusami E001-82 y Corporacion DYJ Rusal E001-100).
+
+4. Pruébalo en tu máquina con npm run dev y revisa:
+     - Al escribir una fecha, que ya no salte el cursor.
+     - Almacén → Resumen de EPP.
+     - Proveedores → Detracciones.
+     - Que una factura muestre su bloque de servicio y el de detracción.
+
+5. Publica:
 
        git add -A
-       git commit -m "Transjer Gestion: plazos de pago, prestamos y servicios"
+       git commit -m "Transjer Gestion: detracciones, servicio de transporte y resumen de EPP"
        git push
 
    Antes del push, revisa que .env NO aparezca en "git status".
 
-5. En Vercel no hace falta ninguna variable nueva.
+6. Después de que Vercel despliegue, corre la importación una vez más desde tu
+   máquina para que el histórico entre a la base de producción.
 
-LO QUE HAY QUE CARGAR A MANO DESPUÉS
-------------------------------------
 
-- La condición pactada de cada proveedor (Proveedores → Editar). Por defecto todos
-  quedan al contado con 1 día.
-- Los cuatro préstamos del banco, con su cronograma.
-- Los servicios recurrentes: celulares, luz, agua, internet, alquileres.
+LO QUE QUEDA PARA DESPUÉS
+-------------------------
+
+- Crear el usuario de la encargada de detracciones (Usuarios → rol "Detracciones").
+- Completar los RUC de los proveedores conforme lleguen sus facturas electrónicas.
+- Revisar las 3 filas del Excel que quedaron fuera por no tener importe.
+
 
 PRUEBAS
 -------
 
-    npm test                            (135 verificaciones)
-    python3 tests/e2e-obligaciones.py   (recorrido completo en el navegador)
+    npm test                            (todas las reglas de cálculo)
+    python3 tests/e2e-detracciones.py   (recorrido completo en el navegador)

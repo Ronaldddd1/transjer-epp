@@ -1,18 +1,22 @@
-import { ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeliveryModal } from "@/components/deliveries/delivery-modal";
+import { ReturnModal } from "@/components/deliveries/return-modal";
 import { VoidDeliveryModal } from "@/components/deliveries/void-delivery-modal";
 import { EmployeeFormModal } from "@/components/employees/employee-form-modal";
-import { Badge, VoidedNote } from "@/components/ui/badge";
+import { ReinstateButton, TerminationModal } from "@/components/employees/termination-modal";
+import { EmployeeStateBadge, ReturnConditionBadge, VoidedNote } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cn, formatDate, todayLima } from "@/lib/utils";
-import { getEmployee, getEmployeeOptions, getProductOptions, listDeliveries } from "@/server/queries";
+import {
+  employeeHoldings, getEmployee, getEmployeeOptions, getProductOptions, listDeliveries, listReturns,
+} from "@/server/queries";
 
 export const metadata: Metadata = { title: "Historial del trabajador" };
 
@@ -23,25 +27,29 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   if (!employee) notFound();
 
   const canDeliver = can(user.role, "deliveries.create") && employee.active;
-  const [{ rows }, products, employees] = await Promise.all([
+  const [{ rows }, holdings, devoluciones, products, employees] = await Promise.all([
     listDeliveries({ employeeId: id }),
+    employeeHoldings(id),
+    listReturns({ employeeId: id }),
     canDeliver ? getProductOptions() : Promise.resolve([]),
     canDeliver ? getEmployeeOptions() : Promise.resolve([]),
   ]);
   const canVoid = can(user.role, "deliveries.void");
+  const canReturn = can(user.role, "deliveries.create");
+  const canManage = can(user.role, "employees.manage");
   // Las entregas anuladas se muestran en el historial, pero no cuentan en los totales.
   const valid = rows.filter((r) => !r.voidedAt);
   const totalUnits = valid.reduce((s, r) => s + r.quantity, 0);
   const lastDate = valid[0]?.deliveryDate;
 
-  // Resumen por EPP: qué tiene y cuándo lo recibió por última vez
-  const byProduct = new Map<string, { name: string; size: string | null; qty: number; last: string }>();
-  for (const r of valid) {
-    const key = `${r.productCode}|${r.size ?? ""}`;
-    const cur = byProduct.get(key);
-    if (cur) cur.qty += r.quantity;
-    else byProduct.set(key, { name: r.productName, size: r.size, qty: r.quantity, last: r.deliveryDate });
-  }
+  // Lo que tiene a su cargo: entregado menos devuelto. El pendiente es lo que hay que
+  // reclamarle si cesa, y se calcula, no se guarda.
+  const pendientes = holdings.filter((h) => h.pendiente > 0);
+  const unidadesPendientes = pendientes.reduce((s, h) => s + h.pendiente, 0);
+  const itemsPendientes = pendientes.map((h) => ({
+    productId: h.productId, productName: h.productName, size: h.size, unit: h.unit, pendiente: h.pendiente,
+  }));
+  const debeEpp = !!employee.terminatedAt && unidadesPendientes > 0;
 
   return (
     <>
@@ -57,22 +65,52 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="font-display text-2xl font-bold leading-tight sm:text-3xl">{employee.firstName} {employee.lastName}</h1>
-              {employee.active ? <Badge tone="green">Activo</Badge> : <Badge>Inactivo</Badge>}
+              <EmployeeStateBadge active={employee.active} terminatedAt={employee.terminatedAt} pendiente={unidadesPendientes} />
             </div>
             <p className="text-steel-600">{employee.position} · {employee.area}</p>
             <p className="text-sm text-steel-500">
               DNI {employee.dni}
               {employee.phone && <> · Tel. {employee.phone}</>}
               {employee.hireDate && <> · Ingreso {formatDate(employee.hireDate)}</>}
+              {employee.terminatedAt && <> · Cese {formatDate(employee.terminatedAt)}</>}
             </p>
+            {employee.terminationReason && <p className="text-sm text-steel-500">Motivo del cese: {employee.terminationReason}</p>}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {canDeliver && <DeliveryModal employees={employees} products={products} today={todayLima()} userName={user.name} employeeId={employee.id} />}
-          {can(user.role, "employees.manage") && <EmployeeFormModal employee={employee} />}
+          {canReturn && itemsPendientes.length > 0 && (
+            <ReturnModal
+              employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }}
+              items={itemsPendientes}
+              variant={debeEpp ? "primary" : "outline"}
+            />
+          )}
+          {canManage && !employee.terminatedAt && (
+            <TerminationModal
+              employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, hireDate: employee.hireDate }}
+              pendiente={unidadesPendientes}
+              tipos={pendientes.length}
+            />
+          )}
+          {canManage && employee.terminatedAt && (
+            <ReinstateButton employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }} />
+          )}
+          {canManage && <EmployeeFormModal employee={employee} />}
           {can(user.role, "reports.view") && <ButtonLink href={`/reportes?tipo=entregas&employee=${employee.id}`} variant="ghost">Exportar</ButtonLink>}
         </div>
       </div>
+
+      {debeEpp && (
+        <div className="mb-6 flex items-start gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" aria-hidden />
+          <span>
+            Cesó el {formatDate(employee.terminatedAt)} y todavía tiene{" "}
+            <strong>{unidadesPendientes} unidad(es)</strong> de EPP a su cargo, de {pendientes.length} tipo(s).
+            Registra la devolución de cada uno para cerrar su cuenta.
+          </span>
+        </div>
+      )}
 
       {employee.notes && <p className="mb-6 rounded-md border-l-4 border-brand bg-white px-4 py-3 text-sm text-ink-700">{employee.notes}</p>}
 
@@ -116,26 +154,81 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <Panel>
             <dl className="grid grid-cols-2 divide-x divide-steel-200">
               <div className="p-4"><dt className="text-xs text-steel-500">Unidades recibidas</dt><dd className="font-display text-3xl font-bold tabular">{totalUnits}</dd></div>
-              <div className="p-4"><dt className="text-xs text-steel-500">Última entrega</dt><dd className="mt-1 font-display text-lg font-bold">{formatDate(lastDate)}</dd></div>
+              <div className="p-4">
+                <dt className="text-xs text-steel-500">A su cargo</dt>
+                <dd className={cn("font-display text-3xl font-bold tabular", debeEpp && "text-red-700")}>{unidadesPendientes}</dd>
+              </div>
             </dl>
+            <p className="border-t border-steel-200 px-4 py-2 text-xs text-steel-500">
+              Última entrega: {formatDate(lastDate)}
+            </p>
           </Panel>
-          <Panel title="Resumen por EPP">
-            {byProduct.size === 0 ? (
+
+          {/* Lo que tiene hoy, no lo que recibió alguna vez: lo devuelto ya no figura
+              pendiente, y es esta columna la que se le reclama al cesar. */}
+          <Panel title="EPP a su cargo" action={<span className="text-sm text-steel-500">{holdings.length} tipo(s)</span>}>
+            {holdings.length === 0 ? (
               <p className="px-4 py-6 text-sm text-steel-500">Sin entregas registradas.</p>
             ) : (
               <ul className="divide-y divide-steel-100">
-                {[...byProduct.values()].map((p) => (
-                  <li key={`${p.name}${p.size}`} className="flex items-center justify-between gap-2 px-4 py-2.5 text-sm">
-                    <div>
-                      <p className="font-medium">{p.name}{p.size && <span className="text-steel-500"> · {p.size}</span>}</p>
-                      <p className="text-xs text-steel-500">Última: {formatDate(p.last)}</p>
+                {holdings.map((h) => (
+                  <li key={h.productId} className="px-4 py-2.5 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium">{h.productName}{h.size && <span className="text-steel-500"> · {h.size}</span>}</p>
+                        <p className="text-xs text-steel-500">
+                          Entregado {h.entregado}
+                          {h.devuelto > 0 && <> · devuelto {h.devuelto}</>}
+                          {" · "}última {formatDate(h.ultima)}
+                        </p>
+                      </div>
+                      <span className={cn("font-display text-lg font-bold tabular", h.pendiente > 0 ? debeEpp && "text-red-700" : "text-steel-400")}>
+                        {h.pendiente}
+                      </span>
                     </div>
-                    <span className="font-display text-lg font-bold tabular">{p.qty}</span>
+                    {h.pendiente > 0 && canReturn && (
+                      <div className="mt-1.5">
+                        <ReturnModal
+                          employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }}
+                          items={itemsPendientes}
+                          productId={h.productId}
+                          variant="ghost"
+                          compact
+                        />
+                      </div>
+                    )}
+                    {h.pendiente === 0 && (
+                      <p className="mt-0.5 text-xs text-emerald-700">
+                        Saldado{h.noDevuelto > 0 && ` · ${h.noDevuelto} no devuelto(s)`}
+                      </p>
+                    )}
                   </li>
                 ))}
               </ul>
             )}
           </Panel>
+
+          {devoluciones.rows.length > 0 && (
+            <Panel title="Devoluciones" action={<span className="text-sm text-steel-500">{devoluciones.total}</span>}>
+              <ul className="divide-y divide-steel-100">
+                {devoluciones.rows.map((d) => (
+                  <li key={d.id} className="px-4 py-2.5 text-sm">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-medium">{d.productName}{d.size && <span className="text-steel-500"> · {d.size}</span>}</p>
+                        <p className="text-xs text-steel-500">{formatDate(d.returnDate)} · {d.reason} · {d.userName}</p>
+                        {d.notes && <p className="text-xs text-steel-500">{d.notes}</p>}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <span className="font-display text-lg font-bold tabular">{d.quantity}</span>
+                        <p className="mt-0.5"><ReturnConditionBadge condition={d.condition} /></p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          )}
         </aside>
       </div>
     </>

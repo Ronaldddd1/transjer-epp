@@ -24,6 +24,15 @@ import {
 
 const MONTHS_AHEAD = 12;
 
+/**
+ * Cuando el usuario indica cuándo vence la primera cuota de un servicio, esa fecha manda:
+ * de ella sale el día de pago mensual, para que no haya dos datos que puedan contradecirse.
+ */
+function conDiaDePago<T extends { type: string; firstDueDate: string | null; billingDay: number | null }>(data: T): T {
+  if (data.type === "PRESTAMO" || !data.firstDueDate) return data;
+  return { ...data, billingDay: Number(data.firstDueDate.slice(8, 10)) };
+}
+
 async function loadObligation(id: string) {
   const [row] = await db.select().from(obligations).where(eq(obligations.id, id)).limit(1);
   if (!row) throw new BusinessError("La obligación no existe.");
@@ -39,7 +48,7 @@ async function loadInstallment(id: string) {
 export async function createObligation(formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("obligations.manage");
-    const data = obligationSchema.parse(formToObject(formData));
+    const data = conDiaDePago(obligationSchema.parse(formToObject(formData)));
 
     const created = await db.transaction(async (tx) => {
       const [row] = await tx.insert(obligations).values({ ...data, createdBy: user.id }).returning();
@@ -73,24 +82,62 @@ export async function createObligation(formData: FormData): Promise<ActionResult
 export async function updateObligation(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("obligations.manage");
-    const data = obligationSchema.parse(formToObject(formData));
+    const data = conDiaDePago(obligationSchema.parse(formToObject(formData)));
     const before = await loadObligation(id);
     if (before.status === "ANULADA") throw new BusinessError("La obligación está anulada.");
     if (before.type !== data.type) {
       throw new BusinessError("No se puede cambiar el tipo. Anula esta obligación y registra una nueva.");
     }
 
-    const after = await db.transaction(async (tx) => {
+    // Cambiar cuándo vence un servicio no sirve de nada si los vencimientos ya creados se
+    // quedan donde estaban: el dato se guardaba y el calendario seguía mostrando las fechas
+    // viejas. Si no hay ningún pago registrado, se rehacen desde cero con los datos nuevos.
+    const calendarioCambio = before.type !== "PRESTAMO" && (
+      (before.firstDueDate ?? "") !== (data.firstDueDate ?? "")
+      || before.billingDay !== data.billingDay
+      || (before.endsAt ?? "") !== (data.endsAt ?? "")
+      || before.variableAmount !== data.variableAmount
+      || (before.fixedAmount ?? "") !== (data.fixedAmount ?? "")
+    );
+
+    const { row: after, rehecho, conPagos } = await db.transaction(async (tx) => {
       const [row] = await tx.update(obligations).set(data).where(eq(obligations.id, id)).returning();
+
+      let rehecho = 0;
+      let conPagos = false;
+      if (calendarioCambio) {
+        const [{ pagadas }] = await tx
+          .select({ pagadas: sql<number>`count(*) filter (where ${obligationInstallments.status} = 'PAGADA')::int` })
+          .from(obligationInstallments)
+          .where(eq(obligationInstallments.obligationId, id));
+
+        // Con pagos registrados no se toca nada: mover las fechas bajo un pago ya hecho
+        // dejaría la historia sin sentido. Los vencimientos nuevos salen al extender.
+        conPagos = pagadas > 0;
+        if (!conPagos) {
+          await tx.delete(obligationInstallments).where(eq(obligationInstallments.obligationId, id));
+          rehecho = await generateMonths(tx, row, MONTHS_AHEAD);
+        }
+      }
+
       await logAudit({
         user, action: "EDITAR", module: "OBLIGACIONES", recordId: id,
-        description: `${user.name} modificó "${row.name}".`, oldData: before, newData: row,
+        description: `${user.name} modificó "${row.name}".`
+          + (rehecho ? ` Se rehizo su calendario: ${rehecho} vencimiento(s).` : ""),
+        oldData: before, newData: row,
       }, tx);
-      return row;
+      return { row, rehecho, conPagos };
     });
 
     revalidatePath("/", "layout");
-    return { ok: true, message: `"${after.name}" actualizado correctamente.` };
+    return {
+      ok: true,
+      message: rehecho
+        ? `"${after.name}" actualizado. Su calendario se rehízo con ${rehecho} vencimiento(s).`
+        : conPagos
+          ? `"${after.name}" actualizado, pero su calendario no se tocó: ya tiene cuotas pagadas y mover las fechas dejaría esos pagos sin sentido.`
+          : `"${after.name}" actualizado correctamente.`,
+    };
   } catch (e) {
     return toActionError(e);
   }
@@ -182,12 +229,17 @@ async function generateMonths(tx: Tx, obligation: typeof obligations.$inferSelec
   const hoy = todayLima();
   const [y, m] = hoy.split("-").map(Number);
   const day = String(obligation.billingDay).padStart(2, "0");
-  // Se arranca del mes siguiente al último vencimiento, o de este mes si no hay ninguno.
+  // Se arranca del mes siguiente al último vencimiento. Si no hay ninguno, manda la fecha
+  // de la primera cuota; sin ella, este mes en el día de pago, que es lo de siempre.
   const start = last
     ? monthlyDueDates(last.dueDate, 2)[1]
-    : `${y}-${String(m).padStart(2, "0")}-${day}`;
+    : obligation.firstDueDate ?? `${y}-${String(m).padStart(2, "0")}-${day}`;
 
-  const fechas = monthlyDueDates(start, months).filter((d) => d >= hoy || !last);
+  // Nada más allá de la vigencia: un contrato a plazo fijo deja de generar vencimientos
+  // cuando termina, en vez de seguir acumulando cuotas que nadie va a pagar.
+  const fechas = monthlyDueDates(start, months)
+    .filter((d) => d >= hoy || !last)
+    .filter((d) => !obligation.endsAt || d <= obligation.endsAt);
   if (fechas.length === 0) return 0;
 
   const importe = obligation.variableAmount ? null : obligation.fixedAmount;
@@ -345,6 +397,54 @@ export async function reopenInstallment(id: string): Promise<ActionResult> {
 }
 
 /** Cierra una obligación que ya no corre, o la reactiva. */
+/**
+ * Borra una obligación registrada por error, con su cronograma.
+ *
+ * Solo se permite mientras no haya ni una cuota pagada. Un préstamo con pagos registrados
+ * es historial de caja: si estaba mal, se anula, que lo deja a la vista y explica por qué.
+ * Borrarlo dejaría pagos huérfanos y un hueco que nadie podría reconstruir.
+ *
+ * Lo borrado queda íntegro en auditoría, así que siempre se puede ver qué se eliminó,
+ * quién lo hizo y volver a cargarlo si hizo falta.
+ */
+export async function deleteObligation(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("obligations.manage");
+    const before = await loadObligation(id);
+
+    const [{ pagadas }] = await db
+      .select({ pagadas: sql<number>`count(*) filter (where ${obligationInstallments.status} = 'PAGADA')::int` })
+      .from(obligationInstallments)
+      .where(eq(obligationInstallments.obligationId, id));
+
+    if (pagadas > 0) {
+      throw new BusinessError(
+        `"${before.name}" tiene ${pagadas} cuota(s) pagada(s), así que no se puede eliminar. ` +
+        "Anúlala: deja de contar en el calendario y conserva el historial de pagos.",
+      );
+    }
+
+    await db.transaction(async (tx) => {
+      const cuotas = await tx.select().from(obligationInstallments)
+        .where(eq(obligationInstallments.obligationId, id));
+      await tx.delete(obligationInstallments).where(eq(obligationInstallments.obligationId, id));
+      await tx.delete(obligations).where(eq(obligations.id, id));
+
+      await logAudit({
+        user, action: "ELIMINAR", module: "OBLIGACIONES", recordId: id,
+        description: `${user.name} eliminó ${OBLIGATION_TYPE_LABEL[before.type].toLowerCase()} "${before.name}"`
+          + ` de ${before.creditor}${cuotas.length ? ` con sus ${cuotas.length} cuota(s)` : ""}, sin pagos registrados.`,
+        oldData: { ...before, cuotas },
+      }, tx);
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true, message: `"${before.name}" fue eliminada.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
 export async function setObligationStatus(id: string, status: "ACTIVA" | "CERRADA" | "ANULADA"): Promise<ActionResult> {
   try {
     const user = await requireActionUser("obligations.manage");

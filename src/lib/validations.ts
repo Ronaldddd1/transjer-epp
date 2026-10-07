@@ -15,8 +15,24 @@ const optionalText = (max: number) =>
   z.string().trim().max(max, `Máximo ${max} caracteres`).optional().transform((v) => (v ? v : null));
 const requiredText = (label: string, max: number) =>
   z.string({ required_error: required(label) }).trim().min(1, required(label)).max(max, `Máximo ${max} caracteres`);
-const intField = (label: string, min = 0) =>
-  z.coerce.number({ invalid_type_error: `${label} debe ser un número` }).int(`${label} debe ser un número entero`).min(min, `${label} debe ser mayor o igual a ${min}`);
+/** Un campo en blanco no es un cero: se deja pasar como NaN para que la validación lo rechace. */
+const vacioEsNada = (v: unknown) => (typeof v === "string" && v.trim() === "" ? Number.NaN : v);
+
+/**
+ * Campo numérico entero.
+ *
+ * El campo vacío se rechaza en vez de valer 0. `Number("")` da 0 sin protestar, y eso
+ * convertía un ajuste de inventario con la cantidad en blanco en un ajuste a cero: el stock
+ * del producto se iba a 0 y quedaba en auditoría como un ajuste legítimo. Un número que no
+ * se escribió no es un cero.
+ */
+const intField = (label: string, min = 0, max?: number) => {
+  let numero = z.coerce.number({ invalid_type_error: `${label} debe ser un número` })
+    .int(`${label} debe ser un número entero`)
+    .min(min, `${label} debe ser mayor o igual a ${min}`);
+  if (max !== undefined) numero = numero.max(max, `${label} no puede pasar de ${max}`);
+  return z.preprocess(vacioEsNada, numero);
+};
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 
 export const productBaseSchema = z.object({
@@ -55,7 +71,10 @@ export const employeeSchema = z.object({
 export const movementSchema = z.object({
   productId: z.string().uuid("Selecciona un producto"),
   type: z.enum(["ENTRADA", "SALIDA", "AJUSTE"]),
-  quantity: z.coerce.number({ invalid_type_error: "La cantidad debe ser un número" }).int("La cantidad debe ser un número entero"),
+  // Sin el filtro de vacío, un ajuste con la cantidad en blanco valía 0 y dejaba el stock
+  // del producto en cero, registrado como un ajuste normal.
+  quantity: z.preprocess(vacioEsNada, z.coerce.number({ invalid_type_error: "La cantidad debe ser un número" })
+    .int("La cantidad debe ser un número entero")),
   reason: requiredText("El motivo", 120),
   notes: optionalText(1000),
 }).superRefine((d, ctx) => {
@@ -80,6 +99,28 @@ export const voidDeliverySchema = z.object({
   voidReason: requiredText("El motivo de la anulación", 250).refine((v) => v.length >= 5, "Explica el motivo (mínimo 5 caracteres)"),
 });
 
+/** Cese del trabajador: desde aquí el sistema le reclama el EPP que tiene a su cargo. */
+export const terminationSchema = z.object({
+  terminatedAt: ymd,
+  terminationReason: optionalText(160),
+});
+
+/** Devolución de EPP: lo que el trabajador entrega de vuelta y en qué estado llega. */
+export const eppReturnSchema = z.object({
+  productId: z.string().uuid("Selecciona un EPP"),
+  quantity: intField("La cantidad", 1),
+  returnDate: ymd,
+  condition: z.enum(["REUTILIZABLE", "DESCARTADO", "NO_DEVUELTO"]),
+  reason: requiredText("El motivo", 120),
+  notes: optionalText(1000),
+}).superRefine((d, ctx) => {
+  // Lo que no se entregó no es una devolución sin explicación: es una pérdida que alguien
+  // tendrá que justificar, así que se exige la nota.
+  if (d.condition === "NO_DEVUELTO" && !d.notes) {
+    ctx.addIssue({ code: "custom", path: ["notes"], message: "Explica qué pasó con el EPP que no devolvió" });
+  }
+});
+
 
 // --------------------------------------------------------------------------
 // Facturas de proveedores
@@ -101,7 +142,11 @@ const optionalMoney = (label: string) =>
     .transform((v) => (v === "" ? null : Number(v).toFixed(2)));
 
 export const supplierSchema = z.object({
-  ruc: z.string().trim().regex(/^\d{11}$/, "El RUC debe tener 11 dígitos"),
+  // El RUC puede faltar: los proveedores que vienen del control en Excel no lo traen y se
+  // completa cuando llega una factura electrónica suya con el XML.
+  ruc: z.string().trim().optional().or(z.literal(""))
+    .transform((v) => (v ? v : null))
+    .refine((v) => v === null || /^\d{11}$/.test(v), "El RUC debe tener 11 dígitos"),
   businessName: requiredText("La razón social", 200),
   tradeName: optionalText(200),
   email: z.string().trim().toLowerCase().email("Correo inválido").optional().or(z.literal("")).transform((v) => (v ? v : null)),
@@ -109,7 +154,7 @@ export const supplierSchema = z.object({
   contactName: optionalText(120),
   notes: optionalText(1000),
   defaultPaymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
-  defaultTermDays: intField("Los días de plazo").max(180, "El plazo no puede pasar de 180 días").default(1),
+  defaultTermDays: intField("Los días de plazo", 0, 180).default(1),
 });
 
 export const invoiceSchema = z.object({
@@ -123,7 +168,7 @@ export const invoiceSchema = z.object({
   /** Cuándo llegó la factura: desde aquí corre el plazo de pago. */
   receivedDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   paymentTerm: z.enum(["CONTADO", "CREDITO"]),
-  termDays: intField("Los días de plazo").max(180, "El plazo no puede pasar de 180 días"),
+  termDays: intField("Los días de plazo", 0, 180),
   /** Entrega física de la guía. Solo aplica a crédito; desde aquí corre el plazo. */
   guideReceivedAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   currency: z.enum(["PEN", "USD"]),
@@ -133,6 +178,15 @@ export const invoiceSchema = z.object({
   description: optionalText(250),
   grtNumber: optionalText(40),
   notes: optionalText(1000),
+  // --- Datos del servicio de transporte ---
+  contactName: optionalText(120),
+  plate: z.string().trim().toUpperCase().max(24, "Máximo 24 caracteres").optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  clientName: optionalText(120),
+  originCity: optionalText(80),
+  destinationCity: optionalText(120),
+  volumeM3: optionalMoney("El volumen"),
+  weightTn: optionalMoney("El peso"),
+  advances: optionalMoney("Los adelantos"),
 }).superRefine((d, ctx) => {
   if (d.dueDate && d.dueDate < d.issueDate) {
     ctx.addIssue({ code: "custom", path: ["dueDate"], message: "El vencimiento no puede ser anterior a la emisión" });
@@ -145,6 +199,30 @@ export const invoiceSchema = z.object({
   }
   if (d.guideReceivedAt && d.guideReceivedAt < d.issueDate) {
     ctx.addIssue({ code: "custom", path: ["guideReceivedAt"], message: "La guía no pudo entregarse antes de emitirse la factura" });
+  }
+});
+
+/** Registro del depósito de la detracción en el Banco de la Nación. */
+export const detractionSchema = z.object({
+  detractionStatus: z.enum(["NO_APLICA", "PENDIENTE", "EN_PROCESO", "PAGADA", "OBSERVADA"]),
+  detractionPaidAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  detractionReceipt: optionalText(40),
+  detractionOperation: optionalText(40),
+  detractionNotes: optionalText(1000),
+}).superRefine((d, ctx) => {
+  if (d.detractionStatus === "PAGADA" && !d.detractionPaidAt) {
+    ctx.addIssue({ code: "custom", path: ["detractionPaidAt"], message: "Una detracción pagada necesita la fecha del depósito" });
+  }
+  // La constancia es lo que permite cuadrar el depósito con el Banco de la Nación después;
+  // el formulario la pedía con asterisco y el servidor la dejaba pasar en blanco.
+  if (d.detractionStatus === "PAGADA" && !d.detractionReceipt) {
+    ctx.addIssue({ code: "custom", path: ["detractionReceipt"], message: "Anota el número de constancia del depósito" });
+  }
+  if (d.detractionStatus !== "PAGADA" && d.detractionPaidAt) {
+    ctx.addIssue({ code: "custom", path: ["detractionPaidAt"], message: "Solo una detracción pagada lleva fecha de depósito" });
+  }
+  if (d.detractionStatus === "OBSERVADA" && !d.detractionNotes) {
+    ctx.addIssue({ code: "custom", path: ["detractionNotes"], message: "Explica qué se observó" });
   }
 });
 
@@ -182,7 +260,12 @@ export const obligationSchema = z.object({
   installmentsCount: optionalInt("El número de cuotas", 1, 360),
   disbursedAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   // Servicios y alquileres
-  billingDay: optionalInt("El día de pago", 1, 28),
+  // Hasta 31: en los meses más cortos el vencimiento cae en el último día del mes.
+  billingDay: optionalInt("El día de pago", 1, 31),
+  /** Vencimiento de la primera cuota de un servicio. Opcional: sin él arranca este mes. */
+  firstDueDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  /** Hasta cuándo rige el contrato. Sin fecha, el servicio sigue indefinidamente. */
+  endsAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
   variableAmount: checkbox,
   fixedAmount: optionalMoney("El importe"),
   notes: optionalText(1000),
@@ -190,8 +273,18 @@ export const obligationSchema = z.object({
   if (d.type === "PRESTAMO" && !d.disbursedAt) {
     ctx.addIssue({ code: "custom", path: ["disbursedAt"], message: "Un préstamo necesita su fecha de desembolso" });
   }
-  if (d.type !== "PRESTAMO" && !d.billingDay) {
-    ctx.addIssue({ code: "custom", path: ["billingDay"], message: "Indica qué día del mes vence" });
+  // Basta con uno de los dos: la fecha de la primera cuota ya dice qué día del mes vence.
+  if (d.type !== "PRESTAMO" && !d.billingDay && !d.firstDueDate) {
+    ctx.addIssue({ code: "custom", path: ["billingDay"], message: "Indica qué día del mes vence, o la fecha de la primera cuota" });
+  }
+  if (d.type === "PRESTAMO" && d.firstDueDate) {
+    ctx.addIssue({ code: "custom", path: ["firstDueDate"], message: "En un préstamo la primera cuota sale del cronograma" });
+  }
+  if (d.type === "PRESTAMO" && d.endsAt) {
+    ctx.addIssue({ code: "custom", path: ["endsAt"], message: "Un préstamo termina con su última cuota, no lleva vigencia" });
+  }
+  if (d.endsAt && d.firstDueDate && d.endsAt < d.firstDueDate) {
+    ctx.addIssue({ code: "custom", path: ["endsAt"], message: "La vigencia no puede terminar antes de la primera cuota" });
   }
   if (d.type !== "PRESTAMO" && !d.variableAmount && !d.fixedAmount) {
     ctx.addIssue({ code: "custom", path: ["fixedAmount"], message: "Indica el importe, o marca que cambia cada mes" });
@@ -243,7 +336,7 @@ export const userBaseSchema = z.object({
   name: requiredText("El nombre", 120),
   username: z.string().trim().toLowerCase().regex(/^[a-z0-9._-]{3,50}$/, "Usa 3 a 50 caracteres: letras, números, punto, guion"),
   email: z.string().trim().toLowerCase().email("Correo inválido"),
-  role: z.enum(["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN"]),
+  role: z.enum(["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES"]),
 });
 export const userCreateSchema = userBaseSchema.extend({ password });
 export const passwordSchema = z.object({ password });

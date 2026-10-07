@@ -6,6 +6,7 @@ import { useState } from "react";
 import { createDelivery } from "@/actions/deliveries";
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { ProductOption } from "@/components/inventory/movement-modal";
 
@@ -79,7 +80,7 @@ export function DeliveryModal({ employees, products, today, userName, employeeId
             <Input name="quantity" type="number" inputMode="numeric" min={1} max={prod?.stock} step={1} defaultValue={1} invalid={!!errors.quantity} />
           </Field>
           <Field label="Fecha de entrega" name="deliveryDate" required error={errors.deliveryDate}>
-            <Input name="deliveryDate" type="date" defaultValue={today} max={today} invalid={!!errors.deliveryDate} />
+            <DateInput name="deliveryDate" defaultValue={today} max={today} required invalid={!!errors.deliveryDate} />
           </Field>
           <Field label="Motivo de entrega" name="reason" required error={errors.reason}>
             <Select name="reason" defaultValue={DELIVERY_REASONS[0]}>

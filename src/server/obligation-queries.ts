@@ -75,6 +75,8 @@ const obligationColumns = {
   installmentsCount: obligations.installmentsCount,
   disbursedAt: obligations.disbursedAt,
   billingDay: obligations.billingDay,
+  firstDueDate: obligations.firstDueDate,
+  endsAt: obligations.endsAt,
   variableAmount: obligations.variableAmount,
   fixedAmount: obligations.fixedAmount,
   status: obligations.status,
@@ -105,6 +107,9 @@ export async function listObligations(f: ObligationFilters = {}) {
       asc(obligations.name),
     );
 }
+
+/** Una fila del listado, tal como la muestran las tablas por tipo. */
+export type ObligationRow = Awaited<ReturnType<typeof listObligations>>[number];
 
 export async function getObligation(id: string) {
   const [row] = await db.select(obligationColumns).from(obligations).where(eq(obligations.id, id)).limit(1);
@@ -295,4 +300,61 @@ export async function obligationPaymentsByMonth(months = 12) {
     ))
     .groupBy(sql`date_trunc('month', ${obligationInstallments.paidAt})`, obligations.type, obligations.currency)
     .orderBy(desc(sql`date_trunc('month', ${obligationInstallments.paidAt})`));
+}
+
+/**
+ * Cuánto se debe por cada tipo de obligación.
+ *
+ * Responde la pregunta directa: de los préstamos, de los servicios, de los alquileres,
+ * ¿cuánto queda por pagar? Cuenta solo las cuotas pendientes de obligaciones activas, y
+ * aparte las que todavía no tienen importe, para que la suma no parezca más pequeña de lo
+ * que es sin explicar por qué.
+ */
+export async function debtByType() {
+  const filas = await db.select({
+    type: obligations.type,
+    currency: obligations.currency,
+    obligaciones: sql<number>`count(distinct ${obligations.id})::int`,
+    cuotas: sql<number>`count(${obligationInstallments.id})::int`,
+    importe: sql<string>`coalesce(sum(${obligationInstallments.total}), 0)::text`,
+    sinImporte: sql<number>`count(*) filter (where ${obligationInstallments.total} is null)::int`,
+    vencidas: sql<number>`count(*) filter (where ${obligationInstallments.dueDate} < ${today})::int`,
+    proxima: sql<string | null>`min(${obligationInstallments.dueDate})::text`,
+  })
+    .from(obligations)
+    .innerJoin(obligationInstallments, eq(obligationInstallments.obligationId, obligations.id))
+    .where(and(eq(obligations.status, "ACTIVA"), eq(obligationInstallments.status, "PENDIENTE")))
+    .groupBy(obligations.type, obligations.currency)
+    .orderBy(desc(sql`sum(${obligationInstallments.total})`));
+
+  const total = filas.reduce(
+    (acc, f) => ({
+      obligaciones: acc.obligaciones + f.obligaciones,
+      cuotas: acc.cuotas + f.cuotas,
+      importe: acc.importe + Number(f.importe),
+      sinImporte: acc.sinImporte + f.sinImporte,
+      vencidas: acc.vencidas + f.vencidas,
+    }),
+    { obligaciones: 0, cuotas: 0, importe: 0, sinImporte: 0, vencidas: 0 },
+  );
+
+  return { filas, total };
+}
+
+/** Deuda por acreedor: a quién se le debe más. */
+export async function debtByCreditor(limite = 10) {
+  return db.select({
+    creditor: obligations.creditor,
+    currency: obligations.currency,
+    obligaciones: sql<number>`count(distinct ${obligations.id})::int`,
+    cuotas: sql<number>`count(${obligationInstallments.id})::int`,
+    importe: sql<string>`coalesce(sum(${obligationInstallments.total}), 0)::text`,
+    proxima: sql<string | null>`min(${obligationInstallments.dueDate})::text`,
+  })
+    .from(obligations)
+    .innerJoin(obligationInstallments, eq(obligationInstallments.obligationId, obligations.id))
+    .where(and(eq(obligations.status, "ACTIVA"), eq(obligationInstallments.status, "PENDIENTE")))
+    .groupBy(obligations.creditor, obligations.currency)
+    .orderBy(desc(sql`sum(${obligationInstallments.total})`))
+    .limit(limite);
 }

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { saveSchedule } from "@/actions/obligations";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import {
   applyMapping, buildSchedule, detectSchedule, type ColumnMapping, type ScheduleImportRow,
@@ -46,6 +47,17 @@ const CAMPOS: { key: keyof ColumnMapping; label: string; required?: boolean }[] 
 
 export function ScheduleImportModal({ obligationId, currency, principal, annualRate, disbursedAt, hasSchedule }: Props) {
   const [modo, setModo] = useState<Modo>("pegar");
+
+  /**
+   * Al cerrar se descarta todo lo tecleado. Sin esto, al reabrir la ventana seguían ahí el
+   * texto pegado y la vista previa de la vez anterior, con el campo oculto de filas ya
+   * cargado: un clic en «Guardar» volvía a grabar el cronograma viejo.
+   */
+  const limpiar = () => {
+    setTexto(""); setMapping(null); setModo("pegar");
+    setCapital(principal ?? ""); setTasa(annualRate ?? ""); setCuotas("24");
+    setPrimera(""); setDesembolso(disbursedAt ?? ""); setSeguro("");
+  };
 
   // --- Pegar ---
   const [texto, setTexto] = useState("");
@@ -109,6 +121,7 @@ export function ScheduleImportModal({ obligationId, currency, principal, annualR
       submitLabel={filas.length ? `Guardar ${filas.length} cuotas` : "Guardar cronograma"}
       size="lg"
       action={(fd) => saveSchedule(obligationId, fd)}
+      onClosed={limpiar}
       trigger={(open) => (
         <Button variant={hasSchedule ? "outline" : "primary"} onClick={open}>
           <Table2 className="h-4 w-4" /> {hasSchedule ? "Reemplazar cronograma" : "Cargar cronograma"}
@@ -211,10 +224,10 @@ export function ScheduleImportModal({ obligationId, currency, principal, annualR
                   <Input id="gen-cuotas" value={cuotas} onChange={(e) => setCuotas(e.target.value)} inputMode="numeric" />
                 </Field>
                 <Field label="Desembolso" name="gen-desembolso" required className="sm:col-span-2">
-                  <Input id="gen-desembolso" type="date" value={desembolso} onChange={(e) => setDesembolso(e.target.value)} />
+                  <DateInput id="gen-desembolso" name="gen-desembolso" value={desembolso} onChange={(v) => setDesembolso(v ?? "")} />
                 </Field>
                 <Field label="Primera cuota vence" name="gen-primera" required className="sm:col-span-2">
-                  <Input id="gen-primera" type="date" value={primera} onChange={(e) => setPrimera(e.target.value)} />
+                  <DateInput id="gen-primera" name="gen-primera" value={primera} onChange={(v) => setPrimera(v ?? "")} />
                 </Field>
                 <Field label="Desgravamen (% anual)" name="gen-seguro" className="sm:col-span-2">
                   <Input id="gen-seguro" value={seguro} onChange={(e) => setSeguro(e.target.value)} inputMode="decimal" placeholder="1.08" />

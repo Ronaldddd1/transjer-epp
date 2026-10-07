@@ -2,7 +2,10 @@ import "server-only";
 import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { auditLogs, categories, employees, eppDeliveries, inventoryMovements, products, users, type MovementType } from "@/db/schema";
+import {
+  auditLogs, categories, employees, eppDeliveries, eppReturns, inventoryMovements, products, users,
+  type MovementType, type ReturnCondition,
+} from "@/db/schema";
 import { first, isYmd, limaDayEnd, limaDayStart, limaMonthStartYmd, type SearchParamsRecord, type StockStatus, todayLima } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
@@ -13,6 +16,8 @@ export type ReportFilters = {
   employeeId?: string; userId?: string; type?: MovementType; status?: StockStatus; q?: string;
   /** Entregas: VIGENTE (no anuladas) o ANULADA. Sin valor: todas. */
   deliveryState?: DeliveryState;
+  /** Devoluciones: en qué estado volvió el EPP. Sin valor: todas. */
+  condition?: ReturnCondition;
 };
 export type DeliveryState = "VIGENTE" | "ANULADA";
 export const DELIVERY_STATE_LABEL: Record<DeliveryState, string> = { VIGENTE: "Vigentes", ANULADA: "Anuladas" };
@@ -23,7 +28,9 @@ export function readFilters(sp: SearchParamsRecord): ReportFilters {
   const from = first(sp.from);
   const to = first(sp.to);
   const estado = first(sp.estado);
+  const condicion = first(sp.condicion);
   return {
+    condition: condicion === "REUTILIZABLE" || condicion === "DESCARTADO" || condicion === "NO_DEVUELTO" ? condicion : undefined,
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
     productId: first(sp.product) || undefined,
@@ -173,6 +180,118 @@ export async function listDeliveries(f: ReportFilters, limit?: number, offset = 
   return { rows, total };
 }
 
+/**
+ * Resumen de las entregas: lo mismo que muestra el listado, pero sumado.
+ *
+ * Responde de un vistazo qué EPP salió del almacén y a quién, sin tener que entrar
+ * trabajador por trabajador. Usa exactamente los mismos filtros que el listado, así que
+ * los totales siempre cuadran con las filas que se están viendo.
+ *
+ * Las entregas anuladas no suman: devolvieron su stock, así que contarlas abultaría
+ * los totales con unidades que nunca salieron.
+ */
+export async function deliverySummary(f: ReportFilters) {
+  const where = and(
+    f.from ? gte(eppDeliveries.deliveryDate, f.from) : undefined,
+    f.to ? lte(eppDeliveries.deliveryDate, f.to) : undefined,
+    f.productId ? eq(eppDeliveries.productId, f.productId) : undefined,
+    f.categoryId ? eq(products.categoryId, f.categoryId) : undefined,
+    f.employeeId ? eq(eppDeliveries.employeeId, f.employeeId) : undefined,
+    f.q ? or(ilike(employees.firstName, like(f.q)), ilike(employees.lastName, like(f.q)), ilike(employees.dni, like(f.q)), ilike(products.name, like(f.q))) : undefined,
+    isNull(eppDeliveries.voidedAt),
+  );
+
+  const [[totales], porProducto, porTrabajador, desglose] = await Promise.all([
+    db.select({
+      unidades: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
+      entregas: count(),
+      trabajadores: sql<number>`count(distinct ${eppDeliveries.employeeId})::int`,
+      tiposEpp: sql<number>`count(distinct ${eppDeliveries.productId})::int`,
+    }).from(eppDeliveries)
+      .innerJoin(employees, eq(eppDeliveries.employeeId, employees.id))
+      .innerJoin(products, eq(eppDeliveries.productId, products.id))
+      .where(where),
+
+    db.select({
+      productId: products.id,
+      productCode: products.code,
+      productName: products.name,
+      categoryName: categories.name,
+      unit: products.unit,
+      stock: products.stock,
+      minimumStock: products.minimumStock,
+      unidades: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
+      entregas: count(),
+      trabajadores: sql<number>`count(distinct ${eppDeliveries.employeeId})::int`,
+      ultima: sql<string>`max(${eppDeliveries.deliveryDate})::text`,
+    }).from(eppDeliveries)
+      .innerJoin(employees, eq(eppDeliveries.employeeId, employees.id))
+      .innerJoin(products, eq(eppDeliveries.productId, products.id))
+      .innerJoin(categories, eq(products.categoryId, categories.id))
+      .where(where)
+      .groupBy(products.id, products.code, products.name, categories.name, products.unit, products.stock, products.minimumStock)
+      .orderBy(desc(sql`sum(${eppDeliveries.quantity})`)),
+
+    db.select({
+      employeeId: employees.id,
+      employeeName: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
+      dni: employees.dni,
+      position: employees.position,
+      area: employees.area,
+      unidades: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
+      entregas: count(),
+      tiposEpp: sql<number>`count(distinct ${eppDeliveries.productId})::int`,
+      ultima: sql<string>`max(${eppDeliveries.deliveryDate})::text`,
+    }).from(eppDeliveries)
+      .innerJoin(employees, eq(eppDeliveries.employeeId, employees.id))
+      .innerJoin(products, eq(eppDeliveries.productId, products.id))
+      .where(where)
+      .groupBy(employees.id, employees.firstName, employees.lastName, employees.dni, employees.position, employees.area)
+      .orderBy(desc(sql`sum(${eppDeliveries.quantity})`)),
+
+    // Qué EPP recibió cada trabajador, no solo cuántas unidades. Es la misma suma abierta
+    // por producto: sirve para saber si al almacenero le falta entregarle algo o si ya
+    // tiene de todo. Un producto es de una sola talla, así que agrupar por producto basta.
+    db.select({
+      employeeId: eppDeliveries.employeeId,
+      productId: products.id,
+      productName: products.name,
+      size: products.size,
+      unit: products.unit,
+      unidades: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
+      ultima: sql<string>`max(${eppDeliveries.deliveryDate})::text`,
+    }).from(eppDeliveries)
+      .innerJoin(employees, eq(eppDeliveries.employeeId, employees.id))
+      .innerJoin(products, eq(eppDeliveries.productId, products.id))
+      .innerJoin(categories, eq(products.categoryId, categories.id))
+      .where(where)
+      .groupBy(eppDeliveries.employeeId, products.id, products.name, products.size, products.unit)
+      .orderBy(desc(sql`sum(${eppDeliveries.quantity})`), asc(products.name)),
+  ]);
+
+  const porEmpleado = new Map<string, EppBreakdown[]>();
+  for (const d of desglose) {
+    const lista = porEmpleado.get(d.employeeId);
+    const item = { productId: d.productId, productName: d.productName, size: d.size, unit: d.unit, unidades: d.unidades, ultima: d.ultima };
+    if (lista) lista.push(item);
+    else porEmpleado.set(d.employeeId, [item]);
+  }
+
+  return {
+    unidades: totales?.unidades ?? 0,
+    entregas: totales?.entregas ?? 0,
+    trabajadores: totales?.trabajadores ?? 0,
+    tiposEpp: totales?.tiposEpp ?? 0,
+    porProducto,
+    porTrabajador: porTrabajador.map((e) => ({ ...e, epps: porEmpleado.get(e.employeeId) ?? [] })),
+  };
+}
+
+export type EppBreakdown = {
+  productId: string; productName: string; size: string | null; unit: string;
+  unidades: number; ultima: string;
+};
+
 // ---------- Trabajadores ----------
 export async function listEmployees(opts: { q?: string; area?: string; state?: string; limit: number; offset: number }) {
   const where = and(
@@ -188,6 +307,7 @@ export async function listEmployees(opts: { q?: string; area?: string; state?: s
       id: employees.id, dni: employees.dni, firstName: employees.firstName, lastName: employees.lastName,
       position: employees.position, area: employees.area, phone: employees.phone, hireDate: employees.hireDate,
       notes: employees.notes, active: employees.active, isDemo: employees.isDemo,
+      terminatedAt: employees.terminatedAt, terminationReason: employees.terminationReason,
       delivered: sql<number>`coalesce(${deliveredCount.n}, 0)`,
     }).from(employees).leftJoin(deliveredCount, eq(deliveredCount.employeeId, employees.id))
       .where(where).orderBy(asc(employees.lastName), asc(employees.firstName)).limit(opts.limit).offset(opts.offset),
@@ -206,6 +326,225 @@ export async function getEmployee(id: string) {
   if (!/^[0-9a-f-]{36}$/i.test(id)) return null;
   const [emp] = await db.select().from(employees).where(eq(employees.id, id));
   return emp ?? null;
+}
+
+// ---------- EPP a cargo y devoluciones ----------
+
+/**
+ * Qué EPP tiene a su cargo un trabajador: entregas vigentes menos lo que ya devolvió.
+ *
+ * Las tres condiciones de devolución descuentan. Un EPP que el trabajador no entregó
+ * (NO_DEVUELTO) también deja de estar pendiente: ya se dio cuenta de la pérdida y seguir
+ * reclamándolo solo mantendría un aviso que nadie puede cerrar.
+ *
+ * Se resuelve en dos consultas agrupadas y se cruzan en memoria: son pocas filas por
+ * trabajador, y así se evita una subconsulta correlacionada.
+ */
+export async function employeeHoldings(employeeId: string) {
+  const [entregado, devuelto] = await Promise.all([
+    db.select({
+      productId: products.id,
+      productCode: products.code,
+      productName: products.name,
+      categoryName: categories.name,
+      size: products.size,
+      unit: products.unit,
+      entregado: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
+      ultima: sql<string>`max(${eppDeliveries.deliveryDate})::text`,
+    }).from(eppDeliveries)
+      .innerJoin(products, eq(eppDeliveries.productId, products.id))
+      .innerJoin(categories, eq(products.categoryId, categories.id))
+      .where(and(eq(eppDeliveries.employeeId, employeeId), isNull(eppDeliveries.voidedAt)))
+      .groupBy(products.id, products.code, products.name, categories.name, products.size, products.unit),
+
+    db.select({
+      productId: eppReturns.productId,
+      devuelto: sql<number>`coalesce(sum(${eppReturns.quantity}), 0)::int`,
+      reutilizable: sql<number>`coalesce(sum(${eppReturns.quantity}) filter (where ${eppReturns.condition} = 'REUTILIZABLE'), 0)::int`,
+      descartado: sql<number>`coalesce(sum(${eppReturns.quantity}) filter (where ${eppReturns.condition} = 'DESCARTADO'), 0)::int`,
+      noDevuelto: sql<number>`coalesce(sum(${eppReturns.quantity}) filter (where ${eppReturns.condition} = 'NO_DEVUELTO'), 0)::int`,
+    }).from(eppReturns)
+      .where(eq(eppReturns.employeeId, employeeId))
+      .groupBy(eppReturns.productId),
+  ]);
+
+  const porProducto = new Map(devuelto.map((d) => [d.productId, d]));
+  return entregado
+    .map((e) => {
+      const d = porProducto.get(e.productId);
+      return {
+        ...e,
+        devuelto: d?.devuelto ?? 0,
+        reutilizable: d?.reutilizable ?? 0,
+        descartado: d?.descartado ?? 0,
+        noDevuelto: d?.noDevuelto ?? 0,
+        pendiente: Math.max(0, e.entregado - (d?.devuelto ?? 0)),
+      };
+    })
+    .sort((a, b) => b.pendiente - a.pendiente || a.productName.localeCompare(b.productName, "es"));
+}
+export type Holding = Awaited<ReturnType<typeof employeeHoldings>>[number];
+
+/**
+ * El pendiente de EPP por trabajador, en SQL.
+ *
+ * Se escribe a mano porque son dos agregados cruzados, y así queda a la vista que el
+ * pendiente es una resta y no un estado guardado: no hay forma de que un trabajador
+ * aparezca debiendo algo que ya devolvió.
+ */
+const PENDIENTE_POR_TRABAJADOR = sql`
+  with entregado as (
+    select employee_id, product_id, sum(quantity)::int as q, max(delivery_date) as ultima
+    from epp_deliveries where voided_at is null group by employee_id, product_id
+  ), devuelto as (
+    select employee_id, product_id, sum(quantity)::int as q
+    from epp_returns group by employee_id, product_id
+  ), pendiente as (
+    select e.employee_id, e.product_id, e.ultima, (e.q - coalesce(d.q, 0)) as q
+    from entregado e
+    left join devuelto d on d.employee_id = e.employee_id and d.product_id = e.product_id
+    where (e.q - coalesce(d.q, 0)) > 0
+  )
+`;
+
+export type PendingReturn = {
+  employeeId: string;
+  employeeName: string;
+  dni: string;
+  position: string;
+  area: string;
+  active: boolean;
+  terminatedAt: string | null;
+  terminationReason: string | null;
+  unidades: number;
+  tipos: number;
+  detalle: string;
+  ultima: string | null;
+  dias: number;
+};
+
+/**
+ * Trabajadores cesados que todavía tienen EPP a su cargo.
+ *
+ * Es la lista de la pantalla de devoluciones y la que alimenta el aviso: mientras un
+ * cesado tenga algo pendiente, el sistema lo recuerda.
+ */
+export async function listPendingReturns(opts: { q?: string; includeActive?: boolean } = {}) {
+  const filtroCese = opts.includeActive ? sql`true` : sql`emp.terminated_at is not null`;
+  const filtroTexto = opts.q
+    ? sql`and (emp.first_name ilike ${like(opts.q)} or emp.last_name ilike ${like(opts.q)} or emp.dni ilike ${like(opts.q)})`
+    : sql``;
+
+  const rows = await db.execute<PendingReturn & { dias: string | number }>(sql`
+    ${PENDIENTE_POR_TRABAJADOR}
+    select
+      emp.id as "employeeId",
+      emp.first_name || ' ' || emp.last_name as "employeeName",
+      emp.dni, emp.position, emp.area, emp.active,
+      emp.terminated_at::text as "terminatedAt",
+      emp.termination_reason as "terminationReason",
+      sum(p.q)::int as unidades,
+      count(*)::int as tipos,
+      string_agg(pr.name || coalesce(' ' || pr.size, '') || ' ×' || p.q, ', ' order by pr.name, pr.size) as detalle,
+      max(p.ultima)::text as ultima,
+      coalesce((${todayLima()}::date - emp.terminated_at), 0)::int as dias
+    from pendiente p
+    join employees emp on emp.id = p.employee_id
+    join products pr on pr.id = p.product_id
+    where ${filtroCese} ${filtroTexto}
+    group by emp.id, emp.first_name, emp.last_name, emp.dni, emp.position, emp.area,
+             emp.active, emp.terminated_at, emp.termination_reason
+    order by emp.terminated_at asc nulls last, emp.last_name asc
+  `);
+
+  return Array.from(rows).map((r) => ({ ...r, dias: Number(r.dias) }));
+}
+
+export type PendingItemRow = {
+  employeeId: string; productId: string; productName: string; size: string | null; unit: string; pendiente: number;
+};
+
+/**
+ * El pendiente abierto por EPP, para todos los trabajadores de una vez.
+ *
+ * Es lo que necesita el modal de devolución para ofrecer solo lo que esa persona tiene a
+ * su cargo. Va en una sola consulta: pedirlo trabajador por trabajador funcionaba, pero
+ * eran dos consultas por fila de la tabla.
+ */
+export async function pendingReturnItems(opts: { includeActive?: boolean } = {}) {
+  const filtroCese = opts.includeActive ? sql`true` : sql`emp.terminated_at is not null`;
+  const rows = await db.execute<PendingItemRow & { pendiente: string | number }>(sql`
+    ${PENDIENTE_POR_TRABAJADOR}
+    select
+      p.employee_id as "employeeId",
+      pr.id as "productId",
+      pr.name as "productName",
+      pr.size,
+      pr.unit,
+      p.q as pendiente
+    from pendiente p
+    join employees emp on emp.id = p.employee_id
+    join products pr on pr.id = p.product_id
+    where ${filtroCese}
+    order by pr.name asc
+  `);
+
+  const porTrabajador = new Map<string, PendingItemRow[]>();
+  for (const r of Array.from(rows)) {
+    const item = { ...r, pendiente: Number(r.pendiente) };
+    const lista = porTrabajador.get(r.employeeId);
+    if (lista) lista.push(item);
+    else porTrabajador.set(r.employeeId, [item]);
+  }
+  return porTrabajador;
+}
+
+/** Para el aviso del menú y del dashboard: cuántos cesados deben EPP. */
+export async function pendingReturnsCount() {
+  const rows = await db.execute<{ trabajadores: number; unidades: number }>(sql`
+    ${PENDIENTE_POR_TRABAJADOR}
+    select count(distinct p.employee_id)::int as trabajadores, coalesce(sum(p.q), 0)::int as unidades
+    from pendiente p
+    join employees emp on emp.id = p.employee_id
+    where emp.terminated_at is not null
+  `);
+  const [r] = Array.from(rows);
+  return { trabajadores: Number(r?.trabajadores ?? 0), unidades: Number(r?.unidades ?? 0) };
+}
+
+/** Historial de devoluciones, con los mismos filtros que el resto de las pantallas. */
+export async function listReturns(f: ReportFilters, limit?: number, offset = 0) {
+  const where = and(
+    f.from ? gte(eppReturns.returnDate, f.from) : undefined,
+    f.to ? lte(eppReturns.returnDate, f.to) : undefined,
+    f.productId ? eq(eppReturns.productId, f.productId) : undefined,
+    f.categoryId ? eq(products.categoryId, f.categoryId) : undefined,
+    f.employeeId ? eq(eppReturns.employeeId, f.employeeId) : undefined,
+    f.condition ? eq(eppReturns.condition, f.condition) : undefined,
+    f.q ? or(ilike(employees.firstName, like(f.q)), ilike(employees.lastName, like(f.q)), ilike(employees.dni, like(f.q)), ilike(products.name, like(f.q))) : undefined,
+  );
+  const base = db.select({
+    id: eppReturns.id, returnDate: eppReturns.returnDate, quantity: eppReturns.quantity,
+    size: eppReturns.size, condition: eppReturns.condition, reason: eppReturns.reason, notes: eppReturns.notes,
+    employeeId: employees.id, employeeName: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
+    dni: employees.dni, position: employees.position, area: employees.area,
+    terminatedAt: employees.terminatedAt,
+    productCode: products.code, productName: products.name, categoryName: categories.name,
+    userName: users.name, createdAt: eppReturns.createdAt,
+  }).from(eppReturns)
+    .innerJoin(employees, eq(eppReturns.employeeId, employees.id))
+    .innerJoin(products, eq(eppReturns.productId, products.id))
+    .innerJoin(categories, eq(products.categoryId, categories.id))
+    .innerJoin(users, eq(eppReturns.userId, users.id))
+    .where(where).orderBy(desc(eppReturns.returnDate), desc(eppReturns.createdAt)).$dynamic();
+
+  const [rows, [{ total }]] = await Promise.all([
+    limit ? base.limit(limit).offset(offset) : base,
+    db.select({ total: count() }).from(eppReturns)
+      .innerJoin(employees, eq(eppReturns.employeeId, employees.id))
+      .innerJoin(products, eq(eppReturns.productId, products.id)).where(where),
+  ]);
+  return { rows, total };
 }
 
 // ---------- Categorías ----------

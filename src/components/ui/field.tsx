@@ -1,4 +1,7 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from "react";
+import {
+  forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes,
+  type TextareaHTMLAttributes, type WheelEvent,
+} from "react";
 import { cn } from "@/lib/utils";
 
 export const controlClass =
@@ -26,8 +29,23 @@ export function Field({ label, name, error, required, hint, className, children 
 }
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement> & { invalid?: boolean }>(
-  function Input({ className, invalid, ...props }, ref) {
-    return <input ref={ref} id={props.id ?? props.name} aria-invalid={invalid || undefined} className={cn(controlClass, "h-10", className)} {...props} />;
+  function Input({ className, invalid, onWheel, ...props }, ref) {
+    // En un campo numérico, la rueda del ratón cambia el valor mientras el campo tiene el
+    // foco. Al desplazarse por un modal largo para llegar al botón de guardar, la cantidad
+    // escrita cambiaba sola. Se le quita el foco al rodar: el scroll sigue, el número no.
+    const rueda = props.type === "number"
+      ? (e: WheelEvent<HTMLInputElement>) => { e.currentTarget.blur(); onWheel?.(e); }
+      : onWheel;
+    return (
+      <input
+        ref={ref}
+        id={props.id ?? props.name}
+        aria-invalid={invalid || undefined}
+        onWheel={rueda}
+        className={cn(controlClass, "h-10", className)}
+        {...props}
+      />
+    );
   },
 );
 

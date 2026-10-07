@@ -5,6 +5,7 @@ import { observeInvoice, payInvoice, reopenInvoice, restoreInvoice, setGuideRece
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import { formatMoney, todayLima } from "@/lib/utils";
 
@@ -46,7 +47,7 @@ export function GuideReceivedModal({ invoice, compact = false }: { invoice: Invo
             <dt className="text-steel-500">Proveedor</dt><dd className="font-medium">{invoice.supplierName}</dd>
           </dl>
           <Field label="Guía entregada el" name="guideReceivedAt" required error={errors.guideReceivedAt} hint="El día que el proveedor la trajo en físico.">
-            <Input name="guideReceivedAt" type="date" defaultValue={todayLima()} max={todayLima()} invalid={!!errors.guideReceivedAt} />
+            <DateInput name="guideReceivedAt" defaultValue={todayLima()} max={todayLima()} required invalid={!!errors.guideReceivedAt} />
           </Field>
           <Field label="Observaciones" name="notes" error={errors.notes}>
             <Textarea name="notes" maxLength={500} rows={2} placeholder="Quién la recibió, en qué estado llegó…" />
@@ -82,7 +83,7 @@ export function PayInvoiceModal({ invoice, variant = "primary", compact = false 
             <dd className="font-display text-base font-bold">{formatMoney(invoice.total, invoice.currency)}</dd>
           </dl>
           <Field label="Fecha de pago" name="paidAt" required error={errors.paidAt}>
-            <Input name="paidAt" type="date" defaultValue={todayLima()} max={todayLima()} invalid={!!errors.paidAt} />
+            <DateInput name="paidAt" defaultValue={todayLima()} max={todayLima()} required invalid={!!errors.paidAt} />
           </Field>
           <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación, transferencia o cheque.">
             <Input name="paymentReference" maxLength={120} placeholder="Transferencia 0012345" />

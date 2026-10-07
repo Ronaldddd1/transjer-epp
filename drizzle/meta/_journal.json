@@ -36,6 +36,34 @@
       "when": 1790652394983,
       "tag": "0004_obligaciones_y_plazos",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791035790048,
+      "tag": "0005_detracciones_y_servicio",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791152904749,
+      "tag": "0006_devoluciones_epp",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791312926928,
+      "tag": "0007_primera_cuota_servicios",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791315138367,
+      "tag": "0008_vigencia_y_dia_31",
+      "breakpoints": true
     }
   ]
 }

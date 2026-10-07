@@ -3,6 +3,7 @@ import { AuditDetail } from "@/components/admin/audit-detail";
 import { Badge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { AUDIT_MODULES } from "@/lib/audit";
@@ -33,7 +34,11 @@ export default async function AuditPage({ searchParams }: { searchParams: Search
 
   return (
     <>
-      <PageHeader title="Auditoría" description="Registro automático de quién hizo cada cambio, cuándo y qué información se modificó." />
+      <PageHeader
+        title="Auditoría"
+        description="Registro automático de quién hizo cada cambio, cuándo y qué información se modificó."
+        actions={<ExportTable tabla="auditoria" />}
+      />
       <FilterBar
         searchPlaceholder="Buscar en la descripción"
         filters={[

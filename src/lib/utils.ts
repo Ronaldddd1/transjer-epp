@@ -96,6 +96,95 @@ export const EMAIL_STATUS_LABEL = {
   ERROR: "Con error",
 } as const;
 
+/**
+ * Reduce el nombre de un proveedor a lo esencial para poder compararlo.
+ *
+ * En el control en Excel el mismo proveedor aparecía escrito de varias formas: distinta
+ * capitalización, con y sin "sac", con y sin puntos. Esto quita acentos, signos, espacios y
+ * la forma societaria, de modo que "Corporacion dyj Rusal sac" y "CORPORACION DYJ RUSAL
+ * S.A.C." se reconozcan como el mismo.
+ */
+export function normalizeSupplierName(nombre: string): string {
+  return nombre
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(s\.?a\.?c\.?|e\.?i\.?r\.?l\.?|s\.?a\.?|s\.?r\.?l\.?)\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+// ---------- Devolución de EPP ----------
+
+export const RETURN_CONDITION_LABEL = {
+  REUTILIZABLE: "Reutilizable",
+  DESCARTADO: "Descartado",
+  NO_DEVUELTO: "No devuelto",
+} as const;
+export type ReturnConditionKey = keyof typeof RETURN_CONDITION_LABEL;
+
+/** Qué significa cada condición, para no tener que explicarlo en cada pantalla. */
+export const RETURN_CONDITION_HINT: Record<ReturnConditionKey, string> = {
+  REUTILIZABLE: "Sirve para otro trabajador: vuelve al stock.",
+  DESCARTADO: "Volvió gastado o roto: se da de baja y no vuelve al stock.",
+  NO_DEVUELTO: "El trabajador no lo entregó: queda registrado como pérdida.",
+};
+
+/** Nombre de cada rol tal como debe salir en un Excel, sin depender de la pantalla. */
+export const ROLE_EXPORT_LABEL: Record<string, string> = {
+  ADMIN: "Administrador",
+  JEFE_ALMACEN: "Jefe de almacén",
+  USUARIO: "Usuario",
+  FINANZAS: "Finanzas",
+  DETRACCIONES: "Detracciones",
+};
+
+// ---------- Detracciones (SPOT) ----------
+// El transporte de bienes por vía terrestre detrae el 4 % del importe total de la operación,
+// IGV incluido, y solo cuando ese importe supera los S/ 400 (R.S. 073-2006/SUNAT).
+// El depósito se hace sin decimales: si la fracción llega a 0.5 sube al sol siguiente y si no,
+// se suprime (R.S. 183-2004/SUNAT, quinta disposición final). Esto es justo lo que el control
+// en Excel venía haciendo a ojo, redondeando unas veces hacia arriba y otras hacia abajo.
+
+export const DETRACTION_RATE = 4;
+export const DETRACTION_THRESHOLD = 400;
+
+export const DETRACTION_STATUS_LABEL = {
+  NO_APLICA: "No aplica",
+  PENDIENTE: "Pendiente",
+  EN_PROCESO: "En proceso",
+  PAGADA: "Pagada",
+  OBSERVADA: "Observada",
+} as const;
+export type DetractionStatusKey = keyof typeof DETRACTION_STATUS_LABEL;
+
+export type Detraction = {
+  /** Si la operación llega al umbral y por tanto se detrae. */
+  applies: boolean;
+  /** Monto a depositar, en soles enteros. */
+  amount: number;
+  /** Lo que queda por pagarle al proveedor después de descontar la detracción. */
+  netPayable: number;
+};
+
+/**
+ * Calcula la detracción de una factura a partir de su importe total con IGV.
+ *
+ * Solo se aplica a las operaciones en soles: el depósito en el Banco de la Nación se hace
+ * en soles, y detraer una factura en dólares exigiría un tipo de cambio que el sistema no
+ * tiene. Esas quedan como "no aplica" y se tratan a mano.
+ */
+export function detractionFor(
+  total: string | number | null | undefined,
+  rate: number = DETRACTION_RATE,
+  currency: string = "PEN",
+): Detraction {
+  const n = typeof total === "number" ? total : Number(total);
+  if (currency !== "PEN" || !Number.isFinite(n) || n <= DETRACTION_THRESHOLD) {
+    return { applies: false, amount: 0, netPayable: Number.isFinite(n) ? n : 0 };
+  }
+  const amount = Math.round((n * rate) / 100);
+  return { applies: true, amount, netPayable: Math.round((n - amount) * 100) / 100 };
+}
+
 // ---------- Obligaciones periódicas ----------
 export const OBLIGATION_TYPE_LABEL = {
   PRESTAMO: "Préstamo",
@@ -105,6 +194,15 @@ export const OBLIGATION_TYPE_LABEL = {
   OTRO: "Otro",
 } as const;
 export type ObligationTypeKey = keyof typeof OBLIGATION_TYPE_LABEL;
+
+/** En plural, para encabezar la tabla de cada tipo. No basta con agregar una "s". */
+export const OBLIGATION_TYPE_PLURAL: Record<ObligationTypeKey, string> = {
+  PRESTAMO: "Préstamos",
+  SERVICIO: "Servicios",
+  ALQUILER: "Alquileres",
+  IMPUESTO: "Impuestos",
+  OTRO: "Otras obligaciones",
+};
 
 export const OBLIGATION_TYPE_HINT: Record<ObligationTypeKey, string> = {
   PRESTAMO: "Crédito bancario con cronograma de cuotas.",

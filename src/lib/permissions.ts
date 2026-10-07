@@ -14,6 +14,7 @@ export const PERMISSIONS = [
   "suppliers.manage",
   "invoices.mailbox",
   "obligations.view", "obligations.manage", "obligations.pay",
+  "detractions.view", "detractions.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -39,7 +40,14 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "invoices.view", "invoices.manage", "invoices.pay",
     "suppliers.manage",
     "obligations.view", "obligations.manage", "obligations.pay",
+    "detractions.view", "detractions.manage",
     "reports.view",
+  ],
+  // Encargada de detracciones: solo deposita y da cuenta del 4 % al Banco de la Nación.
+  // Ve las facturas para saber sobre qué está depositando, pero no las registra ni las paga.
+  DETRACCIONES: [
+    "invoices.view",
+    "detractions.view", "detractions.manage",
   ],
 };
 
@@ -48,6 +56,7 @@ export const ROLE_LABELS: Record<Role, string> = {
   JEFE_ALMACEN: "Jefe de almacén",
   USUARIO: "Usuario",
   FINANZAS: "Finanzas",
+  DETRACCIONES: "Detracciones",
 };
 
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
@@ -55,6 +64,7 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   JEFE_ALMACEN: "Almacén completo: productos, categorías, trabajadores, ajustes y reportes. Sin usuarios ni facturas.",
   USUARIO: "Almacén: consulta el inventario, registra movimientos y entregas.",
   FINANZAS: "Facturas de proveedores, préstamos y servicios: registra, revisa y marca los pagos.",
+  DETRACCIONES: "Solo detracciones: consulta las facturas y registra los depósitos del 4 % al Banco de la Nación.",
 };
 
 export function can(role: Role | undefined | null, permission: Permission): boolean {

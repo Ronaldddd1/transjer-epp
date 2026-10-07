@@ -9,6 +9,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { SortHeader } from "@/components/ui/sort-header";
 import { StockMeter } from "@/components/ui/stock-meter";
@@ -44,6 +45,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
         description="Stock actual de cada equipo. El stock solo cambia con entradas, salidas, ajustes o entregas."
         actions={
           <>
+            <ExportTable tabla="inventario" />
             {canAdjust && <MovementModal products={productOptions} type="AJUSTE" />}
             {canMove && <MovementModal products={productOptions} type="ENTRADA" />}
             {canMove && <MovementModal products={productOptions} type="SALIDA" />}

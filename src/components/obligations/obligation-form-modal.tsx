@@ -5,6 +5,7 @@ import { useState } from "react";
 import { createObligation, updateObligation } from "@/actions/obligations";
 import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
+import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import { OBLIGATION_TYPE_HINT, OBLIGATION_TYPE_LABEL, todayLima, type ObligationTypeKey } from "@/lib/utils";
 
@@ -20,6 +21,8 @@ export type ObligationFormValues = {
   installmentsCount: number | null;
   disbursedAt: string | null;
   billingDay: number | null;
+  firstDueDate: string | null;
+  endsAt: string | null;
   variableAmount: boolean;
   fixedAmount: string | null;
   notes: string | null;
@@ -29,7 +32,18 @@ export function ObligationFormModal({ obligation }: { obligation?: ObligationFor
   const editing = !!obligation;
   const [type, setType] = useState<ObligationTypeKey>((obligation?.type as ObligationTypeKey) ?? "PRESTAMO");
   const [variable, setVariable] = useState(obligation?.variableAmount ?? true);
+  // La fecha de la primera cuota manda sobre el día de pago: si está puesta, el día se
+  // muestra pero no se escribe, para que no queden dos datos diciendo cosas distintas.
+  const [primera, setPrimera] = useState(obligation?.firstDueDate ?? "");
+  const [dia, setDia] = useState(obligation?.billingDay ? String(obligation.billingDay) : "");
+  const [hasta, setHasta] = useState(obligation?.endsAt ?? "");
   const esPrestamo = type === "PRESTAMO";
+
+  /** Al cerrar sin guardar, el alta siguiente no hereda lo tecleado en esta. */
+  const limpiar = () => {
+    if (editing) return;
+    setType("PRESTAMO"); setVariable(true); setPrimera(""); setDia(""); setHasta("");
+  };
 
   return (
     <FormModal
@@ -42,6 +56,7 @@ export function ObligationFormModal({ obligation }: { obligation?: ObligationFor
       submitLabel={editing ? "Guardar cambios" : "Registrar"}
       size="lg"
       action={(fd) => (editing ? updateObligation(obligation.id, fd) : createObligation(fd))}
+      onClosed={limpiar}
       trigger={(open) =>
         editing ? (
           <Button variant="outline" size="sm" onClick={open}><Pencil className="h-4 w-4" /> Editar</Button>
@@ -89,7 +104,7 @@ export function ObligationFormModal({ obligation }: { obligation?: ObligationFor
                   <Input name="annualRate" defaultValue={obligation?.annualRate ?? ""} inputMode="decimal" placeholder="17.00" invalid={!!errors.annualRate} />
                 </Field>
                 <Field label="Fecha de desembolso" name="disbursedAt" required error={errors.disbursedAt} className="sm:col-span-2">
-                  <Input name="disbursedAt" type="date" defaultValue={obligation?.disbursedAt ?? ""} max={todayLima()} invalid={!!errors.disbursedAt} />
+                  <DateInput name="disbursedAt" defaultValue={obligation?.disbursedAt ?? ""} max={todayLima()} required invalid={!!errors.disbursedAt} />
                 </Field>
               </div>
               <p className="mt-3 text-sm text-steel-600">
@@ -100,11 +115,56 @@ export function ObligationFormModal({ obligation }: { obligation?: ObligationFor
             <div className="rounded-lg border border-steel-200 bg-steel-50 p-4 sm:col-span-6">
               <p className="mb-3 text-sm font-semibold text-ink">Cuándo y cuánto</p>
               <div className="grid gap-4 sm:grid-cols-6">
-                <Field label="Día de pago" name="billingDay" required error={errors.billingDay} hint="Del 1 al 28." className="sm:col-span-2">
-                  <Input name="billingDay" defaultValue={obligation?.billingDay ?? ""} inputMode="numeric" placeholder="15" invalid={!!errors.billingDay} />
+                <Field
+                  label="Primera cuota vence"
+                  name="firstDueDate"
+                  error={errors.firstDueDate}
+                  hint="Desde aquí arranca el calendario. Puede ser un mes que ya pasó."
+                  className="sm:col-span-3"
+                >
+                  <DateInput
+                    name="firstDueDate"
+                    value={primera}
+                    onChange={(v) => setPrimera(v ?? "")}
+                    invalid={!!errors.firstDueDate}
+                  />
+                </Field>
+                <Field
+                  label="Día de pago"
+                  name="billingDay"
+                  required={!primera}
+                  error={errors.billingDay}
+                  hint={primera ? "Sale de la fecha de arriba." : "Del 1 al 31. En febrero cae el 28."}
+                  className="sm:col-span-2"
+                >
+                  <Input
+                    name="billingDay"
+                    value={primera ? String(Number(primera.slice(8, 10))) : dia}
+                    onChange={(e) => setDia(e.target.value)}
+                    readOnly={!!primera}
+                    inputMode="numeric"
+                    placeholder="15"
+                    invalid={!!errors.billingDay}
+                    className={primera ? "bg-steel-100 text-steel-500" : undefined}
+                  />
+                </Field>
+                <Field
+                  label="Vigente hasta"
+                  name="endsAt"
+                  error={errors.endsAt}
+                  hint="Opcional. Pasada esa fecha deja de generar vencimientos."
+                  className="sm:col-span-3"
+                >
+                  <DateInput
+                    name="endsAt"
+                    value={hasta}
+                    onChange={(v) => setHasta(v ?? "")}
+                    min={primera || undefined}
+                    invalid={!!errors.endsAt}
+                  />
                 </Field>
                 {!variable && (
-                  <Field label="Importe mensual" name="fixedAmount" required error={errors.fixedAmount} className="sm:col-span-2">
+                  <Field label="Importe mensual" name="fixedAmount" required error={errors.fixedAmount} className="sm:col-span-3">
                     <Input name="fixedAmount" defaultValue={obligation?.fixedAmount ?? ""} inputMode="decimal" placeholder="450.00" invalid={!!errors.fixedAmount} />
                   </Field>
                 )}

@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { registerQueryHandler } from "@/lib/query-nav";
 import { cn } from "@/lib/utils";
+import { DateInput } from "./date-field";
 import { controlClass } from "./field";
 
 export type FilterDef =
@@ -141,11 +142,11 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
                 {f.options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             ) : (
-              <input
-                type="date"
+              <DateInput
+                name={f.name}
                 value={values.get(f.name) ?? ""}
-                onChange={(e) => update({ [f.name]: e.target.value })}
-                className={cn(controlClass, "h-10 text-sm")}
+                onChange={(v) => update({ [f.name]: v ?? "" })}
+                className="min-w-[10rem]"
               />
             )}
           </label>

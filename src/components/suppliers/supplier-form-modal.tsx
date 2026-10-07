@@ -10,7 +10,7 @@ import { DEFAULT_TERM_DAYS, type PaymentTermKey } from "@/lib/utils";
 
 export type SupplierRow = {
   id: string;
-  ruc: string;
+  ruc: string | null;
   businessName: string;
   tradeName: string | null;
   email: string | null;
@@ -31,6 +31,13 @@ export function SupplierFormModal({ supplier }: { supplier?: SupplierRow }) {
     setDays(String(DEFAULT_TERM_DAYS[value]));
   };
 
+  /** Al cerrar sin guardar, el alta siguiente empieza limpia. */
+  const limpiar = () => {
+    if (editing) return;
+    setTerm("CONTADO");
+    setDays(String(DEFAULT_TERM_DAYS.CONTADO));
+  };
+
   return (
     <FormModal
       title={editing ? `Editar ${supplier.businessName}` : "Nuevo proveedor"}
@@ -38,6 +45,7 @@ export function SupplierFormModal({ supplier }: { supplier?: SupplierRow }) {
       submitLabel={editing ? "Guardar cambios" : "Registrar proveedor"}
       size="md"
       action={(fd) => (editing ? updateSupplier(supplier.id, fd) : createSupplier(fd))}
+      onClosed={limpiar}
       trigger={(open) =>
         editing ? (
           <Button variant="ghost" size="sm" onClick={open} title="Editar" aria-label="Editar proveedor">
@@ -50,7 +58,7 @@ export function SupplierFormModal({ supplier }: { supplier?: SupplierRow }) {
     >
       {({ errors }) => (
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="RUC" name="ruc" required error={errors.ruc} hint="11 dígitos">
+          <Field label="RUC" name="ruc" error={errors.ruc} hint="11 dígitos. Si aún no lo tienes, déjalo vacío: se completa solo cuando llegue una factura con su XML.">
             <Input name="ruc" defaultValue={supplier?.ruc ?? ""} invalid={!!errors.ruc} maxLength={11} inputMode="numeric" placeholder="20548392117" />
           </Field>
           <Field label="Razón social" name="businessName" required error={errors.businessName}>

@@ -3,11 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
-  ExtendScheduleButton, ObligationStatusButton, PayInstallmentModal, ReopenInstallmentButton, SetAmountModal,
+  DeleteObligationButton, ExtendScheduleButton, ObligationStatusButton, PayInstallmentModal,
+  ReopenInstallmentButton, SetAmountModal,
 } from "@/components/obligations/installment-actions";
 import { ObligationFormModal } from "@/components/obligations/obligation-form-modal";
 import { ScheduleImportModal } from "@/components/obligations/schedule-import-modal";
 import { Badge, InstallmentStatusBadge, ObligationStatusBadge } from "@/components/ui/badge";
+import { ExportTable } from "@/components/ui/export-table";
 import { PageHeader, Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -60,6 +62,7 @@ export default async function ObligationDetailPage({ params }: { params: Promise
         description={`${OBLIGATION_TYPE_LABEL[obligation.type]} con ${obligation.creditor}`}
         actions={
           <>
+            <ExportTable tabla="cronograma" extra={{ id: obligation.id }} label="Exportar cronograma" />
             {canManage && esPrestamo && (
               <ScheduleImportModal
                 obligationId={obligation.id}
@@ -77,11 +80,15 @@ export default async function ObligationDetailPage({ params }: { params: Promise
                 reference: obligation.reference, currency: obligation.currency, principal: obligation.principal,
                 annualRate: obligation.annualRate, installmentsCount: obligation.installmentsCount,
                 disbursedAt: obligation.disbursedAt, billingDay: obligation.billingDay,
+                firstDueDate: obligation.firstDueDate, endsAt: obligation.endsAt,
                 variableAmount: obligation.variableAmount, fixedAmount: obligation.fixedAmount, notes: obligation.notes,
               }} />
             )}
             {canManage && obligation.status !== "ANULADA" && (
               <ObligationStatusButton id={obligation.id} status={obligation.status} name={obligation.name} />
+            )}
+            {canManage && (
+              <DeleteObligationButton id={obligation.id} name={obligation.name} paidCount={obligation.paidCount} />
             )}
           </>
         }
@@ -202,6 +209,18 @@ export default async function ObligationDetailPage({ params }: { params: Promise
                     {obligation.variableAmount
                       ? "Cambia cada mes"
                       : formatMoney(obligation.fixedAmount, obligation.currency)}
+                  </Dato>
+                  <Dato label="Vigencia">
+                    {obligation.firstDueDate || obligation.endsAt ? (
+                      <>
+                        {obligation.firstDueDate ? formatDate(obligation.firstDueDate) : "—"}
+                        {" a "}
+                        {obligation.endsAt ? formatDate(obligation.endsAt) : "sin fecha de fin"}
+                        {obligation.endsAt && obligation.endsAt < hoy && (
+                          <span className="ml-1 text-sm text-red-700">· vencida</span>
+                        )}
+                      </>
+                    ) : "Sin plazo definido"}
                   </Dato>
                 </>
               )}

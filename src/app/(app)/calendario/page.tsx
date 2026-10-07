@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { requirePageUser } from "@/lib/auth";
 import { addDays, cn, first, formatDate, formatMoney, todayLima, type SearchParams } from "@/lib/utils";
 import { listPaymentCalendar } from "@/server/obligation-queries";
@@ -73,6 +74,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       <PageHeader
         title="Calendario de pagos"
         description="Facturas de proveedores y cuotas de préstamos y servicios, juntas y ordenadas por fecha."
+        actions={<ExportTable tabla="calendario" />}
       />
 
       <div className="mb-4 flex flex-wrap gap-1.5">

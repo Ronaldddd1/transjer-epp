@@ -3,11 +3,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { toggleEmployee } from "@/actions/employees";
 import { EmployeeFormModal } from "@/components/employees/employee-form-modal";
-import { Badge, DemoBadge } from "@/components/ui/badge";
+import { DemoBadge, EmployeeStateBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
+import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -32,7 +33,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Se
       <PageHeader
         title="Trabajadores"
         description="Personal que recibe EPP. Los trabajadores con historial se desactivan en lugar de eliminarse."
-        actions={canManage && <EmployeeFormModal areas={areas} />}
+        actions={<><ExportTable tabla="trabajadores" />{canManage && <EmployeeFormModal areas={areas} />}</>}
       />
       <FilterBar
         searchPlaceholder="Buscar por nombre, DNI o cargo"
@@ -66,7 +67,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Se
               <Td className="hidden text-steel-600 2xl:table-cell">{e.phone ?? "—"}</Td>
               <Td className="whitespace-nowrap text-steel-600 tabular">{formatDate(e.hireDate)}</Td>
               <Td className="text-right font-display text-lg font-bold tabular">{e.delivered}</Td>
-              <Td>{e.active ? <Badge tone="green">Activo</Badge> : <Badge>Inactivo</Badge>}</Td>
+              <Td><EmployeeStateBadge active={e.active} terminatedAt={e.terminatedAt} /></Td>
               <Td>
                 <div className="flex justify-end gap-0.5">
                   <ButtonLink href={`/trabajadores/${e.id}`} variant="ghost" size="sm" title="Ver historial">

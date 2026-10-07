@@ -5,15 +5,16 @@ import { notFound } from "next/navigation";
 import { RemoveAttachmentButton, UploadAttachmentsModal } from "@/components/invoices/attachments";
 import { GuideReceivedModal, InvoiceReasonModal, PayInvoiceModal, RestoreInvoiceButton } from "@/components/invoices/invoice-actions";
 import { InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
-import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
+import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
+import { DetractionModal } from "@/components/invoices/detraction-actions";
 import { PageHeader, Panel } from "@/components/ui/page-header";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   ATTACHMENT_KIND_LABEL, cn, formatDate, formatDateTime, formatFileSize, formatMoney,
-  INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, invoiceNumber, PAYMENT_TERM_LABEL,
+  DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, invoiceNumber, PAYMENT_TERM_LABEL,
 } from "@/lib/utils";
-import { getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
+import { getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Detalle de factura" };
@@ -37,14 +38,26 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const invoice = await getInvoice(id);
   if (!invoice) notFound();
 
-  const [attachments, email, suppliers] = await Promise.all([
+  const [attachments, email, suppliers, clients] = await Promise.all([
     listInvoiceAttachments(id),
     getInvoiceEmail(id),
     can(user.role, "invoices.manage") ? getSupplierOptions() : Promise.resolve([]),
+    can(user.role, "invoices.manage") ? getClientOptions() : Promise.resolve([]),
   ]);
 
   const canManage = can(user.role, "invoices.manage");
   const canPay = can(user.role, "invoices.pay");
+  const canDetraction = can(user.role, "detractions.manage");
+  const detraccion = {
+    id: invoice.id, series: invoice.series, number: invoice.number, currency: invoice.currency,
+    total: invoice.total, supplierName: invoice.supplierName,
+    detractionAmount: invoice.detractionAmount, detractionStatus: invoice.detractionStatus,
+    detractionPaidAt: invoice.detractionPaidAt, detractionReceipt: invoice.detractionReceipt,
+    detractionOperation: invoice.detractionOperation, detractionNotes: invoice.detractionNotes,
+  };
+  const neto = Number(invoice.total) - Number(invoice.detractionAmount ?? 0);
+  const saldo = neto - Number(invoice.advances ?? 0);
+  const tieneServicio = !!(invoice.plate || invoice.clientName || invoice.originCity || invoice.destinationCity);
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
   const ref = {
     id: invoice.id, series: invoice.series, number: invoice.number,
@@ -71,13 +84,19 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               description: invoice.description, grtNumber: invoice.grtNumber, notes: invoice.notes,
               receptionDate: invoice.receptionDate,
               paymentTerm: invoice.paymentTerm, termDays: invoice.termDays, guideReceivedAt: invoice.guideReceivedAt,
-            }} />}
+              contactName: invoice.contactName, plate: invoice.plate, clientName: invoice.clientName,
+              originCity: invoice.originCity, destinationCity: invoice.destinationCity,
+              volumeM3: invoice.volumeM3, weightTn: invoice.weightTn, advances: invoice.advances,
+            }} clients={clients} />}
             {canManage && editable && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && (
               <GuideReceivedModal invoice={ref} />
             )}
             {canManage && invoice.status === "PENDIENTE" && <InvoiceReasonModal invoice={ref} action="observe" />}
             {canManage && invoice.status === "OBSERVADA" && <RestoreInvoiceButton invoice={ref} />}
             {canPay && invoice.status === "PAGADA" && <InvoiceReasonModal invoice={ref} action="reopen" />}
+            {canDetraction && invoice.detractionStatus !== "NO_APLICA" && invoice.status !== "ANULADA" && (
+              <DetractionModal invoice={detraccion} variant="outline" />
+            )}
             {canManage && editable && <InvoiceReasonModal invoice={ref} action="void" />}
           </>
         }
@@ -137,6 +156,52 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 {invoice.notes && <p className="mt-1 text-steel-600"><span className="text-steel-500">Observaciones: </span>{invoice.notes}</p>}
               </div>
             )}
+          </Panel>
+
+          {tieneServicio && (
+            <Panel title="Servicio de transporte">
+              <dl className="grid grid-cols-2 divide-x divide-y divide-steel-100 border-t border-steel-100 sm:grid-cols-3">
+                <Dato label="Cliente">{invoice.clientName ?? "—"}</Dato>
+                <Dato label="Placa">{invoice.plate ?? "—"}</Dato>
+                <Dato label="Contacto">{invoice.contactName ?? "—"}</Dato>
+                <Dato label="Origen">{invoice.originCity ?? "—"}</Dato>
+                <Dato label="Destino">{invoice.destinationCity ?? "—"}</Dato>
+                <Dato label="Carga">
+                  {[invoice.volumeM3 && `${Number(invoice.volumeM3)} m³`, invoice.weightTn && `${Number(invoice.weightTn)} tn`]
+                    .filter(Boolean).join(" · ") || "—"}
+                </Dato>
+              </dl>
+            </Panel>
+          )}
+
+          <Panel title="Detracción">
+            <dl className="grid grid-cols-2 divide-x divide-y divide-steel-100 border-t border-steel-100 sm:grid-cols-3">
+              <Dato label="Estado"><DetractionBadge status={invoice.detractionStatus} /></Dato>
+              <Dato label="Tasa">{Number(invoice.detractionRate)} %</Dato>
+              <Dato label="Monto a depositar">
+                <strong>{formatMoney(invoice.detractionAmount, invoice.currency)}</strong>
+              </Dato>
+              <Dato label="Fecha del depósito">{invoice.detractionPaidAt ? formatDate(invoice.detractionPaidAt) : "—"}</Dato>
+              <Dato label="N.º de constancia">{invoice.detractionReceipt ?? "—"}</Dato>
+              <Dato label="N.º de operación">{invoice.detractionOperation ?? "—"}</Dato>
+            </dl>
+            <div className="border-t border-steel-100 px-4 py-3 text-sm">
+              {invoice.detractionStatus === "NO_APLICA" ? (
+                <p className="text-steel-600">
+                  La operación no supera los S/ {DETRACTION_THRESHOLD}, así que no se detrae y al proveedor
+                  se le paga el total.
+                </p>
+              ) : (
+                <p className="text-steel-600">
+                  Al proveedor se le pagan <strong className="text-ink">{formatMoney(neto.toFixed(2), invoice.currency)}</strong>
+                  {Number(invoice.advances) > 0 && (
+                    <> · adelantado {formatMoney(invoice.advances, invoice.currency)}, queda {formatMoney(saldo.toFixed(2), invoice.currency)}</>
+                  )}
+                  . El resto va al Banco de la Nación.
+                </p>
+              )}
+              {invoice.detractionNotes && <p className="mt-1 text-steel-600"><span className="text-steel-500">Observaciones: </span>{invoice.detractionNotes}</p>}
+            </div>
           </Panel>
 
           {invoice.status === "PAGADA" && (
