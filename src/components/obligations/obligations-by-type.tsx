@@ -20,7 +20,9 @@ import type { ObligationRow } from "@/server/obligation-queries";
  * vence y cuánto llega este mes. Cada tabla muestra lo suyo.
  */
 
-const ORDEN: ObligationTypeKey[] = ["PRESTAMO", "ALQUILER", "SERVICIO", "IMPUESTO", "OTRO"];
+const ORDEN: ObligationTypeKey[] = [
+  "PRESTAMO", "ALQUILER", "COCHERA", "SEGURO", "LINEA", "SERVICIO", "IMPUESTO", "OTRO",
+];
 
 /**
  * Un importe sumado por moneda. Nunca se juntan soles con dólares: sumarlos daría un número

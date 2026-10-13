@@ -43,6 +43,11 @@ export function ObligationFormModal({ obligation, conceptos = [] }: {
   const [dia, setDia] = useState(obligation?.billingDay ? String(obligation.billingDay) : "");
   const [hasta, setHasta] = useState(obligation?.endsAt ?? "");
   const esPrestamo = type === "PRESTAMO";
+  /** El tipo de un préstamo no se toca: su cronograma depende de que lo siga siendo. */
+  const tipoFijo = editing && obligation.type === "PRESTAMO";
+  /** Editando no se ofrece convertir un servicio en préstamo: eso se da de alta aparte. */
+  const tiposElegibles = Object.entries(OBLIGATION_TYPE_LABEL)
+    .filter(([v]) => !editing || tipoFijo || v !== "PRESTAMO");
 
   /** Al cerrar sin guardar, el alta siguiente no hereda lo tecleado en esta. */
   const limpiar = () => {
@@ -72,11 +77,23 @@ export function ObligationFormModal({ obligation, conceptos = [] }: {
     >
       {({ errors }) => (
         <div className="grid gap-4 sm:grid-cols-6">
-          <Field label="Tipo" name="type" required error={errors.type} hint={OBLIGATION_TYPE_HINT[type]} className="sm:col-span-3">
-            <Select name="type" value={type} onChange={(e) => setType(e.target.value as ObligationTypeKey)} disabled={editing}>
-              {Object.entries(OBLIGATION_TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          <Field
+            label="Tipo"
+            name="type"
+            required
+            error={errors.type}
+            hint={tipoFijo
+              ? "Un préstamo no se puede cambiar de tipo: lleva cronograma del banco."
+              : OBLIGATION_TYPE_HINT[type]}
+            className="sm:col-span-3"
+          >
+            {/* Editando se puede corregir el tipo —una cochera que quedó como servicio, por
+                ejemplo—, salvo en los préstamos: cambiarlos de tipo dejaría huérfano el
+                cronograma con su capital, su tasa y sus intereses. */}
+            <Select name="type" value={type} onChange={(e) => setType(e.target.value as ObligationTypeKey)} disabled={tipoFijo}>
+              {tiposElegibles.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </Select>
-            {editing && <input type="hidden" name="type" value={type} />}
+            {tipoFijo && <input type="hidden" name="type" value={type} />}
           </Field>
           <Field label="Moneda" name="currency" required error={errors.currency} className="sm:col-span-3">
             <Select name="currency" defaultValue={obligation?.currency ?? "PEN"}>

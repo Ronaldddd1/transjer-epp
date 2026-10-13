@@ -4,6 +4,7 @@
  * luego ejecuta `npm run db:generate` y `npm run db:migrate`.
  */
 import { relations, sql } from "drizzle-orm";
+import { OBLIGATION_TYPES, type ObligationTypeKey } from "@/lib/utils";
 import {
   boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   uniqueIndex, uuid, varchar,
@@ -44,7 +45,16 @@ export const detractionStatusEnum = pgEnum("detraction_status", [
 export const returnConditionEnum = pgEnum("return_condition", ["REUTILIZABLE", "DESCARTADO", "NO_DEVUELTO"]);
 
 /** Obligaciones periódicas: préstamos bancarios, servicios, alquileres e impuestos. */
-export const obligationTypeEnum = pgEnum("obligation_type", ["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"]);
+/**
+ * Los tipos de obligación son texto con una restricción CHECK, no un enum de Postgres.
+ *
+ * Eran un enum, pero agregarle un valor a un enum y usarlo en la misma corrida de
+ * migraciones no se puede: Postgres no deja usar un valor recién agregado hasta que la
+ * transacción cierra, y Drizzle corre todas las migraciones pendientes en una sola. Con
+ * texto, sumar un tipo nuevo es agregarlo a OBLIGATION_TYPES en src/lib/utils.ts y
+ * ampliar la restricción en una migración.
+ */
+const tiposEnSql = sql.raw(OBLIGATION_TYPES.map((t) => `'${t}'`).join(","));
 export const obligationStatusEnum = pgEnum("obligation_status", ["ACTIVA", "CERRADA", "ANULADA"]);
 export const installmentStatusEnum = pgEnum("installment_status", ["PENDIENTE", "PAGADA", "ANULADA"]);
 
@@ -374,7 +384,7 @@ export const appSettings = pgTable("app_settings", {
  */
 export const obligations = pgTable("obligations", {
   id: uuid("id").primaryKey().defaultRandom(),
-  type: obligationTypeEnum("type").notNull().default("SERVICIO"),
+  type: varchar("type", { length: 16 }).notNull().default("SERVICIO").$type<ObligationType>(),
   /** Cómo la llama la empresa: "Préstamo BCP capital de trabajo", "Claro - flota". */
   name: varchar("name", { length: 160 }).notNull(),
   /** A quién se le paga: BCP, Interbank, Claro, Movistar, el arrendador. */
@@ -430,6 +440,7 @@ export const obligations = pgTable("obligations", {
 }, (t) => [
   index("obligations_status_type_idx").on(t.status, t.type),
   index("obligations_creditor_idx").on(t.creditor),
+  check("obligations_type_valid", sql`${t.type} in (${tiposEnSql})`),
   check("obligations_currency_valid", sql`${t.currency} in ('PEN','USD')`),
   check("obligations_billing_day_range", sql`${t.billingDay} is null or ${t.billingDay} between 1 and 31`),
   check("obligations_vigencia_coherente", sql`${t.endsAt} is null or ${t.firstDueDate} is null or ${t.endsAt} >= ${t.firstDueDate}`),
@@ -562,7 +573,7 @@ export type PaymentTerm = (typeof paymentTermEnum.enumValues)[number];
 export type DetractionStatus = (typeof detractionStatusEnum.enumValues)[number];
 export type Obligation = typeof obligations.$inferSelect;
 export type ObligationInstallment = typeof obligationInstallments.$inferSelect;
-export type ObligationType = (typeof obligationTypeEnum.enumValues)[number];
+export type ObligationType = ObligationTypeKey;
 export type ObligationStatus = (typeof obligationStatusEnum.enumValues)[number];
 export type InstallmentStatus = (typeof installmentStatusEnum.enumValues)[number];
 export type EppReturn = typeof eppReturns.$inferSelect;

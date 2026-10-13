@@ -186,14 +186,31 @@ export function detractionFor(
 }
 
 // ---------- Obligaciones periódicas ----------
+/**
+ * Los tipos de obligación, en el orden en que se muestran.
+ *
+ * Cochera, seguro y línea tienen tipo propio en vez de caer todos en "Servicio": son los
+ * tres gastos que la empresa repite por cada unidad de la flota, y mezclados con la luz y
+ * el internet no se podía leer cuánto se va en cada cosa.
+ */
 export const OBLIGATION_TYPE_LABEL = {
   PRESTAMO: "Préstamo",
-  SERVICIO: "Servicio",
   ALQUILER: "Alquiler",
+  COCHERA: "Cochera",
+  SEGURO: "Seguro",
+  LINEA: "Línea móvil",
+  SERVICIO: "Servicio",
   IMPUESTO: "Impuesto",
   OTRO: "Otro",
 } as const;
 export type ObligationTypeKey = keyof typeof OBLIGATION_TYPE_LABEL;
+
+/**
+ * La lista de tipos, en un solo lugar. De aquí salen la restricción de la base, el
+ * validador del formulario y el orden de las tablas: agregar un tipo es agregarlo arriba
+ * y correr una migración que amplíe la restricción.
+ */
+export const OBLIGATION_TYPES = Object.keys(OBLIGATION_TYPE_LABEL) as [ObligationTypeKey, ...ObligationTypeKey[]];
 
 /**
  * Con qué se agrupa una obligación cuando nadie escribió su concepto.
@@ -211,16 +228,22 @@ export function conceptoDeObligacion(nombre: string): string {
 /** En plural, para encabezar la tabla de cada tipo. No basta con agregar una "s". */
 export const OBLIGATION_TYPE_PLURAL: Record<ObligationTypeKey, string> = {
   PRESTAMO: "Préstamos",
-  SERVICIO: "Servicios",
   ALQUILER: "Alquileres",
+  COCHERA: "Cocheras",
+  SEGURO: "Seguros",
+  LINEA: "Líneas móviles",
+  SERVICIO: "Servicios",
   IMPUESTO: "Impuestos",
   OTRO: "Otras obligaciones",
 };
 
 export const OBLIGATION_TYPE_HINT: Record<ObligationTypeKey, string> = {
   PRESTAMO: "Crédito bancario con cronograma de cuotas.",
-  SERVICIO: "Celular, luz, agua, internet y similares.",
-  ALQUILER: "Local, cochera o equipo alquilado.",
+  ALQUILER: "Local, oficina, almacén o equipo alquilado.",
+  COCHERA: "Estacionamiento de las unidades, una por placa.",
+  SEGURO: "SOAT y pólizas de las unidades o de toda la flota.",
+  LINEA: "Celulares y planes de telefonía.",
+  SERVICIO: "Luz, agua, internet y similares.",
   IMPUESTO: "Pagos a SUNAT u otra entidad.",
   OTRO: "Cualquier pago que se repite cada mes.",
 };
@@ -275,6 +298,43 @@ export const DEFAULT_TERM_DAYS: Record<PaymentTermKey, number> = { CONTADO: 1, C
 export function addDays(ymd: string, days: number): string {
   return new Date(Date.parse(`${ymd}T12:00:00Z`) + days * DAY).toISOString().slice(0, 10);
 }
+
+// ---------- Meses, para la cuadrícula del calendario ----------
+
+/** "2026-10" → "2026-10-01" */
+export const monthStart = (mes: string) => `${mes}-01`;
+
+/** "2026-10" → "2026-10-31". Sale de restarle un día al 1 del mes siguiente. */
+export function monthEnd(mes: string): string {
+  const [y, m] = mes.split("-").map(Number);
+  const siguiente = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+  return addDays(siguiente, -1);
+}
+
+/** "2026-10" más n meses: "2026-12", "2026-09". */
+export function addMonths(mes: string, n: number): string {
+  const [y, m] = mes.split("-").map(Number);
+  const total = y * 12 + (m - 1) + n;
+  return `${Math.floor(total / 12)}-${String((total % 12) + 1).padStart(2, "0")}`;
+}
+
+const MESES = [
+  "enero", "febrero", "marzo", "abril", "mayo", "junio",
+  "julio", "agosto", "setiembre", "octubre", "noviembre", "diciembre",
+];
+
+/** "2026-10" → "Octubre de 2026", como se encabeza un calendario. */
+export function monthLabel(mes: string): string {
+  const [y, m] = mes.split("-").map(Number);
+  const nombre = MESES[m - 1] ?? "";
+  return `${nombre.charAt(0).toUpperCase()}${nombre.slice(1)} de ${y}`;
+}
+
+/** Qué día de la semana cae esa fecha: 0 domingo … 6 sábado. */
+export const weekdayOf = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay();
+
+/** Encabezados de la cuadrícula, empezando en domingo como los calendarios de pared. */
+export const WEEKDAYS = ["Dom.", "Lun.", "Mar.", "Mié.", "Jue.", "Vie.", "Sáb."] as const;
 
 export type PayDueInput = {
   paymentTerm: PaymentTermKey;

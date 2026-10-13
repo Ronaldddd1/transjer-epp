@@ -2,7 +2,7 @@ import "server-only";
 import {
   ATTACHMENT_KIND_LABEL, DETRACTION_STATUS_LABEL, formatDate, formatDateTime, INSTALLMENT_STATUS_LABEL,
   INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
-  EMAIL_STATUS_LABEL, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
+  EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
   PAYMENT_TERM_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL, STOCK_STATUS_LABEL, stockStatus,
   type SearchParamsRecord,
 } from "@/lib/utils";
@@ -327,10 +327,23 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
     title: "Calendario de pagos",
     permission: "invoices.view",
     async build(sp) {
-      const dias = Number(typeof sp.dias === "string" ? sp.dias : "") || 15;
+      // Se exporta el mes que se está mirando en pantalla. Si no viene ninguno —un enlace
+      // viejo, o la exportación desde otro sitio—, se cae a la ventana de días de antes.
       const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date());
+      const pedido = typeof sp.mes === "string" ? sp.mes : "";
+      const mes = /^\d{4}-(0[1-9]|1[0-2])$/.test(pedido) ? pedido : null;
       const mover = (d: number) => new Date(Date.parse(`${hoy}T12:00:00Z`) + d * 86_400_000).toISOString().slice(0, 10);
-      const entradas = await listPaymentCalendar(mover(-30), mover(dias));
+
+      let desde: string, hasta: string;
+      if (mes) {
+        desde = monthStart(mes);
+        hasta = monthEnd(mes);
+      } else {
+        const dias = Number(typeof sp.dias === "string" ? sp.dias : "") || 15;
+        desde = mover(-30);
+        hasta = mover(dias);
+      }
+      const entradas = await listPaymentCalendar(desde, hasta);
       return [{
         title: "Calendario de pagos",
         columns: [

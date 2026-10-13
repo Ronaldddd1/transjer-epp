@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OBLIGATION_TYPES } from "@/lib/utils";
 
 /** Concuerda el mensaje con el género del campo: "La serie es obligatoria", "El motivo es obligatorio". */
 function required(label: string) {
@@ -245,7 +246,7 @@ const optionalInt = (label: string, min: number, max: number) =>
     .refine((v) => v === null || (v >= min && v <= max), `${label} debe estar entre ${min} y ${max}`);
 
 export const obligationSchema = z.object({
-  type: z.enum(["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"]),
+  type: z.enum(OBLIGATION_TYPES),
   name: requiredText("El nombre", 160),
   creditor: requiredText("La entidad", 160),
   reference: optionalText(80),

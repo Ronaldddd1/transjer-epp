@@ -78,6 +78,13 @@
       "when": 1791856735564,
       "tag": "0010_concepto_obligaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791856736564,
+      "tag": "0011_tipos_de_obligacion",
+      "breakpoints": true
     }
   ]
 }

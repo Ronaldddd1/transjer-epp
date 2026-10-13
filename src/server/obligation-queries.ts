@@ -6,7 +6,7 @@ import {
   obligationInstallments, obligations, supplierInvoices, suppliers, users,
   type ObligationStatus, type ObligationType,
 } from "@/db/schema";
-import { first, isYmd, type SearchParamsRecord } from "@/lib/utils";
+import { first, isYmd, OBLIGATION_TYPES, type SearchParamsRecord } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 const today = sql`((now() at time zone 'America/Lima')::date)`;
@@ -19,7 +19,7 @@ export type ObligationFilters = {
   currency?: "PEN" | "USD";
 };
 
-const TYPES: ObligationType[] = ["PRESTAMO", "SERVICIO", "ALQUILER", "IMPUESTO", "OTRO"];
+const TYPES: ObligationType[] = [...OBLIGATION_TYPES];
 const STATUSES: ObligationStatus[] = ["ACTIVA", "CERRADA", "ANULADA"];
 
 export function readObligationFilters(sp: SearchParamsRecord): ObligationFilters {

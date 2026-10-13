@@ -85,8 +85,12 @@ export async function updateObligation(id: string, formData: FormData): Promise<
     const data = conDiaDePago(obligationSchema.parse(formToObject(formData)));
     const before = await loadObligation(id);
     if (before.status === "ANULADA") throw new BusinessError("La obligación está anulada.");
-    if (before.type !== data.type) {
-      throw new BusinessError("No se puede cambiar el tipo. Anula esta obligación y registra una nueva.");
+    // Entre los tipos periódicos el tipo sí se corrige —una cochera que se cargó como
+    // servicio, una línea que quedó suelta—, porque todos llevan el mismo calendario
+    // mensual y lo único que cambia es en qué tabla se lista. Con un préstamo no: su
+    // cronograma trae capital, tasa e intereses que ningún otro tipo sabe leer.
+    if (before.type !== data.type && (before.type === "PRESTAMO" || data.type === "PRESTAMO")) {
+      throw new BusinessError("Un préstamo no se puede convertir en otra cosa, ni al revés. Anula esta obligación y registra una nueva.");
     }
 
     // Cambiar cuándo vence un servicio no sirve de nada si los vencimientos ya creados se

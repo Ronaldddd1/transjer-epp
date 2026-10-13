@@ -28,9 +28,9 @@ def limpiar():
     """Borra lo que dejaron corridas anteriores de esta misma prueba, y solo eso."""
     for q in [
         "delete from obligations where name like 'Préstamo BCP capital de trabajo %' or name like 'Claro flota %'",
-        # Las cocheras y seguros de la prueba de segmentación: solo los que llevan el sello
-        # de seis dígitos que pone esta prueba, nunca una obligación de verdad.
-        r"""delete from obligations where name ~ '^(Cochera|Seguro) [0-9]{6} '""",
+        # Las cocheras, seguros y líneas de la prueba de tipos y segmentación: solo las que
+        # llevan el sello de seis dígitos que pone esta prueba, nunca una de verdad.
+        r"""delete from obligations where name ~ '^(Cochera|Seguro|Linea|Mal tipeada) [0-9]{6}'""",
         "delete from supplier_invoices where supplier_id in (select id from suppliers where business_name like 'AUTOESPAR PRUEBA %')",
         "delete from suppliers where business_name like 'AUTOESPAR PRUEBA %'",
     ]:
@@ -91,7 +91,9 @@ def main():
         nav = p.chromium.launch()
         page = nav.new_page()
         errores_consola = []
-        page.on("pageerror", lambda e: errores_consola.append(str(e)))
+        # Con la URL al lado: un error suelto al final de un recorrido largo no dice en qué
+        # pantalla saltó, y sin eso hay que volver a correr toda la prueba para encontrarlo.
+        page.on("pageerror", lambda e: errores_consola.append(f"{page.url} → {e}"))
 
         # --- Entrar ---
         page.goto(f"{BASE}/login")
@@ -342,26 +344,27 @@ def main():
         prestamos = page.locator("section, div").filter(has_text="Crédito bancario con cronograma").last.inner_text()
         check("la tabla de préstamos muestra capital y TEA", "Capital" in prestamos and "TEA" in prestamos, prestamos[:150])
         check("y cuántas cuotas van pagadas", "Cuotas" in prestamos)
-        servicios = page.locator("section, div").filter(has_text="Celular, luz, agua").last.inner_text()
+        servicios = page.locator("section, div").filter(has_text="Luz, agua, internet").last.inner_text()
         check("la tabla de servicios muestra el día de pago", "Vence cada mes" in servicios, servicios[:150])
         check("la de servicios no habla de capital ni de TEA", "TEA" not in servicios, servicios[:150])
         check("ya no existe la columna Tipo repetida en cada fila",
               page.locator("th", has_text="Tipo").count() == 0)
 
-        # --- Totales del mes y segmentación por concepto ---
-        # Lo que pidió la empresa: ver junto todo lo que es cochera aunque sean placas
-        # distintas y se le pague a playas distintas. Dos cocheras con el mismo concepto
-        # tienen que caer en un solo bloque, con la suma del mes de las dos; el seguro,
-        # que es otro concepto, va en su propio bloque. Hace falta más de un concepto:
-        # con uno solo la fila de grupo repetiría la cabecera y por eso no se dibuja.
-        for placa, entidad, concepto, importe in [
-            ("BYH716", "Playa Central", f"Cochera {SELLO}", 450.00),
-            ("D4T551", "Estacionamiento Sur", f"Cochera {SELLO}", 380.00),
-            ("BYH716", "Pacifico", f"Seguro {SELLO}", 620.50),
+        # --- Tipos propios, totales del mes y segmentación por concepto ---
+        # Cochera, seguro y línea tienen tipo propio en vez de caer todos en "Servicio",
+        # que es lo que pidió la empresa: mezclados con la luz y el internet no se leía
+        # cuánto se va en cada cosa. Dentro de un tipo se sigue agrupando por concepto,
+        # así que las dos cocheras del mismo concepto van juntas aunque sean placas
+        # distintas y se le pague a playas distintas.
+        for nombre, entidad, tipo, concepto, importe in [
+            (f"Cochera {SELLO} BYH716", "Playa Central", "COCHERA", f"Cochera {SELLO}", 450.00),
+            (f"Cochera {SELLO} D4T551", "Estacionamiento Sur", "COCHERA", f"Cochera {SELLO}", 380.00),
+            (f"Cochera {SELLO} patio", "Inmobiliaria", "COCHERA", f"Patio {SELLO}", 900.00),
+            (f"Seguro {SELLO} BYH716", "Pacifico", "SEGURO", f"Seguro {SELLO}", 620.50),
+            (f"Linea {SELLO} 922783263", "Claro", "LINEA", f"Linea {SELLO}", 79.90),
         ]:
-            nombre = f"{concepto} {placa}"
             ejecutar("insert into obligations (type, name, creditor, category, currency, billing_day, fixed_amount) "
-                     f"values ('SERVICIO', '{nombre}', '{entidad}', '{concepto}', 'PEN', 5, {importe})")
+                     f"values ('{tipo}', '{nombre}', '{entidad}', '{concepto}', 'PEN', 5, {importe})")
             ejecutar("insert into obligation_installments (obligation_id, number, due_date, total) "
                      f"select id, 1, date_trunc('month', current_date) + interval '4 days', {importe} "
                      f"from obligations where name = '{nombre}'")
@@ -371,27 +374,70 @@ def main():
         check("hay un total a pagar del mes", "Total a pagar este mes" in cuerpo)
         check("explica lo que viene arrastrado", "meses anteriores" in cuerpo)
         check("cada tipo dice su total del mes", "este mes" in cuerpo)
-        servicios = page.locator("section, div").filter(has_text="Celular, luz, agua").last.inner_text()
-        check("los servicios se agrupan por concepto", "obligación(es) · este mes" in servicios, servicios[:300])
-        # Las dos cocheras quedan en un bloque, no en uno cada una.
-        check("las dos cocheras caen en un solo bloque",
-              servicios.count(f"Cochera {SELLO}\n") == 1 or
-              re.search(rf"Cochera {SELLO}\s+2 obligación\(es\)", servicios) is not None,
-              servicios[:400])
-        # 450 + 380 = 830: el total del bloque suma las dos placas.
-        check("y el bloque de cocheras suma las dos placas", "830.00" in servicios, servicios[:400])
-        # El seguro es otro concepto: su propio bloque con su propio total.
-        check("el seguro va en su propio bloque",
-              re.search(rf"Seguro {SELLO}\s+1 obligación\(es\)", servicios) is not None, servicios[:400])
-        check("y no se mezcla con las cocheras", "620.50" in servicios, servicios[:400])
 
-        # --- Calendario unificado ---
-        page.goto(f"{BASE}/calendario?dias=60")
-        page.wait_for_timeout(1200)
+        # Cada tipo nuevo tiene su propia tabla, con su plural bien escrito.
+        for plural in ["Cocheras", "Seguros", "Líneas móviles"]:
+            check(f"hay una tabla de {plural.lower()}", f">{plural}<" in cuerpo)
+        check("las cocheras ya no salen bajo servicios",
+              "Cochera" not in page.locator("section, div").filter(has_text="Luz, agua, internet").last.inner_text())
+
+        cocheras = page.locator("section, div").filter(has_text="Estacionamiento de las unidades").last.inner_text()
+        # Dos conceptos dentro del tipo: las dos placas de un lado, el patio del otro.
+        check("las cocheras se agrupan por concepto", "obligación(es) · este mes" in cocheras, cocheras[:300])
+        check("las dos placas caen en un solo bloque",
+              re.search(rf"Cochera {SELLO}\s+2 obligación\(es\)", cocheras) is not None, cocheras[:400])
+        # 450 + 380 = 830: el total del bloque suma las dos placas.
+        check("y el bloque suma las dos placas", "830.00" in cocheras, cocheras[:400])
+        check("el patio va en su propio bloque",
+              re.search(rf"Patio {SELLO}\s+1 obligación\(es\)", cocheras) is not None, cocheras[:400])
+
+        seguros = page.locator("section, div").filter(has_text="SOAT y pólizas").last.inner_text()
+        check("el seguro está en la tabla de seguros", "620.50" in seguros, seguros[:300])
+        check("y no en la de cocheras", "620.50" not in cocheras, cocheras[:400])
+
+        # --- El tipo se puede corregir desde la ficha ---
+        # Una cochera que se cargó como servicio tiene que poder arreglarse sin anularla.
+        ejecutar("insert into obligations (type, name, creditor, currency, billing_day, fixed_amount) "
+                 f"values ('SERVICIO', 'Mal tipeada {SELLO}', 'Playa Norte', 'PEN', 5, 200)")
+        mal = psql(f"select id from obligations where name = 'Mal tipeada {SELLO}'")
+        page.goto(f"{BASE}/obligaciones/{mal}"); page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Editar").click(); page.wait_for_timeout(600)
+        check("editando se puede cambiar el tipo", not page.locator("select[name=type]").is_disabled())
+        check("pero no se ofrece convertirla en préstamo",
+              "PRESTAMO" not in page.eval_on_selector_all("select[name=type] option", "o => o.map(x => x.value)"))
+        page.select_option("select[name=type]", "COCHERA")
+        page.get_by_role("button", name="Guardar cambios").click(); page.wait_for_timeout(2500)
+        check("el tipo corregido queda guardado",
+              psql(f"select type from obligations where id = '{mal}'") == "COCHERA")
+
+        # El préstamo sí queda bloqueado: su cronograma depende de que lo siga siendo.
+        prestamo_id = psql(f"select id from obligations where name = '{PRESTAMO}'")
+        page.goto(f"{BASE}/obligaciones/{prestamo_id}"); page.wait_for_timeout(1000)
+        page.get_by_role("button", name="Editar").click(); page.wait_for_timeout(600)
+        check("un préstamo no deja cambiar de tipo", page.locator("select[name=type]").is_disabled())
+        page.keyboard.press("Escape"); page.wait_for_timeout(400)
+
+        # --- Calendario, con forma de calendario ---
+        page.goto(f"{BASE}/calendario")
+        page.wait_for_timeout(1500)
         cal = page.content()
-        check("el calendario junta facturas y cuotas",
-              f"F049-{N_CONTADO}" in cal and (SERVICIO in cal or PRESTAMO in cal), cal[:0])
-        check("el calendario marca lo vencido", "Vencido sin pagar" in cal or "Por pagar" in cal)
+        columnas = page.eval_on_selector_all("thead th", "e => e.map(x => x.innerText.trim().toUpperCase())")
+        check("el calendario tiene los siete días de la semana",
+              columnas == ["DOM.", "LUN.", "MAR.", "MIÉ.", "JUE.", "VIE.", "SÁB."], columnas)
+        check("y encabeza el mes que se está mirando",
+              re.search(r"(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Setiembre|Octubre|Noviembre|Diciembre) de \d{4}", cal) is not None)
+        check("marca el día de hoy", page.locator("td.bg-brand-soft").count() >= 1)
+        check("el calendario junta facturas y cuotas de este mes",
+              f"Cochera {SELLO}" in cal and ("F049" in cal or "F001" in cal), cal[:0])
+        check("avisa de lo que viene vencido de antes", "Viene vencido de antes" in cal)
+
+        # Moverse de mes cambia lo que se muestra, no la página.
+        mes_actual = page.locator("h2").first.inner_text()
+        page.click("a[aria-label='Mes siguiente']"); page.wait_for_timeout(1200)
+        check("se puede pasar al mes siguiente",
+              page.locator("h2").first.inner_text() != mes_actual and "mes=" in page.url, page.url)
+        page.click("a[aria-label='Mes anterior']"); page.wait_for_timeout(1200)
+        check("y volver al anterior", page.locator("h2").first.inner_text() == mes_actual)
 
         # --- Permisos: finanzas ve el módulo, almacén no ---
         check("sin errores de JavaScript en toda la sesión",

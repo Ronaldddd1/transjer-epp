@@ -10,6 +10,11 @@ export function LoginForm({ next }: { next: string }) {
   const [state, action, pending] = useActionState(loginAction, undefined);
   return (
     <form
+      // Sin method, un formulario HTML se envía por GET. Mientras el JavaScript de la
+      // página todavía no carga —o si falla—, el navegador manda el formulario igual, y
+      // por GET la contraseña se va escrita en la URL: queda en el historial del
+      // navegador y en los registros del servidor. Con POST no viaja en la dirección.
+      method="post"
       className="mt-8 grid gap-4"
       onSubmit={(e) => {
         // Se evita el reinicio automático del formulario para no borrar el usuario tras un error.

@@ -1,52 +1,75 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Pagos agrupados por concepto en préstamos y servicios
-=====================================================
+Tipos propios para cochera, seguro y línea · calendario de pagos con forma de calendario
+=========================================================================================
 
-QUÉ CAMBIA
-----------
+1. TIPOS NUEVOS DE OBLIGACIÓN
+-----------------------------
 
-En "Préstamos y servicios", dentro de cada tabla las obligaciones ahora se juntan por
-CONCEPTO y no por entidad.
+Cochera, seguro y línea móvil ya no caen bajo "Servicio": cada uno tiene su propio tipo y
+su propia tabla. Ahora en "Préstamos y servicios" hay una tabla por cada uno:
 
-Antes cada cochera iba en su propio bloque, porque la entidad traía la placa o el número
-de línea. Ahora:
+    Préstamos · Alquileres · Cocheras · Seguros · Líneas móviles · Servicios ·
+    Impuestos · Otras obligaciones
 
-    Seguro                        3 obligación(es) · este mes  S/ 3,091.00
-      SEGURO VEHICULAR ABC123     Pacífico
-      SEGURO VEHICULAR BYH716     Pacífico
-      SEGURO VEHICULAR FLOTA      Rímac
+Dentro de cada tabla se sigue agrupando por concepto, como quedó la vez pasada. Si todas
+las cocheras tienen el mismo concepto, salen en una sola lista sin subtítulos; si hay dos
+conceptos distintos —las cocheras de las unidades por un lado, el patio por otro—, cada
+uno sale en su bloque con su total del mes.
 
-    Cochera                       3 obligación(es) · este mes  S/ 1,280.00
-      COCHERA ABC123              Playa Central
-      COCHERA BYH716              Playa Central
-      COCHERA D4T551              Estacionamiento Sur
+"Servicio" queda para lo que realmente lo es: luz, agua, internet.
 
-    Línea móvil                   3 obligación(es) · este mes  S/   224.80
-      LINEA CLARO 922783263       Claro
-      LINEA CLARO 998112233       Claro
-      LINEAL ENTEL C5Q932         Entel
+QUÉ PASA CON LO QUE YA ESTÁ CARGADO
 
-Todas las cocheras juntas aunque sean placas distintas y se le pague a playas distintas,
-todos los seguros juntos, todas las líneas juntas. Cada bloque dice cuánto se va este mes
-en ese concepto.
+La migración reetiqueta sola lo que claramente es cochera, seguro o línea, mirando el
+nombre y el concepto de cada obligación:
+
+    cochera, estacionamiento                      → Cochera
+    seguro, póliza, soat                          → Seguro
+    línea, lineal, celular, teléfono, móvil, RPC  → Línea móvil
+
+Las cocheras salen también de los alquileres, porque la ayuda del formulario decía "Local,
+cochera o equipo alquilado" y varias se cargaron ahí.
+
+Lo que no reconoce se queda como está. Para corregirlo, ahora el formulario deja cambiar
+el tipo de una obligación que ya existe: entra, dale a "Editar" y elige el tipo correcto.
+La única excepción son los préstamos, que quedan bloqueados: su cronograma trae capital,
+tasa e intereses que ningún otro tipo sabe leer.
+
+SI MÁS ADELANTE QUIERES OTRO TIPO
+
+Avísame y lo agrego: ahora es una línea en la lista de tipos y una migración de un
+renglón. Antes era un enum de Postgres y no se podía hacer en un solo paso.
 
 
-CÓMO SE DECIDE EL CONCEPTO
---------------------------
+2. CALENDARIO DE PAGOS
+----------------------
 
-En el formulario de cada obligación hay un campo nuevo: "Agrupar como". Lo que escribas
-ahí es el bloque donde aparece. Escribe lo mismo en todas las cocheras y salen juntas.
+Dejó de ser una lista por días y pasó a ser una cuadrícula mensual, como un calendario de
+pared: siete columnas de domingo a sábado y una casilla por día.
 
-El campo sugiere los conceptos que ya existen mientras escribes, para que no queden dos
-variantes del mismo ("Cochera" y "Cocheras") que volverían a partir el grupo en dos.
+En cada casilla está lo que vence ese día —facturas de proveedores y cuotas de préstamos
+y servicios, todo junto— con su importe, y arriba a la derecha el total del día. El día de
+hoy va resaltado en amarillo. Los días con algo vencido salen en rojo.
 
-Si lo dejas vacío, el sistema deduce el concepto quitándole al nombre lo del final que
-identifica la unidad (la placa, el número de línea). Acierta en la mayoría. No acierta
-en los que no llevan número — "SEGURO VEHICULAR FLOTA" queda aparte —, y ahí se corrige
-escribiendo el concepto a mano.
+Arriba: el mes, las flechas para moverte de mes, y el total de todo lo que vence en él.
+Lo que quedó debiendo de meses anteriores va en una franja roja plegada, para que se vea
+que existe y cuánto es sin empujar el calendario fuera de la pantalla; se abre con "ver
+cuáles".
 
-La migración rellena el campo de todo lo que ya existe con esa misma deducción. Es un
-punto de partida: conviene revisar el listado una vez y corregir los que quedaron solos.
+Lo que exportas es el mes que estás mirando.
+
+
+3. UNA COSA MÁS, QUE SALIÓ PROBANDO
+-----------------------------------
+
+El formulario de login no decía por qué método enviarse, y un formulario HTML sin eso se
+envía por GET. Mientras el JavaScript de la página todavía no carga —o si falla—, el
+navegador manda el formulario igual, y por GET la contraseña se va escrita en la dirección:
+
+    /login?identifier=admin&password=Admin123!
+
+Ahí queda, en el historial del navegador y en los registros del servidor de Vercel. Ya va
+por POST, así que la contraseña no viaja en la dirección.
 
 
 CÓMO SE INSTALA
@@ -54,20 +77,19 @@ CÓMO SE INSTALA
 
 1. Descomprime y copia la carpeta transjer-epp sobre el proyecto, reemplazando.
 
-2. Abre la consola en la carpeta del proyecto y corre:
+2. En la consola, en la carpeta del proyecto:
 
        npm run db:migrate
 
-   Esto agrega la columna del concepto y rellena las obligaciones que ya existen.
-   Es aditivo: no borra ni cambia nada de lo que ya está cargado.
+   Esto cambia el tipo de obligación a texto, amplía la lista de tipos permitidos y
+   reetiqueta lo que reconoce. Es aditivo: no borra ni mueve ninguna obligación.
 
-3. Levanta el sistema como siempre:
+3. Levanta el sistema:
 
        npm run dev
 
-4. Entra a "Préstamos y servicios" y revisa los bloques. Donde algo quedó en un bloque
-   suelto, entra a la obligación, dale a "Editar" y escribe el concepto correcto en
-   "Agrupar como".
+4. Entra a "Préstamos y servicios" y revisa las tablas. Lo que haya quedado en el tipo
+   equivocado se corrige entrando a la obligación y dándole a "Editar".
 
 
 QUÉ SE PROBÓ
@@ -76,23 +98,19 @@ QUÉ SE PROBÓ
   275 comprobaciones de lógica  — todas pasan
   8 recorridos en el navegador  — todos pasan
 
-Incluye comprobaciones nuevas de que dos cocheras de playas distintas caen en un solo
-bloque con la suma de las dos, y de que el seguro va en su propio bloque.
+Las nuevas: que cochera, seguro y línea tengan su propia tabla, que una cochera ya no
+salga bajo servicios, que las dos placas de un mismo concepto sigan cayendo en un solo
+bloque con la suma de las dos, que el tipo se pueda corregir desde la ficha y que un
+préstamo no lo permita, que el calendario tenga los siete días de la semana, que marque
+hoy y que las flechas cambien de mes.
 
-De paso se arreglaron dos pruebas que fallaban solas:
-
-  · La de avisos de vencimiento contaba los días desde la fecha de UTC y no desde la de
-    Lima, así que fallaba todas las tardes pasadas las 19:00.
-
-  · Las de facturas y detracciones contaban la fila de "no hay nada con esos filtros"
-    como si fuera una factura, así que un filtro sin resultados daba 1 en vez de 0.
-
-Ninguno de los dos era un problema del sistema, solo de las pruebas.
+Se probaron también las reglas de reetiquetado contra diez nombres reales: las clasifica
+bien las diez, y deja "Local Santa Anita", la luz y el internet donde estaban.
 
 
 PENDIENTE
 ---------
 
-Los avisos de WhatsApp quedan listos en el código pero sin configurar. Cuando quieras,
-seguimos con eso: poner AVISOS_SECRET en Vercel, copiar el script al servidor y
-engancharlo a Baileys.
+Los avisos de WhatsApp siguen listos en el código pero sin configurar. Cuando quieras,
+seguimos: poner AVISOS_SECRET en Vercel, copiar el script al servidor y engancharlo a
+Baileys.
