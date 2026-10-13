@@ -17,6 +17,18 @@ DB = os.environ.get("E2E_DB", "epp")
 def psql(q):
     return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
 
+def filas(page):
+    """
+    Cuántas facturas se ven en la tabla.
+
+    Hay que descartar la fila de "no hay nada con esos filtros": también es un <tr> del
+    tbody, así que contarla hacía que un filtro sin resultados diera 1 en vez de 0 y la
+    prueba fallara sola según con qué datos se corriera. Esa fila se reconoce porque es
+    una sola celda con colspan.
+    """
+    return page.locator("tbody tr:not(:has(td[colspan]))").count()
+
+
 def toast(page, text):
     expect(page.get_by_role("status").filter(has_text=text)
            .or_(page.get_by_role("alert").filter(has_text=text)).first).to_be_visible(timeout=10000)
@@ -99,10 +111,10 @@ with sync_playwright() as p:
     page.goto(BASE + "/facturas")
     expect(page.get_by_role("heading", name="Facturas de proveedores")).to_be_visible()
     expect(page.get_by_text("Pendientes de pago")).to_be_visible()
-    filas = page.locator("tbody tr").count()
+    vistas = filas(page)
     # La tabla pagina de 20 en 20: se compara contra lo que cabe en la primera página.
     esperadas = min(int(psql("select count(*) from supplier_invoices")), 20)
-    assert filas == esperadas, f"la tabla muestra {filas} facturas y deberían verse {esperadas}"
+    assert vistas == esperadas, f"la tabla muestra {vistas} facturas y deberían verse {esperadas}"
     # Se busca por su número: con el histórico importado, esa factura ya no cabe en la
     # primera página y antes la prueba daba por perdido algo que sí estaba.
     page.get_by_role("searchbox").fill("0871")
@@ -219,13 +231,13 @@ with sync_playwright() as p:
     vencidas = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
                         "and pay_due_date < (now() at time zone 'America/Lima')::date"))
     page.goto(BASE + "/facturas?vencidas=1")
-    assert page.locator("tbody tr").count() == vencidas, (page.locator("tbody tr").count(), vencidas)
+    assert filas(page) == vencidas, (filas(page), vencidas)
 
     # Y el de las que esperan la guía, las de crédito sin entrega anotada.
     sin_guia = int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
                         "and payment_term='CREDITO' and guide_received_at is null"))
     page.goto(BASE + "/facturas?singuia=1")
-    assert page.locator("tbody tr").count() == sin_guia, (page.locator("tbody tr").count(), sin_guia)
+    assert filas(page) == sin_guia, (filas(page), sin_guia)
     page.screenshot(path=f"{SHOTS}/e2e-plazos.png", full_page=True)
     ok("Fecha límite de pago: contado vence al día siguiente y los filtros cuadran")
 
@@ -234,18 +246,18 @@ with sync_playwright() as p:
     # valiendo cuando cambian los datos de ejemplo.
     page.goto(BASE + "/facturas?estado=PAGADA")
     pagadas = min(int(psql("select count(*) from supplier_invoices where status='PAGADA'")), 20)
-    assert page.locator("tbody tr").count() == pagadas, (page.locator("tbody tr").count(), pagadas)
+    assert filas(page) == pagadas, (filas(page), pagadas)
     page.goto(BASE + "/facturas?vencidas=1&q=0871")
     expect(page.get_by_role("row").filter(has_text="F002-0871")).to_be_visible()
     page.goto(BASE + "/facturas?vencidas=1")
     vencidas = min(int(psql("select count(*) from supplier_invoices where status='PENDIENTE' "
                             "and pay_due_date < (now() at time zone 'America/Lima')::date")), 20)
-    assert page.locator("tbody tr").count() == vencidas, (page.locator("tbody tr").count(), vencidas)
+    assert filas(page) == vencidas, (filas(page), vencidas)
     page.goto(BASE + "/facturas")
     page.get_by_role("searchbox").fill("20487654321")
     expect(page).to_have_url(re.compile("q=204"))
     delProveedor = min(int(psql("select count(*) from supplier_invoices i join suppliers s on s.id=i.supplier_id where s.ruc='20487654321'")), 20)
-    expect(page.locator("tbody tr")).to_have_count(delProveedor)
+    assert filas(page) == delProveedor, (filas(page), delProveedor)
     ok("Filtros por estado, vencidas y búsqueda por RUC")
 
     # --- 13. Proveedores

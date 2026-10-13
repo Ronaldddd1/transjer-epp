@@ -28,6 +28,9 @@ def limpiar():
     """Borra lo que dejaron corridas anteriores de esta misma prueba, y solo eso."""
     for q in [
         "delete from obligations where name like 'Préstamo BCP capital de trabajo %' or name like 'Claro flota %'",
+        # Las cocheras y seguros de la prueba de segmentación: solo los que llevan el sello
+        # de seis dígitos que pone esta prueba, nunca una obligación de verdad.
+        r"""delete from obligations where name ~ '^(Cochera|Seguro) [0-9]{6} '""",
         "delete from supplier_invoices where supplier_id in (select id from suppliers where business_name like 'AUTOESPAR PRUEBA %')",
         "delete from suppliers where business_name like 'AUTOESPAR PRUEBA %'",
     ]:
@@ -345,23 +348,42 @@ def main():
         check("ya no existe la columna Tipo repetida en cada fila",
               page.locator("th", has_text="Tipo").count() == 0)
 
-        # --- Totales del mes y segmentación por entidad ---
-        # Hace falta una segunda entidad dentro del mismo tipo: con una sola, la fila de
-        # grupo repetiría la cabecera y por eso no se dibuja.
-        ejecutar("insert into obligations (type, name, creditor, currency, billing_day, fixed_amount) "
-                 f"values ('SERVICIO', '{SERVICIO} entel', 'Entel', 'PEN', 5, 33.71)")
-        ejecutar("insert into obligation_installments (obligation_id, number, due_date, total) "
-                 f"select id, 1, current_date + 3, 33.71 from obligations where name = '{SERVICIO} entel'")
+        # --- Totales del mes y segmentación por concepto ---
+        # Lo que pidió la empresa: ver junto todo lo que es cochera aunque sean placas
+        # distintas y se le pague a playas distintas. Dos cocheras con el mismo concepto
+        # tienen que caer en un solo bloque, con la suma del mes de las dos; el seguro,
+        # que es otro concepto, va en su propio bloque. Hace falta más de un concepto:
+        # con uno solo la fila de grupo repetiría la cabecera y por eso no se dibuja.
+        for placa, entidad, concepto, importe in [
+            ("BYH716", "Playa Central", f"Cochera {SELLO}", 450.00),
+            ("D4T551", "Estacionamiento Sur", f"Cochera {SELLO}", 380.00),
+            ("BYH716", "Pacifico", f"Seguro {SELLO}", 620.50),
+        ]:
+            nombre = f"{concepto} {placa}"
+            ejecutar("insert into obligations (type, name, creditor, category, currency, billing_day, fixed_amount) "
+                     f"values ('SERVICIO', '{nombre}', '{entidad}', '{concepto}', 'PEN', 5, {importe})")
+            ejecutar("insert into obligation_installments (obligation_id, number, due_date, total) "
+                     f"select id, 1, date_trunc('month', current_date) + interval '4 days', {importe} "
+                     f"from obligations where name = '{nombre}'")
         page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
         cuerpo = page.content()
 
         check("hay un total a pagar del mes", "Total a pagar este mes" in cuerpo)
         check("explica lo que viene arrastrado", "meses anteriores" in cuerpo)
         check("cada tipo dice su total del mes", "este mes" in cuerpo)
-        # Dentro de un tipo, las obligaciones se agrupan por la entidad a la que se paga.
-        # Esta prueba crea dos servicios de Claro, así que debe salir la fila de Claro.
         servicios = page.locator("section, div").filter(has_text="Celular, luz, agua").last.inner_text()
-        check("los servicios se agrupan por entidad", "obligación(es) · este mes" in servicios, servicios[:200])
+        check("los servicios se agrupan por concepto", "obligación(es) · este mes" in servicios, servicios[:300])
+        # Las dos cocheras quedan en un bloque, no en uno cada una.
+        check("las dos cocheras caen en un solo bloque",
+              servicios.count(f"Cochera {SELLO}\n") == 1 or
+              re.search(rf"Cochera {SELLO}\s+2 obligación\(es\)", servicios) is not None,
+              servicios[:400])
+        # 450 + 380 = 830: el total del bloque suma las dos placas.
+        check("y el bloque de cocheras suma las dos placas", "830.00" in servicios, servicios[:400])
+        # El seguro es otro concepto: su propio bloque con su propio total.
+        check("el seguro va en su propio bloque",
+              re.search(rf"Seguro {SELLO}\s+1 obligación\(es\)", servicios) is not None, servicios[:400])
+        check("y no se mezcla con las cocheras", "620.50" in servicios, servicios[:400])
 
         # --- Calendario unificado ---
         page.goto(f"{BASE}/calendario?dias=60")

@@ -71,6 +71,13 @@
       "when": 1791827663180,
       "tag": "0009_avisos_vencimiento",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1791856735564,
+      "tag": "0010_concepto_obligaciones",
+      "breakpoints": true
     }
   ]
 }

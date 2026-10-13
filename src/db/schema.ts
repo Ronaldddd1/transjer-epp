@@ -381,6 +381,15 @@ export const obligations = pgTable("obligations", {
   creditor: varchar("creditor", { length: 160 }).notNull(),
   /** Número de crédito, de cuenta o de suministro. */
   reference: varchar("reference", { length: 80 }),
+  /**
+   * Con qué se agrupa en el listado: "Cochera", "Seguro vehicular", "Línea Entel".
+   *
+   * No sirve la entidad ni el nombre. La entidad en la práctica trae la placa o el número
+   * de línea, y el nombre lleva dentro esa misma unidad, así que agrupar por cualquiera de
+   * los dos deja cada cochera y cada seguro en su propio bloque, que es justo lo contrario
+   * de lo que hace falta para ver cuánto se va en cocheras este mes.
+   */
+  category: varchar("category", { length: 80 }),
   currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
 
   // --- Solo préstamos ---

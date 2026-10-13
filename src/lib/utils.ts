@@ -195,6 +195,19 @@ export const OBLIGATION_TYPE_LABEL = {
 } as const;
 export type ObligationTypeKey = keyof typeof OBLIGATION_TYPE_LABEL;
 
+/**
+ * Con qué se agrupa una obligación cuando nadie escribió su concepto.
+ *
+ * Se le quita al nombre lo que identifica la unidad por el final —la placa, el número de
+ * línea—, que es lo que hacía que cada cochera y cada seguro salieran en su propio bloque.
+ * Es una deducción, no una regla: el campo de la ficha manda sobre esto.
+ */
+export function conceptoDeObligacion(nombre: string): string {
+  const limpio = nombre.trim().replace(/\s+/g, " ");
+  const sinUnidad = limpio.replace(/(\s+[-–]?\s*\S*\d\S*)+$/, "").trim();
+  return sinUnidad || limpio;
+}
+
 /** En plural, para encabezar la tabla de cada tipo. No basta con agregar una "s". */
 export const OBLIGATION_TYPE_PLURAL: Record<ObligationTypeKey, string> = {
   PRESTAMO: "Préstamos",

@@ -11,7 +11,9 @@ import { can } from "@/lib/permissions";
 import {
   cn, formatMoney, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL, type SearchParams,
 } from "@/lib/utils";
-import { getObligationSummary, listObligations, readObligationFilters } from "@/server/obligation-queries";
+import {
+  getObligationSummary, listObligationCategories, listObligations, readObligationFilters,
+} from "@/server/obligation-queries";
 
 export const metadata: Metadata = { title: "Préstamos y servicios" };
 
@@ -21,7 +23,9 @@ export default async function ObligationsPage({ searchParams }: { searchParams: 
   const f = readObligationFilters(sp);
   const canManage = can(user.role, "obligations.manage");
 
-  const [rows, resumen] = await Promise.all([listObligations(f), getObligationSummary()]);
+  const [rows, resumen, conceptos] = await Promise.all([
+    listObligations(f), getObligationSummary(), listObligationCategories(),
+  ]);
 
   const tarjetas = [
     { label: "Vencidas sin pagar", count: resumen.overdueCount, detail: formatMoney(resumen.overdueAmount), tone: resumen.overdueCount > 0 ? "alert" : "plain" },
@@ -36,7 +40,7 @@ export default async function ObligationsPage({ searchParams }: { searchParams: 
       <PageHeader
         title="Préstamos y servicios"
         description="Todo lo que se paga mes a mes: créditos del banco, celulares, luz, alquileres e impuestos."
-        actions={<><ExportTable tabla="obligaciones" />{canManage && <ObligationFormModal />}</>}
+        actions={<><ExportTable tabla="obligaciones" />{canManage && <ObligationFormModal conceptos={conceptos} />}</>}
       />
 
       {resumen.missingAmounts > 0 && (

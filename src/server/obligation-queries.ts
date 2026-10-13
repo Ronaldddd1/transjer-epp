@@ -44,6 +44,7 @@ function conditions(f: ObligationFilters): SQL | undefined {
           ilike(obligations.name, like(f.q)),
           ilike(obligations.creditor, like(f.q)),
           ilike(obligations.reference, like(f.q)),
+          ilike(obligations.category, like(f.q)),
         )
       : undefined,
   );
@@ -69,6 +70,7 @@ const obligationColumns = {
   name: obligations.name,
   creditor: obligations.creditor,
   reference: obligations.reference,
+  category: obligations.category,
   currency: obligations.currency,
   principal: obligations.principal,
   annualRate: obligations.annualRate,
@@ -131,6 +133,15 @@ export async function listObligations(f: ObligationFilters = {}) {
       sql`(select min(i.due_date) from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending}) asc nulls last`,
       asc(obligations.name),
     );
+}
+
+/** Los conceptos ya usados, para sugerirlos al registrar y no partir un grupo por una errata. */
+export async function listObligationCategories(): Promise<string[]> {
+  const filas = await db.selectDistinct({ category: obligations.category })
+    .from(obligations)
+    .where(sql`${obligations.category} is not null and ${obligations.category} <> ''`)
+    .orderBy(asc(obligations.category));
+  return filas.map((f) => f.category!).filter(Boolean);
 }
 
 /** Una fila del listado, tal como la muestran las tablas por tipo. */

@@ -6,8 +6,8 @@ import { ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import {
-  cn, formatDate, formatMoney, OBLIGATION_TYPE_HINT, OBLIGATION_TYPE_PLURAL, todayLima,
-  type ObligationTypeKey,
+  cn, conceptoDeObligacion, formatDate, formatMoney, OBLIGATION_TYPE_HINT,
+  OBLIGATION_TYPE_PLURAL, todayLima, type ObligationTypeKey,
 } from "@/lib/utils";
 import type { ObligationRow } from "@/server/obligation-queries";
 
@@ -41,37 +41,39 @@ const pendiente = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.pendingA
 const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") : "—");
 
 /**
- * Las obligaciones de un tipo, agrupadas por la entidad a la que se le paga.
+ * Las obligaciones de un tipo, agrupadas por concepto.
  *
- * Dentro de "Servicios" conviven cinco líneas de Entel, seis seguros de La Positiva y la
- * luz de la oficina. Verlas en un solo bloque no dice nada; agrupadas por entidad se ve de
- * un vistazo cuánto se le va a cada una este mes, que es como se maneja el dinero.
+ * Por concepto y no por entidad: en la práctica la entidad trae la placa o el número de
+ * línea, así que agrupar por ella deja cada cochera y cada seguro en su propio bloque. Lo
+ * que hace falta es lo contrario — cuánto se va en cocheras, en seguros, en líneas— sin
+ * importar de qué unidad sea cada una.
  */
-function porEntidad(filas: ObligationRow[]) {
+function porConcepto(filas: ObligationRow[]) {
   const grupos = new Map<string, ObligationRow[]>();
   for (const o of filas) {
-    const lista = grupos.get(o.creditor);
+    const clave = o.category?.trim() || conceptoDeObligacion(o.name);
+    const lista = grupos.get(clave);
     if (lista) lista.push(o);
-    else grupos.set(o.creditor, [o]);
+    else grupos.set(clave, [o]);
   }
   return [...grupos.entries()]
-    .map(([creditor, suyas]) => ({
-      creditor,
+    .map(([concepto, suyas]) => ({
+      concepto,
       filas: suyas,
       mes: suyas.reduce((s, o) => s + Number(o.monthAmount ?? 0), 0),
       vencidas: suyas.reduce((s, o) => s + o.overdueCount, 0),
       sinImporte: suyas.reduce((s, o) => s + o.monthMissing, 0),
     }))
-    .sort((a, b) => b.mes - a.mes || a.creditor.localeCompare(b.creditor, "es"));
+    .sort((a, b) => b.mes - a.mes || a.concepto.localeCompare(b.concepto, "es"));
 }
 
-/** Fila que encabeza cada entidad dentro de la tabla de un tipo. */
-function FilaEntidad({ grupo, columnas }: { grupo: ReturnType<typeof porEntidad>[number]; columnas: number }) {
+/** Fila que encabeza cada concepto dentro de la tabla de un tipo. */
+function FilaConcepto({ grupo, columnas }: { grupo: ReturnType<typeof porConcepto>[number]; columnas: number }) {
   return (
     <tr className="border-t border-steel-200 bg-steel-50">
       <td colSpan={columnas} className="px-4 py-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-          <span className="font-semibold text-ink">{grupo.creditor}</span>
+          <span className="font-semibold text-ink">{grupo.concepto}</span>
           <span className="text-sm text-steel-600">
             {grupo.filas.length} obligación(es) · este mes{" "}
             <strong className="font-display text-ink">{juntar(delMes(grupo.filas))}</strong>
@@ -131,7 +133,7 @@ const Acciones = ({ id }: { id: string }) => (
 
 /** Tabla de préstamos: capital, tasa y cuánto se ha amortizado. */
 function TablaPrestamos({ grupos, hoy, segmentar }: {
-  grupos: ReturnType<typeof porEntidad>; hoy: string; segmentar: boolean;
+  grupos: ReturnType<typeof porConcepto>; hoy: string; segmentar: boolean;
 }) {
   return (
     <TableShell>
@@ -150,8 +152,8 @@ function TablaPrestamos({ grupos, hoy, segmentar }: {
       </thead>
       <tbody>
         {grupos.map((g) => (
-          <Fragment key={g.creditor}>
-            {segmentar && <FilaEntidad grupo={g} columnas={9} />}
+          <Fragment key={g.concepto}>
+            {segmentar && <FilaConcepto grupo={g} columnas={9} />}
             {g.filas.map((o) => (
           <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
             <Nombre o={o} />
@@ -185,7 +187,7 @@ function TablaPrestamos({ grupos, hoy, segmentar }: {
 
 /** Tabla de servicios, alquileres e impuestos: cuándo vence y cuánto llega. */
 function TablaPeriodicas({ grupos, hoy, segmentar }: {
-  grupos: ReturnType<typeof porEntidad>; hoy: string; segmentar: boolean;
+  grupos: ReturnType<typeof porConcepto>; hoy: string; segmentar: boolean;
 }) {
   return (
     <TableShell>
@@ -203,8 +205,8 @@ function TablaPeriodicas({ grupos, hoy, segmentar }: {
       </thead>
       <tbody>
         {grupos.map((g) => (
-          <Fragment key={g.creditor}>
-            {segmentar && <FilaEntidad grupo={g} columnas={8} />}
+          <Fragment key={g.concepto}>
+            {segmentar && <FilaConcepto grupo={g} columnas={8} />}
             {g.filas.map((o) => (
           <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
             <Nombre o={o} />
@@ -280,8 +282,8 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
 
       {tipos.map(({ type, filas }) => {
         const vencidas = filas.reduce((s, o) => s + o.overdueCount, 0);
-        const grupos = porEntidad(filas);
-        // Con una sola entidad la fila de grupo repetiría lo que ya dice la cabecera.
+        const grupos = porConcepto(filas);
+        // Con un solo concepto la fila de grupo repetiría lo que ya dice la cabecera.
         const segmentar = grupos.length > 1;
         return (
           <Panel

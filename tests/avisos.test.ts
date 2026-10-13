@@ -11,6 +11,7 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
 import { obligationInstallments, obligations } from "../src/db/schema";
 import { avisosPendientes, marcarAvisadas, mensajeDeAvisos } from "../src/server/reminders";
+import { todayLima } from "../src/lib/utils";
 
 let fails = 0;
 const check = (n: string, c: boolean, x?: unknown) => {
@@ -19,8 +20,16 @@ const check = (n: string, c: boolean, x?: unknown) => {
 };
 
 const SELLO = `AVISO ${Date.now()}`;
+/**
+ * Días contados desde hoy en Lima, no desde hoy en UTC.
+ *
+ * La consulta de avisos compara contra la fecha de Lima. Partir de UTC hacía que la
+ * prueba fallara todas las tardes: pasadas las 19:00 de Lima ya es el día siguiente en
+ * UTC, así que cada vencimiento quedaba un día corrido y los de "en 2 días" se salían
+ * de la ventana.
+ */
 const enDias = (d: number) => {
-  const f = new Date();
+  const f = new Date(`${todayLima()}T12:00:00Z`);
   f.setUTCDate(f.getUTCDate() + d);
   return f.toISOString().slice(0, 10);
 };

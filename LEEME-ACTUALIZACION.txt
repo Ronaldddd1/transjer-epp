@@ -1,121 +1,98 @@
-TRANSJER GESTIÓN — DETRACCIONES, SERVICIO DE TRANSPORTE Y RESUMEN DE EPP
-=========================================================================
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Pagos agrupados por concepto en préstamos y servicios
+=====================================================
 
-QUÉ CAMBIÓ
+QUÉ CAMBIA
 ----------
 
-1. LAS FECHAS. El campo de fecha ya no depende del idioma del navegador. Se escribe
-   en día/mes/año, las barras se ponen solas, el foco no salta a otro campo y el
-   calendario sigue disponible en el icono de la derecha. Una fecha que no existe
-   (31 de abril) se rechaza al momento.
+En "Préstamos y servicios", dentro de cada tabla las obligaciones ahora se juntan por
+CONCEPTO y no por entidad.
 
-   Esto arreglaba un riesgo real: con el navegador en inglés el campo mostraba
-   mm/dd/aaaa, así que escribir 03/10/2026 pensando en el 3 de octubre registraba
-   el 10 de marzo.
+Antes cada cochera iba en su propio bloque, porque la entidad traía la placa o el número
+de línea. Ahora:
 
-2. RESUMEN DE EPP (Almacén → Resumen de EPP). Cuánto salió de cada EPP y quién lo
-   recibió, en dos tablas con totales, sin entrar trabajador por trabajador. El
-   listado de entregas y el historial de cada trabajador siguen igual.
+    Seguro                        3 obligación(es) · este mes  S/ 3,091.00
+      SEGURO VEHICULAR ABC123     Pacífico
+      SEGURO VEHICULAR BYH716     Pacífico
+      SEGURO VEHICULAR FLOTA      Rímac
 
-3. DATOS DEL SERVICIO en las facturas: cliente, placa, contacto, origen, destino,
-   volumen, peso y adelantos. Es lo que se controlaba en el Excel.
+    Cochera                       3 obligación(es) · este mes  S/ 1,280.00
+      COCHERA ABC123              Playa Central
+      COCHERA BYH716              Playa Central
+      COCHERA D4T551              Estacionamiento Sur
 
-4. DETRACCIONES (Proveedores → Detracciones). El 4 % se calcula solo: sobre el total
-   con IGV, redondeado al sol más próximo, y "no aplica" por debajo de S/ 400.
-   Pantalla propia con el resumen de lo pendiente y lo depositado, aviso de las que
-   llevan más de 30 días, y un rol nuevo para quien solo lleva esa tarea.
+    Línea móvil                   3 obligación(es) · este mes  S/   224.80
+      LINEA CLARO 922783263       Claro
+      LINEA CLARO 998112233       Claro
+      LINEAL ENTEL C5Q932         Entel
 
-5. MENÚ POR SECCIONES: Almacén, Proveedores, Finanzas, Reportes y Administración.
-   Cada una se contrae. Solo se ven las secciones donde el rol tiene algo que hacer.
-
-6. DEUDA POR TIPO en Préstamos y servicios: cuánto se debe de cada tipo y a quién.
-
-7. DASHBOARD con detracciones por depositar, atrasadas, cuotas por pagar y vencidas.
-
-8. EXPORTAR A EXCEL en todas las tablas. El botón "Exportar" está arriba a la derecha
-   de cada pantalla y ofrece Excel, CSV y PDF. Lo que se baja es lo que se está viendo:
-   el archivo arrastra los filtros de la pantalla, y trae todas las filas aunque en
-   pantalla solo se vean 20. El resumen de EPP sale con una hoja por tabla.
-
-   Son quince tablas: inventario, movimientos, entregas, resumen de EPP, trabajadores,
-   facturas, detracciones, proveedores, buzón de correo, préstamos y servicios,
-   cronograma, calendario de pagos, categorías, usuarios y auditoría.
-
-   Cada una exige el permiso de su módulo: la encargada de detracciones se baja la suya
-   y no la de trabajadores. Las contraseñas no salen en ningún archivo.
+Todas las cocheras juntas aunque sean placas distintas y se le pague a playas distintas,
+todos los seguros juntos, todas las líneas juntas. Cada bloque dice cuánto se va este mes
+en ese concepto.
 
 
-LO QUE HAY QUE SABER ANTES DE ACTUALIZAR
-----------------------------------------
+CÓMO SE DECIDE EL CONCEPTO
+--------------------------
 
-LA DETRACCIÓN DEL EXCEL ESTABA MAL CALCULADA. Era una columna escrita a mano: de
-154 filas, 99 estaban redondeadas hacia arriba, 30 hacia abajo y solo 25 cuadraban.
-Dos facturas idénticas de S/ 4,956 figuraban con 198 y con 199. En total se depositaron
-29 soles de más. El sistema aplica la regla de SUNAT, así que de aquí en adelante los
-montos van a salir distintos a los que venían saliendo. Para las que ya se depositaron,
-la importación conserva el monto del Excel, porque es el que dice la constancia.
+En el formulario de cada obligación hay un campo nuevo: "Agrupar como". Lo que escribas
+ahí es el bloque donde aparece. Escribe lo mismo en todas las cocheras y salen juntas.
 
-EL EXCEL NO TRAE RUC. Los 33 proveedores se crean solo con su nombre y el RUC queda
-pendiente. Se completa solo cuando llegue una factura electrónica suya con el XML; el
-sistema reconoce el proveedor aunque el nombre esté escrito distinto. También se puede
-escribir a mano desde Proveedores.
+El campo sugiere los conceptos que ya existen mientras escribes, para que no queden dos
+variantes del mismo ("Cochera" y "Cocheras") que volverían a partir el grupo en dos.
+
+Si lo dejas vacío, el sistema deduce el concepto quitándole al nombre lo del final que
+identifica la unidad (la placa, el número de línea). Acierta en la mayoría. No acierta
+en los que no llevan número — "SEGURO VEHICULAR FLOTA" queda aparte —, y ahí se corrige
+escribiendo el concepto a mano.
+
+La migración rellena el campo de todo lo que ya existe con esa misma deducción. Es un
+punto de partida: conviene revisar el listado una vez y corregir los que quedaron solos.
 
 
-PASOS PARA ACTUALIZAR
----------------------
+CÓMO SE INSTALA
+---------------
 
-1. Reemplaza la carpeta del proyecto por la de este paquete (el proyecto COMPLETO).
+1. Descomprime y copia la carpeta transjer-epp sobre el proyecto, reemplazando.
 
-2. En la carpeta del proyecto:
+2. Abre la consola en la carpeta del proyecto y corre:
 
-       Remove-Item -Recurse -Force .next
-       npm install
        npm run db:migrate
 
-   La migración es ADITIVA. A las facturas que ya existen les calcula la detracción.
+   Esto agrega la columna del concepto y rellena las obligaciones que ya existen.
+   Es aditivo: no borra ni cambia nada de lo que ya está cargado.
 
-3. Importa el histórico del Excel (158 filas). Primero en simulación, para ver qué
-   va a pasar sin tocar nada:
+3. Levanta el sistema como siempre:
 
-       npm run import:facturas -- --simular
+       npm run dev
 
-   Si el resumen te cuadra, hazlo de verdad:
-
-       npm run import:facturas
-
-   Se puede repetir: lo ya importado se reconoce y se salta.
-
-   De las 158 filas entran 155. Las otras 3 no tienen importe en la hoja
-   (R & K Logistic E001-1257, Transp Cusami E001-82 y Corporacion DYJ Rusal E001-100).
-
-4. Pruébalo en tu máquina con npm run dev y revisa:
-     - Al escribir una fecha, que ya no salte el cursor.
-     - Almacén → Resumen de EPP.
-     - Proveedores → Detracciones.
-     - Que una factura muestre su bloque de servicio y el de detracción.
-
-5. Publica:
-
-       git add -A
-       git commit -m "Transjer Gestion: detracciones, servicio de transporte y resumen de EPP"
-       git push
-
-   Antes del push, revisa que .env NO aparezca en "git status".
-
-6. Después de que Vercel despliegue, corre la importación una vez más desde tu
-   máquina para que el histórico entre a la base de producción.
+4. Entra a "Préstamos y servicios" y revisa los bloques. Donde algo quedó en un bloque
+   suelto, entra a la obligación, dale a "Editar" y escribe el concepto correcto en
+   "Agrupar como".
 
 
-LO QUE QUEDA PARA DESPUÉS
--------------------------
+QUÉ SE PROBÓ
+------------
 
-- Crear el usuario de la encargada de detracciones (Usuarios → rol "Detracciones").
-- Completar los RUC de los proveedores conforme lleguen sus facturas electrónicas.
-- Revisar las 3 filas del Excel que quedaron fuera por no tener importe.
+  275 comprobaciones de lógica  — todas pasan
+  8 recorridos en el navegador  — todos pasan
+
+Incluye comprobaciones nuevas de que dos cocheras de playas distintas caen en un solo
+bloque con la suma de las dos, y de que el seguro va en su propio bloque.
+
+De paso se arreglaron dos pruebas que fallaban solas:
+
+  · La de avisos de vencimiento contaba los días desde la fecha de UTC y no desde la de
+    Lima, así que fallaba todas las tardes pasadas las 19:00.
+
+  · Las de facturas y detracciones contaban la fila de "no hay nada con esos filtros"
+    como si fuera una factura, así que un filtro sin resultados daba 1 en vez de 0.
+
+Ninguno de los dos era un problema del sistema, solo de las pruebas.
 
 
-PRUEBAS
--------
+PENDIENTE
+---------
 
-    npm test                            (todas las reglas de cálculo)
-    python3 tests/e2e-detracciones.py   (recorrido completo en el navegador)
+Los avisos de WhatsApp quedan listos en el código pero sin configurar. Cuando quieras,
+seguimos con eso: poner AVISOS_SECRET en Vercel, copiar el script al servidor y
+engancharlo a Baileys.

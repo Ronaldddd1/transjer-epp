@@ -15,7 +15,7 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cn, formatDate, formatMoney, OBLIGATION_TYPE_LABEL, todayLima } from "@/lib/utils";
-import { getObligation, listInstallments } from "@/server/obligation-queries";
+import { getObligation, listInstallments, listObligationCategories } from "@/server/obligation-queries";
 
 export const metadata: Metadata = { title: "Detalle de obligación" };
 
@@ -40,6 +40,7 @@ export default async function ObligationDetailPage({ params }: { params: Promise
 
   const installments = await listInstallments(id);
   const canManage = can(user.role, "obligations.manage");
+  const conceptos = canManage ? await listObligationCategories() : [];
   const canPay = can(user.role, "obligations.pay");
   const esPrestamo = obligation.type === "PRESTAMO";
   const hoy = todayLima();
@@ -77,12 +78,13 @@ export default async function ObligationDetailPage({ params }: { params: Promise
             {canManage && (
               <ObligationFormModal obligation={{
                 id: obligation.id, type: obligation.type, name: obligation.name, creditor: obligation.creditor,
-                reference: obligation.reference, currency: obligation.currency, principal: obligation.principal,
+                reference: obligation.reference, category: obligation.category,
+                currency: obligation.currency, principal: obligation.principal,
                 annualRate: obligation.annualRate, installmentsCount: obligation.installmentsCount,
                 disbursedAt: obligation.disbursedAt, billingDay: obligation.billingDay,
                 firstDueDate: obligation.firstDueDate, endsAt: obligation.endsAt,
                 variableAmount: obligation.variableAmount, fixedAmount: obligation.fixedAmount, notes: obligation.notes,
-              }} />
+              }} conceptos={conceptos} />
             )}
             {canManage && obligation.status !== "ANULADA" && (
               <ObligationStatusButton id={obligation.id} status={obligation.status} name={obligation.name} />

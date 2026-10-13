@@ -249,6 +249,8 @@ export const obligationSchema = z.object({
   name: requiredText("El nombre", 160),
   creditor: requiredText("La entidad", 160),
   reference: optionalText(80),
+  /** Con qué se agrupa en el listado. Vacío: se deduce del nombre. */
+  category: optionalText(80),
   currency: z.enum(["PEN", "USD"]),
   // Préstamos
   principal: optionalMoney("El capital"),

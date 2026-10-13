@@ -20,6 +20,7 @@ export type ObligationFormValues = {
   annualRate: string | null;
   installmentsCount: number | null;
   disbursedAt: string | null;
+  category: string | null;
   billingDay: number | null;
   firstDueDate: string | null;
   endsAt: string | null;
@@ -28,7 +29,11 @@ export type ObligationFormValues = {
   notes: string | null;
 };
 
-export function ObligationFormModal({ obligation }: { obligation?: ObligationFormValues }) {
+export function ObligationFormModal({ obligation, conceptos = [] }: {
+  obligation?: ObligationFormValues;
+  /** Los conceptos ya usados, para sugerirlos y no terminar con dos variantes del mismo. */
+  conceptos?: string[];
+}) {
   const editing = !!obligation;
   const [type, setType] = useState<ObligationTypeKey>((obligation?.type as ObligationTypeKey) ?? "PRESTAMO");
   const [variable, setVariable] = useState(obligation?.variableAmount ?? true);
@@ -89,8 +94,28 @@ export function ObligationFormModal({ obligation }: { obligation?: ObligationFor
               placeholder={esPrestamo ? "BCP" : "Claro"} />
           </Field>
 
-          <Field label="Número de crédito o suministro" name="reference" error={errors.reference} className="sm:col-span-6">
+          <Field label="Número de crédito o suministro" name="reference" error={errors.reference} className="sm:col-span-3">
             <Input name="reference" defaultValue={obligation?.reference ?? ""} maxLength={80} placeholder="100-191-0000-30000006902184" />
+          </Field>
+          <Field
+            label="Agrupar como"
+            name="category"
+            error={errors.category}
+            hint="Con esto se suma en el listado. Escribe lo mismo en todas las cocheras para verlas juntas."
+            className="sm:col-span-3"
+          >
+            <Input
+              name="category"
+              defaultValue={obligation?.category ?? ""}
+              maxLength={80}
+              list="conceptos-de-obligacion"
+              placeholder={esPrestamo ? "Préstamos bancarios" : "Cochera"}
+            />
+            {/* Sugiere los conceptos que ya existen: así no se escriben dos variantes del
+                mismo ("Cochera" y "Cocheras") que volverían a partir el grupo en dos. */}
+            <datalist id="conceptos-de-obligacion">
+              {conceptos.map((c) => <option key={c} value={c} />)}
+            </datalist>
           </Field>
 
           {esPrestamo ? (

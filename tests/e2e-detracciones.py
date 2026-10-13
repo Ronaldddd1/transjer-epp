@@ -154,7 +154,9 @@ def main():
         check("la pantalla de detracciones carga", "Detracciones" in page.content())
         check("muestra el total pendiente", "Pendientes de depositar" in page.content())
         pendientes = int(psql("select count(*) from supplier_invoices where detraction_status='PENDIENTE' and status<>'ANULADA'"))
-        filas = page.locator("tbody tr").count()
+        # Sin la fila de "no hay nada con esos filtros", que también es un <tr> del tbody
+        # y haría contar 1 cuando no se ve ninguna factura.
+        filas = page.locator("tbody tr:not(:has(td[colspan]))").count()
         check("por defecto lista solo las pendientes", filas == min(pendientes, 25), (filas, pendientes))
         page.goto(f"{BASE}/detracciones?detraccion=PAGADA"); page.wait_for_timeout(1000)
         check("el filtro de pagadas funciona", "Pagada" in page.content())
