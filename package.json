@@ -16,7 +16,7 @@
     "db:clear-demo": "tsx scripts/clear-demo.ts",
     "db:studio": "drizzle-kit studio",
     "admin:create": "tsx scripts/create-admin.ts",
-    "test": "tsx tests/sunat-xml.test.ts && tsx tests/plazos.test.ts && tsx tests/fechas.test.ts && tsx tests/detracciones.test.ts && tsx tests/amortizacion.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts && tsx --conditions=react-server tests/obligaciones.test.ts && tsx --conditions=react-server tests/devoluciones.test.ts && tsx --conditions=react-server tests/hoja-facturas.test.ts && tsx --conditions=react-server tests/avisos.test.ts",
+    "test": "tsx tests/sunat-xml.test.ts && tsx tests/plazos.test.ts && tsx tests/fechas.test.ts && tsx tests/detracciones.test.ts && tsx tests/amortizacion.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts && tsx --conditions=react-server tests/obligaciones.test.ts && tsx --conditions=react-server tests/devoluciones.test.ts && tsx --conditions=react-server tests/hoja-facturas.test.ts && tsx --conditions=react-server tests/avisos.test.ts && tsx tests/envio-whatsapp.test.ts",
     "import:facturas": "tsx scripts/import-facturas.ts",
     "test:e2e": "python3 tests/e2e-epp.py && python3 tests/e2e-facturas.py && python3 tests/e2e-obligaciones.py && python3 tests/e2e-detracciones.py && python3 tests/e2e-exportar.py && python3 tests/e2e-devoluciones.py && python3 tests/e2e-formularios.py && python3 tests/e2e-importar-excel.py"
   },

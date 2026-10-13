@@ -1,0 +1,220 @@
+AVISOS DE VENCIMIENTO POR WHATSAPP — PASO A PASO
+=================================================
+
+Qué va a pasar cuando esté andando: cada mañana el droplet le pregunta a Transjer Gestión
+qué cuotas de préstamos y servicios vencen en los próximos 2 días, arma un mensaje, lo
+manda por WhatsApp al número que elijas, y le avisa de vuelta a la web qué mandó para que
+ese vencimiento no se repita al día siguiente.
+
+Pregunta el droplet, no al revés. Así tu servidor de avisos sigue detrás de Tailscale sin
+abrir ningún puerto a internet.
+
+El mensaje se ve así:
+
+    *Transjer Gestión* — pagos por vencer
+    2 cuota(s) vencen pronto:
+    • *15/10/2026* (en 2 días) — Claro flota
+       Claro · servicio · S/ 382.50
+    • *15/10/2026* (en 2 días) — SEGURO VEHICULAR BYH716
+       Pacífico Seguros · seguro · S/ 620.50
+    *Total: S/ 1,003.00*
+
+
+------------------------------------------------------------------------------
+PASO 1 — La clave, en Vercel
+------------------------------------------------------------------------------
+
+Es la que usa el droplet para pedirle los datos a la web. Sin ella, /api/avisos/ responde
+401 a todo el mundo, que es como está ahora.
+
+Esta te la generé; sirve tal cual:
+
+    0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+
+En Vercel: tu proyecto → Settings → Environment Variables → Add New
+
+    Name:   AVISOS_SECRET
+    Value:  0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+    Env:    marca Production (y Preview si quieres probar desde ahí)
+
+Guarda y después Deployments → el último → Redeploy. Las variables nuevas solo entran en
+un despliegue nuevo.
+
+Para comprobar que quedó, desde tu PC:
+
+    curl -i https://TU-DOMINIO.vercel.app/api/avisos/vencimientos
+
+    → tiene que responder 401. Si responde 404, el despliegue todavía no subió.
+
+    curl -H "Authorization: Bearer 0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=" ^
+         "https://TU-DOMINIO.vercel.app/api/avisos/vencimientos?dias=2"
+
+    → tiene que devolver un JSON con "ok": true. (En PowerShell el ^ es ` o todo en una
+      línea; si te complica, ábrelo con Postman o pruébalo después desde el droplet.)
+
+
+------------------------------------------------------------------------------
+PASO 2 — La ruta de envío, en el servidor de avisos
+------------------------------------------------------------------------------
+
+Tu servidor hoy solo manda los avisos de entrega. Le falta poder mandar un texto suelto a
+un número, que es lo que necesita esto.
+
+En la carpeta scripts/ de este proyecto hay dos archivos que van al droplet:
+
+    enviar-mensaje.mjs      la ruta de envío
+    aviso-vencimientos.mjs  el que corre cada mañana
+
+Cópialos a la carpeta del servidor de avisos (la misma donde está el archivo que arranca
+con pm2). Con scp desde tu PC:
+
+    scp scripts/enviar-mensaje.mjs scripts/aviso-vencimientos.mjs ^
+        root@143.198.115.75:/ruta/del/servidor/
+
+Después, en el archivo principal del servidor, después de que se crea el socket de
+Baileys, agrega dos líneas:
+
+    import { montarEnvio } from "./enviar-mensaje.mjs";
+    montarEnvio(app, () => sock);
+
+Donde `app` es tu servidor de Express y `sock` la variable del socket de Baileys. Si en tu
+código se llaman distinto —`server`, `client`, `whatsapp`, lo que sea—, cambia esos dos
+nombres y ya está. Va como función, `() => sock`, a propósito: cuando Baileys se cae y
+reconecta reemplaza el socket, y así la ruta usa el nuevo en vez de quedarse con el viejo.
+
+Si tu servidor usa `require` en vez de `import`:
+
+    const { montarEnvio } = await import("./enviar-mensaje.mjs");
+    montarEnvio(app, () => sock);
+
+La ruta queda en POST /enviar y pide la misma clave del paso 1. No toca nada de lo que ya
+tienes.
+
+
+------------------------------------------------------------------------------
+PASO 3 — Las variables, en el droplet
+------------------------------------------------------------------------------
+
+En la carpeta del servidor de avisos, crea un archivo .env.avisos:
+
+    nano /ruta/del/servidor/.env.avisos
+
+Con esto adentro:
+
+    TRANSJER_URL=https://TU-DOMINIO.vercel.app
+    AVISOS_SECRET=0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+    AVISOS_DESTINO=51XXXXXXXXX
+    AVISOS_BAILEYS=http://127.0.0.1:PUERTO/enviar
+    AVISOS_DIAS=2
+
+  · AVISOS_DESTINO es el número que recibe los avisos, con código de país y sin el +.
+    Por ejemplo 51987654321.
+  · PUERTO es el puerto en el que ya escucha tu servidor de avisos. Si no te acuerdas,
+    `pm2 logs` suele decirlo, o `ss -ltnp | grep node`.
+  · AVISOS_DIAS es con cuántos días de anticipación avisa. Quedamos en 2.
+
+La clave es un secreto, así que que no la pueda leer nadie más:
+
+    chmod 600 /ruta/del/servidor/.env.avisos
+
+Tu servidor de avisos también necesita AVISOS_SECRET para que la ruta nueva funcione. Si
+lo levantas con pm2 y un archivo .env propio, agrégale ahí la misma línea:
+
+    AVISOS_SECRET=0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+
+Y reinícialo:
+
+    pm2 restart <nombre-del-proceso>
+    pm2 logs --lines 20
+
+En los logs tiene que salir:  [envio] ruta /enviar lista.
+Si en vez de eso sale un error diciendo que falta AVISOS_SECRET, es que el servidor no
+está leyendo el .env: revisa esa línea antes de seguir.
+
+
+------------------------------------------------------------------------------
+PASO 4 — Probar sin mandar nada
+------------------------------------------------------------------------------
+
+    cd /ruta/del/servidor
+    set -a; . ./.env.avisos; set +a
+    node aviso-vencimientos.mjs --simular
+
+Tiene que imprimir el mensaje que mandaría, sin mandarlo y sin marcar nada.
+
+Si algo falla, el mensaje te dice qué:
+
+    "No se pudo conectar con https://... (ENOTFOUND)"
+        → TRANSJER_URL está mal escrita.
+
+    "respondió 401"
+        → la clave del droplet y la de Vercel no son la misma, o falta el redeploy.
+
+    "Nada vence en los próximos 2 día(s)"
+        → funcionó: es que de verdad no hay nada venciendo. Para probarlo igual,
+          corre con AVISOS_DIAS=30 adelante del comando.
+
+
+------------------------------------------------------------------------------
+PASO 5 — Probar de verdad
+------------------------------------------------------------------------------
+
+    node aviso-vencimientos.mjs
+
+Tiene que llegarte el WhatsApp al número de AVISOS_DESTINO, y en pantalla:
+
+    N cuota(s) por avisar.
+    Mensaje enviado a 51XXXXXXXXX.
+    N cuota(s) quedaron marcadas como avisadas.
+
+Córrelo una segunda vez seguida: tiene que decir "Nada vence…". Eso confirma que no va a
+repetir el mismo aviso todos los días hasta que pagues, que es lo que hace que la gente
+deje de leer los avisos automáticos.
+
+Si el envío falla, no marca nada y sale con error: el aviso se reintenta mañana en vez de
+perderse en silencio.
+
+
+------------------------------------------------------------------------------
+PASO 6 — Programarlo
+------------------------------------------------------------------------------
+
+    crontab -e
+
+Y al final, de lunes a sábado a las 8 de la mañana:
+
+    0 8 * * 1-6 cd /ruta/del/servidor && set -a && . ./.env.avisos && set +a && /usr/bin/node aviso-vencimientos.mjs >> /var/log/avisos-vencimientos.log 2>&1
+
+(Todo en una sola línea.) Revisa que la hora del droplet sea la de Lima:
+
+    timedatectl
+    # si no lo está:  sudo timedatectl set-timezone America/Lima
+
+A los días, para ver que viene corriendo:
+
+    tail -20 /var/log/avisos-vencimientos.log
+
+
+------------------------------------------------------------------------------
+SI ALGO SE ROMPE MÁS ADELANTE
+------------------------------------------------------------------------------
+
+No llega nada y el log dice "No se pudo conectar con http://127.0.0.1:PUERTO/enviar"
+    El servidor de avisos está caído. pm2 status.
+
+El log dice "respondió 503: WhatsApp no está conectado todavía"
+    Baileys perdió la sesión. Entra al panel por Tailscale y vuelve a escanear el QR.
+    El aviso no se marcó, así que se reintenta.
+
+El log dice "El número ... no tiene WhatsApp"
+    AVISOS_DESTINO está mal escrito.
+
+Llegó el aviso pero con cuotas de menos
+    Las que ya se avisaron no se repiten. Para forzar que vuelvan a salir, en la base:
+        update obligation_installments set reminder_sent_at = null where id in (...);
+
+Quieres cambiar el número o los días
+    Edita .env.avisos. No hace falta tocar código ni volver a desplegar la web.
+
+Quieres que avise a varios números
+    Avísame y lo cambio: hoy manda a uno solo.

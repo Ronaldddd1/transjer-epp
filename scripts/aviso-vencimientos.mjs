@@ -39,18 +39,38 @@ const log = (...partes) => console.log(`[${ahora()}]`, ...partes);
  * Por defecto hace POST a AVISOS_BAILEYS con { numero, mensaje }. Si tu servidor espera
  * otra cosa, cambia solo esta función: el resto del script no sabe nada de WhatsApp.
  */
+/**
+ * fetch, pero diciendo a quién no pudo alcanzar.
+ *
+ * Cuando algo no responde, fetch lanza "fetch failed" a secas. Leído tres días después en
+ * el log del cron, eso no dice si se cayó la web, el servidor de envío o el internet del
+ * droplet. Aquí se nombra la dirección y el motivo del sistema operativo.
+ */
+async function pedirRed(url, opciones) {
+  try {
+    return await fetch(url, opciones);
+  } catch (e) {
+    const motivo = e?.cause?.code ?? e?.cause?.message ?? e?.message ?? "sin detalle";
+    throw new Error(`No se pudo conectar con ${url} (${motivo}).`);
+  }
+}
+
 async function enviarWhatsApp(numero, mensaje) {
   if (!BAILEYS) throw new Error("Falta AVISOS_BAILEYS: no se sabe a qué servidor pedirle el envío.");
-  const r = await fetch(BAILEYS, {
+  const r = await pedirRed(BAILEYS, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      // La misma clave que protege la ruta de envío en el servidor de avisos.
+      Authorization: `Bearer ${SECRET}`,
+      "Content-Type": "application/json",
+    },
     body: JSON.stringify({ numero, mensaje }),
   });
   if (!r.ok) throw new Error(`El servidor de avisos respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
 }
 
 async function pedir(ruta, opciones = {}) {
-  const r = await fetch(`${URL_BASE}${ruta}`, {
+  const r = await pedirRed(`${URL_BASE}${ruta}`, {
     ...opciones,
     headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json", ...opciones.headers },
   });

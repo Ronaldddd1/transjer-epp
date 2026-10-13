@@ -1,116 +1,69 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Tipos propios para cochera, seguro y línea · calendario de pagos con forma de calendario
-=========================================================================================
+Avisos de vencimiento por WhatsApp
+==================================
 
-1. TIPOS NUEVOS DE OBLIGACIÓN
------------------------------
+El paso a paso para dejarlo andando está en AVISOS-WHATSAPP.txt, dentro de esta misma
+carpeta. Ábrelo cuando vayas a configurarlo: son seis pasos y lleva como media hora.
 
-Cochera, seguro y línea móvil ya no caen bajo "Servicio": cada uno tiene su propio tipo y
-su propia tabla. Ahora en "Préstamos y servicios" hay una tabla por cada uno:
-
-    Préstamos · Alquileres · Cocheras · Seguros · Líneas móviles · Servicios ·
-    Impuestos · Otras obligaciones
-
-Dentro de cada tabla se sigue agrupando por concepto, como quedó la vez pasada. Si todas
-las cocheras tienen el mismo concepto, salen en una sola lista sin subtítulos; si hay dos
-conceptos distintos —las cocheras de las unidades por un lado, el patio por otro—, cada
-uno sale en su bloque con su total del mes.
-
-"Servicio" queda para lo que realmente lo es: luz, agua, internet.
-
-QUÉ PASA CON LO QUE YA ESTÁ CARGADO
-
-La migración reetiqueta sola lo que claramente es cochera, seguro o línea, mirando el
-nombre y el concepto de cada obligación:
-
-    cochera, estacionamiento                      → Cochera
-    seguro, póliza, soat                          → Seguro
-    línea, lineal, celular, teléfono, móvil, RPC  → Línea móvil
-
-Las cocheras salen también de los alquileres, porque la ayuda del formulario decía "Local,
-cochera o equipo alquilado" y varias se cargaron ahí.
-
-Lo que no reconoce se queda como está. Para corregirlo, ahora el formulario deja cambiar
-el tipo de una obligación que ya existe: entra, dale a "Editar" y elige el tipo correcto.
-La única excepción son los préstamos, que quedan bloqueados: su cronograma trae capital,
-tasa e intereses que ningún otro tipo sabe leer.
-
-SI MÁS ADELANTE QUIERES OTRO TIPO
-
-Avísame y lo agrego: ahora es una línea en la lista de tipos y una migración de un
-renglón. Antes era un enum de Postgres y no se podía hacer en un solo paso.
+Acá va solo el resumen de qué trae esta entrega.
 
 
-2. CALENDARIO DE PAGOS
-----------------------
+QUÉ HACE
+--------
 
-Dejó de ser una lista por días y pasó a ser una cuadrícula mensual, como un calendario de
-pared: siete columnas de domingo a sábado y una casilla por día.
+Cada mañana el droplet de avisos le pregunta a Transjer Gestión qué cuotas de préstamos y
+servicios vencen en los próximos 2 días, manda un WhatsApp al número que elijas, y le
+avisa de vuelta a la web qué mandó para que ese vencimiento no se repita al día siguiente.
 
-En cada casilla está lo que vence ese día —facturas de proveedores y cuotas de préstamos
-y servicios, todo junto— con su importe, y arriba a la derecha el total del día. El día de
-hoy va resaltado en amarillo. Los días con algo vencido salen en rojo.
-
-Arriba: el mes, las flechas para moverte de mes, y el total de todo lo que vence en él.
-Lo que quedó debiendo de meses anteriores va en una franja roja plegada, para que se vea
-que existe y cuánto es sin empujar el calendario fuera de la pantalla; se abre con "ver
-cuáles".
-
-Lo que exportas es el mes que estás mirando.
+Pregunta el droplet, no al revés, para que tu servidor de avisos siga detrás de Tailscale
+sin abrir ningún puerto a internet.
 
 
-3. UNA COSA MÁS, QUE SALIÓ PROBANDO
------------------------------------
+QUÉ ES NUEVO EN ESTA ENTREGA
+----------------------------
 
-El formulario de login no decía por qué método enviarse, y un formulario HTML sin eso se
-envía por GET. Mientras el JavaScript de la página todavía no carga —o si falla—, el
-navegador manda el formulario igual, y por GET la contraseña se va escrita en la dirección:
+scripts/enviar-mensaje.mjs
+    La ruta de envío que le faltaba a tu servidor de avisos. Como solo manda los avisos de
+    entrega, no tenía forma de mandar un texto suelto a un número. Esto se la agrega sin
+    tocar nada de lo que ya tienes: le pasas tu socket de Baileys y se monta con dos
+    líneas. Antes de mandar comprueba que el número tenga WhatsApp —sin eso, un número mal
+    escrito se "envía" sin error y el aviso queda marcado como mandado aunque nunca
+    llegó— y pide una clave, para que una ruta que manda WhatsApp a cualquier número no
+    quede abierta ni dentro de la red privada.
 
-    /login?identifier=admin&password=Admin123!
+scripts/aviso-vencimientos.mjs
+    Ya estaba, pero ahora manda la clave en cada pedido y, cuando algo no responde, dice a
+    quién no pudo alcanzar y por qué. Antes decía "fetch failed" a secas, que leído tres
+    días después en el log del cron no dice si se cayó la web, el servidor de envío o el
+    internet del droplet.
 
-Ahí queda, en el historial del navegador y en los registros del servidor de Vercel. Ya va
-por POST, así que la contraseña no viaja en la dirección.
+.env.example
+    Documenta AVISOS_SECRET, que no estaba.
+
+AVISOS-WHATSAPP.txt
+    El paso a paso, con la clave ya generada, los comandos para probar, y qué significa
+    cada error que te puede salir.
 
 
-CÓMO SE INSTALA
+LO QUE SE PROBÓ
 ---------------
 
-1. Descomprime y copia la carpeta transjer-epp sobre el proyecto, reemplazando.
-
-2. En la consola, en la carpeta del proyecto:
-
-       npm run db:migrate
-
-   Esto cambia el tipo de obligación a texto, amplía la lista de tipos permitidos y
-   reetiqueta lo que reconoce. Es aditivo: no borra ni mueve ninguna obligación.
-
-3. Levanta el sistema:
-
-       npm run dev
-
-4. Entra a "Préstamos y servicios" y revisa las tablas. Lo que haya quedado en el tipo
-   equivocado se corrige entrando a la obligación y dándole a "Editar".
-
-
-QUÉ SE PROBÓ
-------------
-
-  275 comprobaciones de lógica  — todas pasan
+  293 comprobaciones de lógica  — todas pasan
   8 recorridos en el navegador  — todos pasan
 
-Las nuevas: que cochera, seguro y línea tengan su propia tabla, que una cochera ya no
-salga bajo servicios, que las dos placas de un mismo concepto sigan cayendo en un solo
-bloque con la suma de las dos, que el tipo se pueda corregir desde la ficha y que un
-préstamo no lo permita, que el calendario tenga los siete días de la semana, que marque
-hoy y que las flechas cambien de mes.
+De las 18 nuevas, lo que cubren: que un número sin WhatsApp no reciba nada, que la ruta
+responda 401 sin la clave, que distinga "WhatsApp todavía no conecta" —que se reintenta,
+503— de "el pedido está mal" —que no, 400—, y que después de una reconexión de Baileys
+siga enviando en vez de quedarse con el socket viejo.
 
-Se probaron también las reglas de reetiquetado contra diez nombres reales: las clasifica
-bien las diez, y deja "Local Santa Anita", la luz y el internet donde estaban.
+Además se corrió la cadena entera contra un servidor de envío de mentira: pedir a la web,
+armar el mensaje, enviarlo, marcarlo, y no repetirlo en la segunda corrida. Y con el
+servidor de envío apagado, para confirmar lo importante: no marca nada y sale con error,
+así que el aviso se reintenta mañana en vez de perderse en silencio.
 
 
-PENDIENTE
----------
+UNA COSA QUE NO HACE TODAVÍA
+----------------------------
 
-Los avisos de WhatsApp siguen listos en el código pero sin configurar. Cuando quieras,
-seguimos: poner AVISOS_SECRET en Vercel, copiar el script al servidor y engancharlo a
-Baileys.
+Manda a un solo número. Si más adelante quieres que les llegue a dos o tres personas,
+avísame y lo cambio.
