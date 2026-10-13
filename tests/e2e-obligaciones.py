@@ -20,6 +20,10 @@ def psql(q):
     return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
 
 
+def ejecutar(q):
+    subprocess.run(["su", "postgres", "-c", f'psql -q -d {DB} -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
+
+
 def limpiar():
     """Borra lo que dejaron corridas anteriores de esta misma prueba, y solo eso."""
     for q in [
@@ -340,6 +344,24 @@ def main():
         check("la de servicios no habla de capital ni de TEA", "TEA" not in servicios, servicios[:150])
         check("ya no existe la columna Tipo repetida en cada fila",
               page.locator("th", has_text="Tipo").count() == 0)
+
+        # --- Totales del mes y segmentación por entidad ---
+        # Hace falta una segunda entidad dentro del mismo tipo: con una sola, la fila de
+        # grupo repetiría la cabecera y por eso no se dibuja.
+        ejecutar("insert into obligations (type, name, creditor, currency, billing_day, fixed_amount) "
+                 f"values ('SERVICIO', '{SERVICIO} entel', 'Entel', 'PEN', 5, 33.71)")
+        ejecutar("insert into obligation_installments (obligation_id, number, due_date, total) "
+                 f"select id, 1, current_date + 3, 33.71 from obligations where name = '{SERVICIO} entel'")
+        page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
+        cuerpo = page.content()
+
+        check("hay un total a pagar del mes", "Total a pagar este mes" in cuerpo)
+        check("explica lo que viene arrastrado", "meses anteriores" in cuerpo)
+        check("cada tipo dice su total del mes", "este mes" in cuerpo)
+        # Dentro de un tipo, las obligaciones se agrupan por la entidad a la que se paga.
+        # Esta prueba crea dos servicios de Claro, así que debe salir la fila de Claro.
+        servicios = page.locator("section, div").filter(has_text="Celular, luz, agua").last.inner_text()
+        check("los servicios se agrupan por entidad", "obligación(es) · este mes" in servicios, servicios[:200])
 
         # --- Calendario unificado ---
         page.goto(f"{BASE}/calendario?dias=60")

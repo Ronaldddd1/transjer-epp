@@ -3,10 +3,10 @@ import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 /**
  * Rutas que llaman servicios externos y no pueden llevar la sesión del navegador.
- * Cada una comprueba su propia identidad: el aviso de Microsoft valida su palabra secreta
- * y la tarea programada valida la clave CRON_SECRET.
+ * Cada una comprueba su propia identidad: el aviso de Microsoft valida su palabra secreta,
+ * la tarea programada valida CRON_SECRET y el servidor de avisos valida AVISOS_SECRET.
  */
-const PUBLIC_API = ["/api/correo/graph", "/api/cron/"];
+const PUBLIC_API = ["/api/correo/graph", "/api/cron/", "/api/avisos/"];
 
 /** Primera barrera: sin sesión válida no se accede a ninguna página interna. Los permisos se validan en el servidor. */
 export async function middleware(req: NextRequest) {

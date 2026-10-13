@@ -1,4 +1,5 @@
 import { AlertTriangle } from "lucide-react";
+import { Fragment } from "react";
 import Link from "next/link";
 import { ObligationStatusBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
@@ -21,14 +22,66 @@ import type { ObligationRow } from "@/server/obligation-queries";
 
 const ORDEN: ObligationTypeKey[] = ["PRESTAMO", "ALQUILER", "SERVICIO", "IMPUESTO", "OTRO"];
 
-/** Lo pendiente de un grupo, separado por moneda: no se suman soles con dólares. */
-function pendientePorMoneda(filas: ObligationRow[]) {
-  const porMoneda = new Map<string, number>();
+/**
+ * Un importe sumado por moneda. Nunca se juntan soles con dólares: sumarlos daría un número
+ * que no existe, y la empresa tiene obligaciones en las dos.
+ */
+function porMoneda(filas: ObligationRow[], campo: (o: ObligationRow) => string | null) {
+  const suma = new Map<string, number>();
   for (const o of filas) {
-    const n = Number(o.pendingAmount ?? 0);
-    if (n > 0) porMoneda.set(o.currency, (porMoneda.get(o.currency) ?? 0) + n);
+    const n = Number(campo(o) ?? 0);
+    if (n > 0) suma.set(o.currency, (suma.get(o.currency) ?? 0) + n);
   }
-  return [...porMoneda.entries()].map(([currency, importe]) => formatMoney(importe.toFixed(2), currency));
+  return [...suma.entries()].map(([currency, importe]) => formatMoney(importe.toFixed(2), currency));
+}
+
+const delMes = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthAmount);
+const arrastrado = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthOverdue);
+const pendiente = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.pendingAmount);
+const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") : "—");
+
+/**
+ * Las obligaciones de un tipo, agrupadas por la entidad a la que se le paga.
+ *
+ * Dentro de "Servicios" conviven cinco líneas de Entel, seis seguros de La Positiva y la
+ * luz de la oficina. Verlas en un solo bloque no dice nada; agrupadas por entidad se ve de
+ * un vistazo cuánto se le va a cada una este mes, que es como se maneja el dinero.
+ */
+function porEntidad(filas: ObligationRow[]) {
+  const grupos = new Map<string, ObligationRow[]>();
+  for (const o of filas) {
+    const lista = grupos.get(o.creditor);
+    if (lista) lista.push(o);
+    else grupos.set(o.creditor, [o]);
+  }
+  return [...grupos.entries()]
+    .map(([creditor, suyas]) => ({
+      creditor,
+      filas: suyas,
+      mes: suyas.reduce((s, o) => s + Number(o.monthAmount ?? 0), 0),
+      vencidas: suyas.reduce((s, o) => s + o.overdueCount, 0),
+      sinImporte: suyas.reduce((s, o) => s + o.monthMissing, 0),
+    }))
+    .sort((a, b) => b.mes - a.mes || a.creditor.localeCompare(b.creditor, "es"));
+}
+
+/** Fila que encabeza cada entidad dentro de la tabla de un tipo. */
+function FilaEntidad({ grupo, columnas }: { grupo: ReturnType<typeof porEntidad>[number]; columnas: number }) {
+  return (
+    <tr className="border-t border-steel-200 bg-steel-50">
+      <td colSpan={columnas} className="px-4 py-2">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <span className="font-semibold text-ink">{grupo.creditor}</span>
+          <span className="text-sm text-steel-600">
+            {grupo.filas.length} obligación(es) · este mes{" "}
+            <strong className="font-display text-ink">{juntar(delMes(grupo.filas))}</strong>
+            {grupo.sinImporte > 0 && <span className="text-brand-ink"> · {grupo.sinImporte} sin importe</span>}
+            {grupo.vencidas > 0 && <span className="font-semibold text-red-700"> · {grupo.vencidas} vencida(s)</span>}
+          </span>
+        </div>
+      </td>
+    </tr>
+  );
 }
 
 function Vencimiento({ fecha, sinCronograma, hoy }: { fecha: string | null; sinCronograma: boolean; hoy: string }) {
@@ -77,7 +130,9 @@ const Acciones = ({ id }: { id: string }) => (
 );
 
 /** Tabla de préstamos: capital, tasa y cuánto se ha amortizado. */
-function TablaPrestamos({ filas, hoy }: { filas: ObligationRow[]; hoy: string }) {
+function TablaPrestamos({ grupos, hoy, segmentar }: {
+  grupos: ReturnType<typeof porEntidad>; hoy: string; segmentar: boolean;
+}) {
   return (
     <TableShell>
       <thead>
@@ -94,7 +149,10 @@ function TablaPrestamos({ filas, hoy }: { filas: ObligationRow[]; hoy: string })
         </tr>
       </thead>
       <tbody>
-        {filas.map((o) => (
+        {grupos.map((g) => (
+          <Fragment key={g.creditor}>
+            {segmentar && <FilaEntidad grupo={g} columnas={9} />}
+            {g.filas.map((o) => (
           <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
             <Nombre o={o} />
             <Td className="whitespace-nowrap text-right tabular text-steel-600">
@@ -117,6 +175,8 @@ function TablaPrestamos({ filas, hoy }: { filas: ObligationRow[]; hoy: string })
             <Estado o={o} />
             <Acciones id={o.id} />
           </Tr>
+            ))}
+          </Fragment>
         ))}
       </tbody>
     </TableShell>
@@ -124,7 +184,9 @@ function TablaPrestamos({ filas, hoy }: { filas: ObligationRow[]; hoy: string })
 }
 
 /** Tabla de servicios, alquileres e impuestos: cuándo vence y cuánto llega. */
-function TablaPeriodicas({ filas, hoy }: { filas: ObligationRow[]; hoy: string }) {
+function TablaPeriodicas({ grupos, hoy, segmentar }: {
+  grupos: ReturnType<typeof porEntidad>; hoy: string; segmentar: boolean;
+}) {
   return (
     <TableShell>
       <thead>
@@ -140,7 +202,10 @@ function TablaPeriodicas({ filas, hoy }: { filas: ObligationRow[]; hoy: string }
         </tr>
       </thead>
       <tbody>
-        {filas.map((o) => (
+        {grupos.map((g) => (
+          <Fragment key={g.creditor}>
+            {segmentar && <FilaEntidad grupo={g} columnas={8} />}
+            {g.filas.map((o) => (
           <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
             <Nombre o={o} />
             <Td className="hidden whitespace-nowrap text-center tabular text-steel-600 lg:table-cell">
@@ -164,6 +229,8 @@ function TablaPeriodicas({ filas, hoy }: { filas: ObligationRow[]; hoy: string }
             <Estado o={o} />
             <Acciones id={o.id} />
           </Tr>
+            ))}
+          </Fragment>
         ))}
       </tbody>
     </TableShell>
@@ -187,29 +254,51 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
     );
   }
 
-  const grupos = ORDEN
+  const tipos = ORDEN
     .map((type) => ({ type, filas: rows.filter((o) => o.type === type) }))
     .filter((g) => g.filas.length > 0);
 
+  const totalDelMes = delMes(rows);
+  const totalArrastrado = arrastrado(rows);
+  const totalSinImporte = rows.reduce((s, o) => s + o.monthMissing, 0);
+
   return (
     <div className="grid gap-6">
-      {grupos.map(({ type, filas }) => {
+      {/* Lo primero que hay que saber a fin de mes: cuánta plata hay que tener lista. */}
+      <div className="rounded-lg border border-ink bg-ink px-4 py-3 text-white">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+          <span className="text-sm text-steel-300">Total a pagar este mes</span>
+          <span className="font-display text-2xl font-bold text-brand">{juntar(totalDelMes)}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-steel-400">
+          {totalArrastrado.length > 0
+            ? `Incluye ${totalArrastrado.join(" + ")} que viene de meses anteriores y sigue sin pagarse.`
+            : "Nada arrastrado de meses anteriores."}
+          {totalSinImporte > 0 && ` ${totalSinImporte} cuota(s) de monto variable todavía no suman: falta su recibo.`}
+        </p>
+      </div>
+
+      {tipos.map(({ type, filas }) => {
         const vencidas = filas.reduce((s, o) => s + o.overdueCount, 0);
-        const pendiente = pendientePorMoneda(filas);
+        const grupos = porEntidad(filas);
+        // Con una sola entidad la fila de grupo repetiría lo que ya dice la cabecera.
+        const segmentar = grupos.length > 1;
         return (
           <Panel
             key={type}
             title={OBLIGATION_TYPE_PLURAL[type]}
             action={
               <span className="text-sm text-steel-500">
-                {filas.length} · falta pagar {pendiente.length ? pendiente.join(" + ") : "nada"}
+                {filas.length} · este mes{" "}
+                <strong className="font-display text-base text-ink">{juntar(delMes(filas))}</strong>
+                <span className="text-steel-400"> · falta pagar {juntar(pendiente(filas))}</span>
                 {vencidas > 0 && <span className="ml-2 font-semibold text-red-700">{vencidas} cuota(s) vencida(s)</span>}
               </span>
             }
           >
             {type === "PRESTAMO"
-              ? <TablaPrestamos filas={filas} hoy={hoy} />
-              : <TablaPeriodicas filas={filas} hoy={hoy} />}
+              ? <TablaPrestamos grupos={grupos} hoy={hoy} segmentar={segmentar} />
+              : <TablaPeriodicas grupos={grupos} hoy={hoy} segmentar={segmentar} />}
             <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
               {OBLIGATION_TYPE_HINT[type]}
             </p>

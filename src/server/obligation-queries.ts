@@ -95,6 +95,31 @@ const obligationColumns = {
   balance: sql<string | null>`(select i.balance_after::text from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and i.status = 'PAGADA' order by i.number desc limit 1)`,
   /** Cuotas de servicios variables que aún no tienen importe: falta el recibo. */
   missingAmounts: sql<number>`(select count(*)::int from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending} and i.total is null)`,
+  /**
+   * Lo que toca pagar de esta obligación dentro del mes en curso.
+   *
+   * Es la pregunta de cada fin de mes: cuánta plata hay que tener lista. Incluye lo que
+   * venció antes y sigue sin pagarse, porque ese dinero también sale este mes. Lo de meses
+   * siguientes no entra, aunque ya esté programado.
+   */
+  monthAmount: sql<string>`(select coalesce(sum(i.total), 0)::text from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and ${pending}
+      and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
+  monthCount: sql<number>`(select count(*)::int from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and ${pending}
+      and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
+  /** De lo de este mes, cuánto no tiene importe todavía: no se puede sumar. */
+  monthMissing: sql<number>`(select count(*)::int from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and ${pending} and i.total is null
+      and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
+  /**
+   * La parte de lo de este mes que en realidad viene arrastrada de meses anteriores.
+   * Se separa para poder decirlo: si no, el total del mes parece más alto de lo que
+   * corresponde a este mes y nadie entiende de dónde sale la diferencia.
+   */
+  monthOverdue: sql<string>`(select coalesce(sum(i.total), 0)::text from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and ${pending}
+      and i.due_date < date_trunc('month', ${today})::date)`,
 };
 
 export async function listObligations(f: ObligationFilters = {}) {

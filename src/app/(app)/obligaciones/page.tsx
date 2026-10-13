@@ -26,7 +26,9 @@ export default async function ObligationsPage({ searchParams }: { searchParams: 
   const tarjetas = [
     { label: "Vencidas sin pagar", count: resumen.overdueCount, detail: formatMoney(resumen.overdueAmount), tone: resumen.overdueCount > 0 ? "alert" : "plain" },
     { label: "Vencen esta semana", count: resumen.weekCount, detail: formatMoney(resumen.weekAmount), tone: "brand" },
-    { label: "Total de este mes", count: resumen.monthCount, detail: formatMoney(resumen.monthAmount), tone: "plain" },
+    // Se llama así y no "total del mes" para no chocar con la franja de arriba, que sí
+    // suma lo arrastrado: dos cifras distintas con el mismo nombre no se entienden.
+    { label: "Vence dentro del mes", count: resumen.monthCount, detail: formatMoney(resumen.monthAmount), tone: "plain" },
   ] as const;
 
   return (

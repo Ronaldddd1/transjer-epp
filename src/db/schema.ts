@@ -451,6 +451,11 @@ export const obligationInstallments = pgTable("obligation_installments", {
   paymentReference: varchar("payment_reference", { length: 120 }),
   paidBy: uuid("paid_by").references(() => users.id),
   notes: text("notes"),
+  /**
+   * Cuándo se avisó por WhatsApp que esta cuota estaba por vencer. Evita que el mismo
+   * vencimiento se avise cada día hasta que llegue: se avisa una vez y queda marcado.
+   */
+  reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   ...timestamps,
 }, (t) => [
   uniqueIndex("obligation_installment_number_unique").on(t.obligationId, t.number),

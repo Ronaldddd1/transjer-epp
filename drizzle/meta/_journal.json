@@ -64,6 +64,13 @@
       "when": 1791315138367,
       "tag": "0008_vigencia_y_dia_31",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791827663180,
+      "tag": "0009_avisos_vencimiento",
+      "breakpoints": true
     }
   ]
 }
