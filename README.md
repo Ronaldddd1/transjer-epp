@@ -413,6 +413,38 @@ Cuando está activada, cada factura que llega a `facturas@transjer.com` se regis
 
 > El plan gratuito (Hobby) de Vercel solo permite **una tarea programada al día**. Por eso el sistema usa el aviso instantáneo para lo urgente y deja la tarea diaria como respaldo. No hace falta el plan Pro.
 
+### Opción A — Un buzón corriente, por IMAP
+
+Es el camino corto y sirve con cualquier correo: el del hosting de la empresa, Gmail, el que sea. No hay que registrar ninguna aplicación ni pedirle permisos a nadie.
+
+Los datos salen de la configuración del buzón. Si lo tienes en Outlook o en el celular, están en "servidor de entrada"; en cPanel, en *Cuentas de correo* → el buzón → **Conectar dispositivos**.
+
+En Vercel, **Settings → Environment Variables**:
+
+| Variable | Valor |
+|---|---|
+| `IMAP_HOST` | `mail.transjer.com` |
+| `IMAP_PORT` | `993` |
+| `IMAP_USER` | `facturas@transjer.com` |
+| `IMAP_PASSWORD` | La contraseña del buzón |
+| `INVOICE_MAILBOX` | `facturas@transjer.com` |
+| `CRON_SECRET` | Genera una con `openssl rand -base64 24` |
+| `IMAP_FOLDER` | Opcional. Por defecto `INBOX` |
+
+Vuelve a desplegar y entra a *Facturas → Correos* → **Probar conexión**.
+
+**IMAP no avisa cuando llega un correo**, hay que preguntar. La tarea de `vercel.json` revisa el buzón una vez al día, que es lo que permite el plan gratuito. Para que las facturas entren a los pocos minutos, algo externo tiene que llamar a la revisión más seguido. Desde el servidor de tareas, con cron cada 10 minutos:
+
+```
+*/10 * * * * curl -fsS -H "Authorization: Bearer TU_CRON_SECRET" https://transjer-epp.vercel.app/api/cron/facturas > /dev/null
+```
+
+Cada revisión procesa hasta 15 correos, del más antiguo al más reciente, y guarda hasta dónde llegó. Un buzón con meses de atraso se vacía solo en revisiones sucesivas.
+
+### Opción B — Microsoft 365
+
+Solo si la empresa tiene suscripción. A cambio del registro de la aplicación, Microsoft avisa en cuanto llega un correo y no hace falta preguntar.
+
 ### Qué debe hacer el administrador de Microsoft 365
 
 Estos pasos los hace quien administra el correo de la empresa, una sola vez.
@@ -441,7 +473,7 @@ New-ManagementRoleAssignment -App <CLIENT-ID> -Role "Application Mail.Read" -Cus
 
 Los cambios tardan entre 30 minutos y 2 horas en aplicarse. Puedes comprobarlo con `Test-ServicePrincipalAuthorization`.
 
-### Qué debes configurar tú en Vercel
+#### Qué debes configurar tú en Vercel
 
 En **Settings → Environment Variables**:
 

@@ -1,0 +1,160 @@
+LECTURA AUTOMÁTICA DE FACTURAS DESDE EL CORREO — PASO A PASO
+=============================================================
+
+Cada factura que llega a facturas@transjer.com se registra sola y aparece en Facturas
+como pendiente de pago. La encargada pasa de transcribir a revisar y aprobar.
+
+Si un correo no se puede procesar —no trae el XML, viene dañado, o esa factura ya estaba
+registrada— no se pierde: queda en Facturas → Correos con sus archivos y el motivo, para
+revisarlo a mano.
+
+
+POR QUÉ CAMBIÓ EL PLAN
+----------------------
+
+El sistema estaba escrito para Microsoft 365, que es lo que suelen usar las empresas con
+suscripción. Transjer no la tiene: el correo vive en el mismo servidor que la página web,
+que es un buzón corriente.
+
+Eso resultó ser más simple. Un buzón corriente se lee por IMAP, y para eso no hace falta
+registrar ninguna aplicación, ni consentimiento de administrador, ni tocar permisos del
+dominio. Solo el servidor, el usuario y la contraseña.
+
+No necesitas a Ángel para esto, salvo que él sea quien tenga la contraseña del buzón.
+
+
+UNA DIFERENCIA QUE SÍ IMPORTA
+-----------------------------
+
+Microsoft avisaba al sistema en cuanto llegaba un correo. IMAP no avisa: hay que preguntar.
+
+La tarea de Vercel revisa el buzón una vez al día, que es lo que permite el plan gratuito.
+Para que las facturas entren a los pocos minutos, el droplet pregunta cada 10 minutos. Es
+el mismo patrón de los avisos de vencimiento que ya dejamos andando.
+
+
+------------------------------------------------------------------------------
+PASO 1 — Instalar lo nuevo y publicar
+------------------------------------------------------------------------------
+
+Esta entrega agrega dos librerías al proyecto, así que no basta con copiar los archivos:
+
+    cd D:\\transjer-epp\\transjer-epp
+    npm install
+
+No hay migración: la base de datos no cambia.
+
+Después revisa que no se cuele el .env y publica:
+
+    git status --short
+    git add -A
+    git commit -m "Lectura de facturas desde un buzón IMAP"
+    git push
+
+Espera a que Vercel termine de desplegar.
+
+
+------------------------------------------------------------------------------
+PASO 2 — Las variables, en Vercel
+------------------------------------------------------------------------------
+
+Settings → Environment Variables. Estas seis, en Production:
+
+    IMAP_HOST          mail.transjer.com
+    IMAP_PORT          993
+    IMAP_USER          facturas@transjer.com
+    IMAP_PASSWORD      la contraseña del buzón
+    INVOICE_MAILBOX    facturas@transjer.com
+    CRON_SECRET        ArawCK7/lN8rw3zMb9zQdJor/o6dZBST
+
+CRON_SECRET puede que ya esté puesta de antes; si está, déjala como está y usa esa misma
+en el paso 4.
+
+Guarda y haz Redeploy del último despliegue. Las variables nuevas solo entran al desplegar.
+
+
+------------------------------------------------------------------------------
+PASO 3 — Probar
+------------------------------------------------------------------------------
+
+Entra a Facturas → Correos. El panel de arriba tiene que decir "Activa" y, en "Cómo se
+lee", "IMAP, revisando cada pocos minutos".
+
+Pulsa PROBAR CONEXIÓN. Si todo está bien responde con el nombre de la carpeta y cuántos
+correos hay. Si algo falla, el mensaje dice qué revisar:
+
+    "No se encontró el servidor mail.transjer.com"
+        IMAP_HOST está mal escrito.
+
+    "rechazó la conexión en el puerto ..."
+        IMAP_PORT está mal. Tiene que ser 993.
+
+    "El servidor rechazó el usuario o la contraseña"
+        IMAP_USER o IMAP_PASSWORD. Ojo que el usuario es el correo completo.
+
+    "no respondió. Puede estar bloqueando conexiones desde fuera de su red"
+        El hosting no acepta conexiones desde internet. Hay que pedirles que permitan
+        IMAP desde fuera, o mover la revisión al droplet. Avísame si sale esto.
+
+    "No existe la carpeta INBOX"
+        El mensaje lista las carpetas que sí hay; se pone la correcta en IMAP_FOLDER.
+
+Cuando la prueba pase, pulsa REVISAR AHORA. Eso lee el buzón y registra lo que encuentre.
+La primera vez mira los últimos 3 días, para no inundar la pantalla con meses de histórico.
+
+
+------------------------------------------------------------------------------
+PASO 4 — Que revise cada 10 minutos
+------------------------------------------------------------------------------
+
+En el droplet, como root:
+
+    crontab -u transjer -l > /tmp/cron-actual
+    echo '*/10 * * * * curl -fsS -H "Authorization: Bearer ArawCK7/lN8rw3zMb9zQdJor/o6dZBST" https://transjer-epp.vercel.app/api/cron/facturas >> /home/transjer/facturas-correo.log 2>&1' >> /tmp/cron-actual
+    crontab -u transjer /tmp/cron-actual
+    rm /tmp/cron-actual
+    crontab -u transjer -l
+
+La primera línea conserva el aviso de vencimientos que ya está puesto; sin eso lo borrarías.
+
+Al final te tiene que listar las dos tareas: la de los avisos a las 8, y esta cada 10
+minutos.
+
+
+------------------------------------------------------------------------------
+CÓMO SABER QUE ESTÁ FUNCIONANDO
+------------------------------------------------------------------------------
+
+En Facturas → Correos, el panel dice cuándo fue la última revisión y cuál fue el último
+correo leído. Si algo falló, lo muestra en rojo con el motivo.
+
+Desde tu PC:
+
+    ssh root@avisos-transjer "tail -5 /home/transjer/facturas-correo.log"
+
+Cada revisión procesa hasta 15 correos, del más antiguo al más reciente, y guarda hasta
+dónde llegó. Si el buzón tiene meses de atraso se vacía solo, de a 15 cada 10 minutos.
+
+
+SI QUIERES TRAER EL HISTÓRICO
+-----------------------------
+
+Por defecto solo mira de los últimos 3 días en adelante. Si quieres que procese todo lo
+que hay en el buzón, avísame y te paso cómo: conviene hacerlo una vez, mirando, y no
+dejarlo corriendo.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  309 comprobaciones de lógica  — todas pasan
+  8 recorridos en el navegador  — todos pasan
+
+De las nuevas: que un correo con XML y PDF se convierta bien en factura con sus adjuntos
+enteros, que el logotipo de la firma del remitente no se tome por adjunto, que cada correo
+se identifique sin poder confundirse con otro aunque el servidor reorganice el buzón, que
+se elija IMAP o Microsoft según qué variables estén cargadas, y que cada fallo de conexión
+diga qué variable revisar.
+
+Lo que no se probó desde aquí: la conexión con mail.transjer.com. Mi entorno no tiene
+salida a ese servidor, así que esa es la que haremos juntos en el paso 3.

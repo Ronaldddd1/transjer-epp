@@ -12,7 +12,8 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { EMAIL_STATUS_LABEL, formatDateTime, formatFileSize, invoiceNumber, pageParams, type SearchParams } from "@/lib/utils";
-import { missingMailboxSettings, notificationUrl, readMailboxConfig } from "@/server/graph";
+import { notificationUrl } from "@/server/graph";
+import { missingMailboxSettings, readMailboxConfig } from "@/server/mailbox-config";
 import { attachmentsByEmail, getSupplierOptions, listInvoiceEmails, readEmailFilters } from "@/server/invoice-queries";
 import { getSubscriptionState, getSyncState, minutesToExpiry } from "@/server/mailbox-state";
 
@@ -28,7 +29,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
   const config = readMailboxConfig();
   const [{ rows, total }, subscription, sync, suppliers] = await Promise.all([
     listInvoiceEmails(f, pageSize, offset),
-    config ? getSubscriptionState() : Promise.resolve(null),
+    config?.kind === "graph" ? getSubscriptionState() : Promise.resolve(null),
     getSyncState(),
     getSupplierOptions(),
   ]);
@@ -36,6 +37,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
 
   const status = {
     configured: !!config,
+    // IMAP o Microsoft 365: cambia qué botones tienen sentido y qué se le explica a quien mira.
+    tipo: config?.kind ?? null,
     missing: missingMailboxSettings(),
     mailbox: config?.mailbox ?? null,
     notificationUrl: notificationUrl(),
@@ -88,7 +91,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
               title="No hay correos registrados"
               hint={status.configured
                 ? "Cuando llegue una factura al buzón aparecerá aquí. Puedes forzar una revisión con Revisar ahora."
-                : "Esta bandeja se llena cuando se conecta el buzón de Microsoft 365."}
+                : "Esta bandeja se llena cuando se conecta el buzón de correo."}
             />
           )}
           {rows.map((e) => {

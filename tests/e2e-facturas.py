@@ -288,8 +288,12 @@ with sync_playwright() as p:
     page.goto(BASE + "/facturas/correos")
     expect(page.get_by_role("heading", name="Correos de facturas")).to_be_visible()
     expect(page.get_by_text("Sin configurar")).to_be_visible()
-    for var in ["GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "INVOICE_MAILBOX"]:
+    # Sin nada configurado se proponen las variables de IMAP, que es el camino que sirve
+    # con cualquier correo y no necesita que un administrador registre nada.
+    for var in ["IMAP_HOST", "IMAP_USER", "IMAP_PASSWORD"]:
         expect(page.get_by_text(var, exact=True)).to_be_visible()
+    # Y no se mezclan las de Microsoft, que solo aplican si la empresa tiene suscripción.
+    expect(page.get_by_text("GRAPH_TENANT_ID", exact=True)).to_have_count(0)
     page.screenshot(path=f"{SHOTS}/e2e-correos.png", full_page=True)
     ok("Bandeja de correos explica qué falta configurar")
 

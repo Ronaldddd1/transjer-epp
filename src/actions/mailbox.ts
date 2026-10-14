@@ -10,9 +10,11 @@ import { requireActionUser } from "@/lib/auth";
 import { invoiceNumber } from "@/lib/utils";
 import { invoiceSchema, observeInvoiceSchema } from "@/lib/validations";
 import {
-  createSubscription, deleteSubscription, getSubscription, notificationUrl, readMailboxConfig,
+  createSubscription, deleteSubscription, getSubscription, notificationUrl,
   renewSubscription, resetTokenCache, testConnection,
 } from "@/server/graph";
+import { testImapConnection } from "@/server/imap";
+import { readMailboxConfig } from "@/server/mailbox-config";
 import { ingestMessage, syncMailbox } from "@/server/invoice-ingest";
 import { insertInvoice } from "@/server/invoice-service";
 import { clearSubscriptionState, getSubscriptionState, setSubscriptionState } from "@/server/mailbox-state";
@@ -25,10 +27,30 @@ function requireConfig() {
   return config;
 }
 
+/**
+ * Las suscripciones de avisos son cosa de Microsoft: es él quien avisa cuando llega un
+ * correo. Un buzón IMAP corriente no tiene nada parecido, se revisa cada pocos minutos
+ * desde fuera, así que estos botones no le aplican.
+ */
+function requireGraph() {
+  const config = requireConfig();
+  if (config.kind !== "graph") {
+    throw new BusinessError(
+      "Los avisos automáticos son exclusivos de Microsoft 365. Este buzón se lee por IMAP, "
+      + "que no avisa: se revisa cada pocos minutos desde el servidor de tareas.",
+    );
+  }
+  return config;
+}
+
 export async function testMailbox(): Promise<ActionResult> {
   try {
     await requireActionUser("invoices.mailbox");
     const config = requireConfig();
+    if (config.kind === "imap") {
+      const info = await testImapConnection(config);
+      return { ok: true, message: `Conexión correcta con el buzón ${info.address} (${info.displayName}).` };
+    }
     resetTokenCache();
     const info = await testConnection(config);
     return { ok: true, message: `Conexión correcta con el buzón ${info.address} (${info.displayName}).` };
@@ -41,7 +63,7 @@ export async function testMailbox(): Promise<ActionResult> {
 export async function activateMailbox(): Promise<ActionResult> {
   try {
     const user = await requireActionUser("invoices.mailbox");
-    const config = requireConfig();
+    const config = requireGraph();
     const url = notificationUrl();
     if (!url) throw new BusinessError("Falta la variable APP_URL con la dirección pública del sistema.");
 
@@ -72,7 +94,7 @@ export async function activateMailbox(): Promise<ActionResult> {
 export async function deactivateMailbox(): Promise<ActionResult> {
   try {
     const user = await requireActionUser("invoices.mailbox");
-    const config = requireConfig();
+    const config = requireGraph();
     const state = await getSubscriptionState();
     if (!state) throw new BusinessError("Los avisos no están activos.");
     try {
@@ -95,7 +117,7 @@ export async function deactivateMailbox(): Promise<ActionResult> {
 export async function renewMailbox(): Promise<ActionResult> {
   try {
     await requireActionUser("invoices.mailbox");
-    const config = requireConfig();
+    const config = requireGraph();
     const state = await getSubscriptionState();
     if (!state) throw new BusinessError("Los avisos no están activos: actívalos primero.");
     const live = await getSubscription(config, state.id);

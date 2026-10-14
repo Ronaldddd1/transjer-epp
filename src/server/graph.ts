@@ -1,5 +1,6 @@
 import "server-only";
 import { BusinessError } from "@/lib/action-result";
+import { publicBaseUrl, type GraphConfig } from "./mailbox-config";
 
 /**
  * Conexión con el buzón de facturas en Microsoft 365, mediante Microsoft Graph.
@@ -34,43 +35,6 @@ export class GraphError extends BusinessError {
   }
 }
 
-export type MailboxConfig = {
-  tenantId: string;
-  clientId: string;
-  clientSecret: string;
-  mailbox: string;
-  webhookSecret: string;
-};
-
-export function readMailboxConfig(): MailboxConfig | null {
-  const tenantId = process.env.GRAPH_TENANT_ID?.trim();
-  const clientId = process.env.GRAPH_CLIENT_ID?.trim();
-  const clientSecret = process.env.GRAPH_CLIENT_SECRET?.trim();
-  const mailbox = process.env.INVOICE_MAILBOX?.trim().toLowerCase();
-  const webhookSecret = process.env.GRAPH_WEBHOOK_SECRET?.trim();
-  if (!tenantId || !clientId || !clientSecret || !mailbox || !webhookSecret) return null;
-  return { tenantId, clientId, clientSecret, mailbox, webhookSecret };
-}
-
-/** Qué falta por configurar, para mostrarlo en pantalla. */
-export function missingMailboxSettings(): string[] {
-  const required = {
-    GRAPH_TENANT_ID: process.env.GRAPH_TENANT_ID,
-    GRAPH_CLIENT_ID: process.env.GRAPH_CLIENT_ID,
-    GRAPH_CLIENT_SECRET: process.env.GRAPH_CLIENT_SECRET,
-    INVOICE_MAILBOX: process.env.INVOICE_MAILBOX,
-    GRAPH_WEBHOOK_SECRET: process.env.GRAPH_WEBHOOK_SECRET,
-  };
-  return Object.entries(required).filter(([, v]) => !v?.trim()).map(([k]) => k);
-}
-
-/** Dirección pública de la aplicación, necesaria para que Microsoft pueda avisar. */
-export function publicBaseUrl(): string | null {
-  const explicit = process.env.APP_URL?.trim();
-  if (explicit) return explicit.replace(/\/$/, "");
-  const vercel = process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
-  return vercel ? `https://${vercel}` : null;
-}
 
 export function notificationUrl(): string | null {
   const base = publicBaseUrl();
@@ -80,7 +44,7 @@ export function notificationUrl(): string | null {
 // --- Token de acceso (se reutiliza mientras siga vigente) ---
 let cachedToken: { value: string; expiresAt: number } | null = null;
 
-export async function getAccessToken(config: MailboxConfig): Promise<string> {
+export async function getAccessToken(config: GraphConfig): Promise<string> {
   if (cachedToken && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.value;
 
   const res = await safeFetch(`https://login.microsoftonline.com/${config.tenantId}/oauth2/v2.0/token`, {
@@ -109,7 +73,7 @@ export function resetTokenCache() {
   cachedToken = null;
 }
 
-async function graphFetch(config: MailboxConfig, path: string, init: RequestInit = {}) {
+async function graphFetch(config: GraphConfig, path: string, init: RequestInit = {}) {
   const token = await getAccessToken(config);
   const res = await safeFetch(path.startsWith("http") ? path : `${GRAPH}${path}`, {
     ...init,
@@ -143,12 +107,12 @@ export type GraphMessage = {
 
 const MESSAGE_FIELDS = "id,internetMessageId,subject,receivedDateTime,hasAttachments,from,bodyPreview";
 
-export async function getMessage(config: MailboxConfig, messageId: string): Promise<GraphMessage> {
+export async function getMessage(config: GraphConfig, messageId: string): Promise<GraphMessage> {
   return graphFetch(config, `/users/${encodeURIComponent(config.mailbox)}/messages/${messageId}?$select=${MESSAGE_FIELDS}`);
 }
 
 /** Mensajes recibidos desde una fecha, del más antiguo al más reciente. */
-export async function listMessagesSince(config: MailboxConfig, since: Date, top = 25): Promise<GraphMessage[]> {
+export async function listMessagesSince(config: GraphConfig, since: Date, top = 25): Promise<GraphMessage[]> {
   const folder = process.env.INVOICE_MAIL_FOLDER?.trim() || "Inbox";
   const filter = encodeURIComponent(`receivedDateTime ge ${since.toISOString()}`);
   const data = await graphFetch(
@@ -162,7 +126,7 @@ export async function listMessagesSince(config: MailboxConfig, since: Date, top 
 export type GraphAttachment = { id: string; name: string; contentType: string; size: number; data: Buffer };
 
 /** Descarga los archivos adjuntos de un mensaje (solo archivos, no mensajes incrustados). */
-export async function getAttachments(config: MailboxConfig, messageId: string): Promise<GraphAttachment[]> {
+export async function getAttachments(config: GraphConfig, messageId: string): Promise<GraphAttachment[]> {
   const data = await graphFetch(config, `/users/${encodeURIComponent(config.mailbox)}/messages/${messageId}/attachments`);
   const out: GraphAttachment[] = [];
   for (const att of data?.value ?? []) {
@@ -201,7 +165,7 @@ export function subscriptionExpiry(): string {
   return new Date(Date.now() + 6 * 24 * 60 * 60 * 1000).toISOString();
 }
 
-export async function createSubscription(config: MailboxConfig): Promise<GraphSubscription> {
+export async function createSubscription(config: GraphConfig): Promise<GraphSubscription> {
   const url = notificationUrl();
   if (!url) throw new GraphError("Falta APP_URL: Microsoft necesita una dirección pública para enviar los avisos.");
   if (!url.startsWith("https://")) throw new GraphError("La dirección de avisos debe empezar con https://.");
@@ -219,18 +183,18 @@ export async function createSubscription(config: MailboxConfig): Promise<GraphSu
   });
 }
 
-export async function renewSubscription(config: MailboxConfig, id: string): Promise<GraphSubscription> {
+export async function renewSubscription(config: GraphConfig, id: string): Promise<GraphSubscription> {
   return graphFetch(config, `/subscriptions/${id}`, {
     method: "PATCH",
     body: JSON.stringify({ expirationDateTime: subscriptionExpiry() }),
   });
 }
 
-export async function deleteSubscription(config: MailboxConfig, id: string): Promise<void> {
+export async function deleteSubscription(config: GraphConfig, id: string): Promise<void> {
   await graphFetch(config, `/subscriptions/${id}`, { method: "DELETE" });
 }
 
-export async function getSubscription(config: MailboxConfig, id: string): Promise<GraphSubscription | null> {
+export async function getSubscription(config: GraphConfig, id: string): Promise<GraphSubscription | null> {
   try {
     return await graphFetch(config, `/subscriptions/${id}`);
   } catch (error) {
@@ -240,7 +204,7 @@ export async function getSubscription(config: MailboxConfig, id: string): Promis
 }
 
 /** Comprueba que las credenciales y el permiso sobre el buzón funcionan. */
-export async function testConnection(config: MailboxConfig): Promise<{ displayName: string; address: string }> {
+export async function testConnection(config: GraphConfig): Promise<{ displayName: string; address: string }> {
   const data = await graphFetch(config, `/users/${encodeURIComponent(config.mailbox)}?$select=displayName,mail,userPrincipalName`);
   return { displayName: data?.displayName ?? config.mailbox, address: data?.mail ?? data?.userPrincipalName ?? config.mailbox };
 }

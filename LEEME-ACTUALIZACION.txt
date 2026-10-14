@@ -1,69 +1,62 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Avisos de vencimiento por WhatsApp
-==================================
+Lectura de facturas desde el correo, por IMAP
+=============================================
 
-El paso a paso para dejarlo andando está en AVISOS-WHATSAPP.txt, dentro de esta misma
-carpeta. Ábrelo cuando vayas a configurarlo: son seis pasos y lleva como media hora.
-
-Acá va solo el resumen de qué trae esta entrega.
+El paso a paso está en FACTURAS-POR-CORREO.txt, con tus datos ya puestos.
 
 
-QUÉ HACE
---------
+LO IMPORTANTE
+-------------
 
-Cada mañana el droplet de avisos le pregunta a Transjer Gestión qué cuotas de préstamos y
-servicios vencen en los próximos 2 días, manda un WhatsApp al número que elijas, y le
-avisa de vuelta a la web qué mandó para que ese vencimiento no se repita al día siguiente.
+Transjer no tiene Microsoft 365, y el sistema estaba escrito solo para eso. El correo de
+la empresa vive en el mismo servidor que la página web: un buzón corriente, que se lee
+por IMAP.
 
-Pregunta el droplet, no al revés, para que tu servidor de avisos siga detrás de Tailscale
-sin abrir ningún puerto a internet.
+Resultó ser el camino más corto. No hay que registrar ninguna aplicación, ni pedir
+consentimiento de administrador, ni tocar permisos del dominio. Solo servidor, usuario y
+contraseña, en las variables de entorno de Vercel.
+
+El documento de Microsoft 365 que te pasé antes ya no aplica. No se lo mandes a Ángel.
 
 
-QUÉ ES NUEVO EN ESTA ENTREGA
-----------------------------
+QUÉ TRAE ESTA ENTREGA
+---------------------
 
-scripts/enviar-mensaje.mjs
-    La ruta de envío que le faltaba a tu servidor de avisos. Como solo manda los avisos de
-    entrega, no tenía forma de mandar un texto suelto a un número. Esto se la agrega sin
-    tocar nada de lo que ya tienes: le pasas tu socket de Baileys y se monta con dos
-    líneas. Antes de mandar comprueba que el número tenga WhatsApp —sin eso, un número mal
-    escrito se "envía" sin error y el aviso queda marcado como mandado aunque nunca
-    llegó— y pide una clave, para que una ruta que manda WhatsApp a cualquier número no
-    quede abierta ni dentro de la red privada.
+src/server/imap.ts
+    El lector del buzón. Devuelve lo mismo que el de Microsoft, así que todo lo que viene
+    después —leer el XML, crear la factura, detectar duplicados, la bandeja de Por
+    revisar— no cambió ni una línea.
 
-scripts/aviso-vencimientos.mjs
-    Ya estaba, pero ahora manda la clave en cada pedido y, cuando algo no responde, dice a
-    quién no pudo alcanzar y por qué. Antes decía "fetch failed" a secas, que leído tres
-    días después en el log del cron no dice si se cayó la web, el servidor de envío o el
-    internet del droplet.
+src/server/mailbox-config.ts
+    Decide de dónde se leen los correos según qué variables estén cargadas. Microsoft 365
+    sigue soportado por si algún día la empresa lo contrata.
 
-.env.example
-    Documenta AVISOS_SECRET, que no estaba.
+El panel de Facturas → Correos
+    Ya no da por hecho Microsoft: muestra cómo se está leyendo el buzón, y los botones de
+    avisos automáticos solo aparecen cuando aplican.
 
-AVISOS-WHATSAPP.txt
-    El paso a paso, con la clave ya generada, los comandos para probar, y qué significa
-    cada error que te puede salir.
+Dos librerías nuevas (imapflow y mailparser), así que esta vez hay que correr
+`npm install` antes de publicar. La base de datos no cambia: no hay migración.
+
+
+UNA DIFERENCIA QUE SÍ IMPORTA
+-----------------------------
+
+Microsoft avisaba cuando llegaba un correo. IMAP no avisa, hay que preguntar. Como el
+plan gratuito de Vercel solo permite una tarea al día, el droplet pregunta cada 10
+minutos. Es el mismo patrón de los avisos de vencimiento.
 
 
 LO QUE SE PROBÓ
 ---------------
 
-  293 comprobaciones de lógica  — todas pasan
+  309 comprobaciones de lógica  — todas pasan
   8 recorridos en el navegador  — todos pasan
 
-De las 18 nuevas, lo que cubren: que un número sin WhatsApp no reciba nada, que la ruta
-responda 401 sin la clave, que distinga "WhatsApp todavía no conecta" —que se reintenta,
-503— de "el pedido está mal" —que no, 400—, y que después de una reconexión de Baileys
-siga enviando en vez de quedarse con el socket viejo.
+Entre las nuevas: que un correo con XML y PDF se convierta en factura con los adjuntos
+enteros, que el logotipo de la firma del remitente no se tome por adjunto, que cada correo
+se identifique sin confundirse con otro aunque el servidor reorganice el buzón, y que cada
+fallo de conexión diga qué variable revisar.
 
-Además se corrió la cadena entera contra un servidor de envío de mentira: pedir a la web,
-armar el mensaje, enviarlo, marcarlo, y no repetirlo en la segunda corrida. Y con el
-servidor de envío apagado, para confirmar lo importante: no marca nada y sale con error,
-así que el aviso se reintenta mañana en vez de perderse en silencio.
-
-
-UNA COSA QUE NO HACE TODAVÍA
-----------------------------
-
-Manda a un solo número. Si más adelante quieres que les llegue a dos o tres personas,
-avísame y lo cambio.
+Lo que NO se probó desde aquí: la conexión con mail.transjer.com. Este entorno no tiene
+salida a ese servidor. Esa prueba la hacemos juntos, como hicimos con el WhatsApp.

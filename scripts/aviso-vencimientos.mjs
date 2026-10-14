@@ -8,25 +8,72 @@
  * Se hace así —el VPS preguntando— para no abrir ningún puerto: el servidor de avisos
  * sigue detrás de Tailscale, sin exponerse a internet.
  *
+ * Para mandar el WhatsApp usa la ruta que el servidor de avisos ya tiene, POST /api/mensaje,
+ * la misma del panel para escribirle a un número suelto. No hace falta tocar ese servidor.
+ *
  * Instalación en el droplet:
  *
- *   1. Copiar este archivo junto al servidor de avisos.
- *   2. Crear el archivo de variables (chmod 600, la clave es un secreto):
+ *   1. Copiar este archivo a la carpeta del servidor de avisos.
+ *   2. Crear el archivo de variables (chmod 600: lleva dos claves):
  *        TRANSJER_URL=https://transjer-epp.vercel.app
  *        AVISOS_SECRET=...la misma que se puso en Vercel...
  *        AVISOS_DESTINO=51999888777          # el número que recibe, con código de país
- *        AVISOS_BAILEYS=http://127.0.0.1:3001/enviar
+ *        AVISOS_PANEL=http://127.0.0.1:3000/api/mensaje
+ *        AVISOS_PANEL_USUARIO=...el USUARIO_PANEL del servidor de avisos...
+ *        AVISOS_PANEL_CLAVE=...la CLAVE_PANEL del servidor de avisos...
+ *      El script lo lee solo: no hace falta cargarlo antes con `set -a; . ./.env.avisos`.
  *   3. Probar sin enviar nada:   node aviso-vencimientos.mjs --simular
  *   4. Programarlo con cron, de lunes a sábado a las 8:00:
  *        0 8 * * 1-6  cd /ruta/al/servidor && /usr/bin/node aviso-vencimientos.mjs >> avisos.log 2>&1
  *
  * No usa ninguna dependencia: Node 18 o superior ya trae fetch.
  */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/**
+ * Lee el archivo de variables que está junto a este script.
+ *
+ * Lo lee aquí y no con `set -a; . ./.env.avisos` a propósito. Al cargarlo desde bash, una
+ * clave con un espacio o con caracteres como $ o ` se parte: el shell se queda con el
+ * primer trozo e intenta ejecutar el resto. La variable termina a medias y el envío falla
+ * con un 401 que no se explica mirando el archivo, porque ahí la clave está bien escrita.
+ * Partiendo por el primer "=" y sin pasar por el shell, el valor llega entero sea cual sea.
+ *
+ * Lo que ya venga en el entorno manda sobre el archivo, para poder probar cosas sueltas:
+ *   AVISOS_DIAS=30 node aviso-vencimientos.mjs --simular
+ */
+function cargarVariables() {
+  const archivo = path.join(path.dirname(fileURLToPath(import.meta.url)), ".env.avisos");
+  if (!fs.existsSync(archivo)) return;
+
+  for (const linea of fs.readFileSync(archivo, "utf8").split("\n")) {
+    const limpia = linea.trim();
+    if (!limpia || limpia.startsWith("#")) continue;
+
+    const corte = limpia.indexOf("=");
+    if (corte < 1) continue;
+
+    const nombre = limpia.slice(0, corte).trim();
+    let valor = limpia.slice(corte + 1).trim();
+    // Se aceptan valores entrecomillados, por si el archivo viene de otro sitio.
+    const comilla = valor[0];
+    if ((comilla === '"' || comilla === "'") && valor.endsWith(comilla) && valor.length > 1) {
+      valor = valor.slice(1, -1);
+    }
+    if (!(nombre in process.env)) process.env[nombre] = valor;
+  }
+}
+
+cargarVariables();
 
 const URL_BASE = (process.env.TRANSJER_URL ?? "").replace(/\/$/, "");
 const SECRET = process.env.AVISOS_SECRET ?? "";
 const DESTINO = process.env.AVISOS_DESTINO ?? "";
-const BAILEYS = process.env.AVISOS_BAILEYS ?? "";
+const PANEL = process.env.AVISOS_PANEL ?? "http://127.0.0.1:3000/api/mensaje";
+const PANEL_USUARIO = process.env.AVISOS_PANEL_USUARIO ?? "";
+const PANEL_CLAVE = process.env.AVISOS_PANEL_CLAVE ?? "";
 const DIAS = Number(process.env.AVISOS_DIAS ?? 2);
 const SIMULAR = process.argv.includes("--simular");
 
@@ -34,10 +81,15 @@ const ahora = () => new Date().toLocaleString("es-PE", { timeZone: "America/Lima
 const log = (...partes) => console.log(`[${ahora()}]`, ...partes);
 
 /**
- * El envío. Es lo único que depende de tu servidor de avisos.
+ * El envío. Es lo único que depende del servidor de avisos.
  *
- * Por defecto hace POST a AVISOS_BAILEYS con { numero, mensaje }. Si tu servidor espera
- * otra cosa, cambia solo esta función: el resto del script no sabe nada de WhatsApp.
+ * Usa su ruta POST /api/mensaje, la que el panel ya usa para escribirle a un número
+ * suelto: recibe { telefono, texto } y por dentro resuelve el JID, comprueba que el
+ * número tenga WhatsApp y manda. Nada de eso hace falta repetirlo acá.
+ *
+ * El panel entero está detrás de autenticación básica, así que va con el usuario y la
+ * clave del panel. Si ese servidor corriera sin CLAVE_PANEL —no debería—, basta con
+ * dejar vacías las dos variables y se manda sin cabecera.
  */
 /**
  * fetch, pero diciendo a quién no pudo alcanzar.
@@ -55,18 +107,26 @@ async function pedirRed(url, opciones) {
   }
 }
 
-async function enviarWhatsApp(numero, mensaje) {
-  if (!BAILEYS) throw new Error("Falta AVISOS_BAILEYS: no se sabe a qué servidor pedirle el envío.");
-  const r = await pedirRed(BAILEYS, {
-    method: "POST",
-    headers: {
-      // La misma clave que protege la ruta de envío en el servidor de avisos.
-      Authorization: `Bearer ${SECRET}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ numero, mensaje }),
-  });
-  if (!r.ok) throw new Error(`El servidor de avisos respondió ${r.status}: ${(await r.text()).slice(0, 200)}`);
+async function enviarWhatsApp(telefono, texto) {
+  const cabeceras = { "Content-Type": "application/json" };
+  if (PANEL_CLAVE) {
+    const credencial = Buffer.from(`${PANEL_USUARIO}:${PANEL_CLAVE}`).toString("base64");
+    cabeceras.Authorization = `Basic ${credencial}`;
+  }
+
+  const r = await pedirRed(PANEL, { method: "POST", headers: cabeceras, body: JSON.stringify({ telefono, texto }) });
+  if (r.ok) return;
+
+  const detalle = (await r.text()).slice(0, 200);
+  // El 401 es el error más probable al configurarlo, y "Acceso restringido" a secas no
+  // dice qué hay que arreglar.
+  if (r.status === 401) {
+    throw new Error(
+      "El panel de avisos rechazó el acceso (401). Revisa AVISOS_PANEL_USUARIO y "
+      + "AVISOS_PANEL_CLAVE: tienen que ser los mismos USUARIO_PANEL y CLAVE_PANEL de ese servidor.",
+    );
+  }
+  throw new Error(`El panel de avisos respondió ${r.status}: ${detalle}`);
 }
 
 async function pedir(ruta, opciones = {}) {

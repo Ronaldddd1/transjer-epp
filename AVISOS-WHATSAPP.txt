@@ -1,167 +1,139 @@
 AVISOS DE VENCIMIENTO POR WHATSAPP — PASO A PASO
 =================================================
 
-Qué va a pasar cuando esté andando: cada mañana el droplet le pregunta a Transjer Gestión
-qué cuotas de préstamos y servicios vencen en los próximos 2 días, arma un mensaje, lo
-manda por WhatsApp al número que elijas, y le avisa de vuelta a la web qué mandó para que
-ese vencimiento no se repita al día siguiente.
+Cada mañana el droplet le pregunta a Transjer Gestión qué cuotas de préstamos y servicios
+vencen en los próximos 2 días, manda un WhatsApp al número que elijas, y le avisa de vuelta
+a la web qué mandó para que ese vencimiento no se repita al día siguiente.
 
-Pregunta el droplet, no al revés. Así tu servidor de avisos sigue detrás de Tailscale sin
-abrir ningún puerto a internet.
+Pregunta el droplet, no al revés, así el servidor de avisos sigue detrás de Tailscale sin
+abrir ningún puerto.
 
 El mensaje se ve así:
 
     *Transjer Gestión* — pagos por vencer
-    2 cuota(s) vencen pronto:
-    • *15/10/2026* (en 2 días) — Claro flota
-       Claro · servicio · S/ 382.50
+    3 cuota(s) vencen pronto:
     • *15/10/2026* (en 2 días) — SEGURO VEHICULAR BYH716
        Pacífico Seguros · seguro · S/ 620.50
+    • *15/10/2026* (en 2 días) — Claro flota
+       Claro · servicio · S/ 382.50
     *Total: S/ 1,003.00*
 
 
-------------------------------------------------------------------------------
-PASO 1 — La clave, en Vercel
-------------------------------------------------------------------------------
+NO HAY QUE TOCAR NINGÚN CÓDIGO
+------------------------------
 
-Es la que usa el droplet para pedirle los datos a la web. Sin ella, /api/avisos/ responde
-401 a todo el mundo, que es como está ahora.
+Ni el de Transjer Gestión ni el del servidor de avisos.
 
-Esta te la generé; sirve tal cual:
+El servidor de avisos ya tiene la ruta que hace falta: POST /api/mensaje, la misma que usa
+el panel para escribirle a un número suelto. Recibe { telefono, texto }, y por dentro ya
+resuelve el JID y comprueba que el número tenga WhatsApp. El script usa esa.
 
-    0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+Es un solo archivo para copiar y un archivo de variables para llenar.
 
-En Vercel: tu proyecto → Settings → Environment Variables → Add New
 
-    Name:   AVISOS_SECRET
-    Value:  0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
-    Env:    marca Production (y Preview si quieres probar desde ahí)
+DATOS DE TU INSTALACIÓN
+-----------------------
 
-Guarda y después Deployments → el último → Redeploy. Las variables nuevas solo entran en
-un despliegue nuevo.
-
-Para comprobar que quedó, desde tu PC:
-
-    curl -i https://TU-DOMINIO.vercel.app/api/avisos/vencimientos
-
-    → tiene que responder 401. Si responde 404, el despliegue todavía no subió.
-
-    curl -H "Authorization: Bearer 0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=" ^
-         "https://TU-DOMINIO.vercel.app/api/avisos/vencimientos?dias=2"
-
-    → tiene que devolver un JSON con "ok": true. (En PowerShell el ^ es ` o todo en una
-      línea; si te complica, ábrelo con Postman o pruébalo después desde el droplet.)
+    Web                 https://transjer-epp.vercel.app
+    Droplet             avisos-transjer  (143.198.115.75)
+    Carpeta             /home/transjer/transjer-notificaciones
+    Usuario             transjer   (no root)
+    Proceso pm2         avisos-transjer
+    Puerto              3000
+    Ruta de envío       POST /api/mensaje
 
 
 ------------------------------------------------------------------------------
-PASO 2 — La ruta de envío, en el servidor de avisos
+PASO 1 — La clave, en Vercel                                        [ YA ESTÁ ]
 ------------------------------------------------------------------------------
 
-Tu servidor hoy solo manda los avisos de entrega. Le falta poder mandar un texto suelto a
-un número, que es lo que necesita esto.
+    AVISOS_SECRET = 0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
 
-En la carpeta scripts/ de este proyecto hay dos archivos que van al droplet:
-
-    enviar-mensaje.mjs      la ruta de envío
-    aviso-vencimientos.mjs  el que corre cada mañana
-
-Cópialos a la carpeta del servidor de avisos (la misma donde está el archivo que arranca
-con pm2). Con scp desde tu PC:
-
-    scp scripts/enviar-mensaje.mjs scripts/aviso-vencimientos.mjs ^
-        root@143.198.115.75:/ruta/del/servidor/
-
-Después, en el archivo principal del servidor, después de que se crea el socket de
-Baileys, agrega dos líneas:
-
-    import { montarEnvio } from "./enviar-mensaje.mjs";
-    montarEnvio(app, () => sock);
-
-Donde `app` es tu servidor de Express y `sock` la variable del socket de Baileys. Si en tu
-código se llaman distinto —`server`, `client`, `whatsapp`, lo que sea—, cambia esos dos
-nombres y ya está. Va como función, `() => sock`, a propósito: cuando Baileys se cae y
-reconecta reemplaza el socket, y así la ruta usa el nuevo en vez de quedarse con el viejo.
-
-Si tu servidor usa `require` en vez de `import`:
-
-    const { montarEnvio } = await import("./enviar-mensaje.mjs");
-    montarEnvio(app, () => sock);
-
-La ruta queda en POST /enviar y pide la misma clave del paso 1. No toca nada de lo que ya
-tienes.
+Ya quedó: /api/avisos/vencimientos responde {"ok":true,...} con esa clave.
 
 
 ------------------------------------------------------------------------------
-PASO 3 — Las variables, en el droplet
+PASO 2 — Copiar el script al droplet
 ------------------------------------------------------------------------------
 
-En la carpeta del servidor de avisos, crea un archivo .env.avisos:
+Desde PowerShell, en la carpeta del proyecto:
 
-    nano /ruta/del/servidor/.env.avisos
+    scp scripts\aviso-vencimientos.mjs root@avisos-transjer:/home/transjer/transjer-notificaciones/
+
+Y como llega siendo de root, pásalo al usuario que corresponde:
+
+    ssh root@avisos-transjer "chown transjer:transjer /home/transjer/transjer-notificaciones/aviso-vencimientos.mjs"
+
+
+------------------------------------------------------------------------------
+PASO 3 — Buscar el usuario y la clave del panel
+------------------------------------------------------------------------------
+
+El panel está protegido con autenticación básica, así que el script necesita esas dos
+credenciales para poder usar /api/mensaje. Están en la configuración del servidor:
+
+    ssh root@avisos-transjer
+    su - transjer
+    grep -rnE "USUARIO_PANEL|CLAVE_PANEL" ~/transjer-notificaciones/.env ~/transjer-notificaciones/src/config.js
+
+Si CLAVE_PANEL sale vacía o no existe, el panel está sin clave — en ese caso deja las dos
+variables del paso 4 en blanco, pero conviene ponerle una: hoy cualquiera que llegue a ese
+puerto puede mandar WhatsApp desde el número de la empresa.
+
+
+------------------------------------------------------------------------------
+PASO 4 — El archivo de variables
+------------------------------------------------------------------------------
+
+Como usuario transjer, en la carpeta del servidor:
+
+    nano ~/transjer-notificaciones/.env.avisos
 
 Con esto adentro:
 
-    TRANSJER_URL=https://TU-DOMINIO.vercel.app
+    TRANSJER_URL=https://transjer-epp.vercel.app
     AVISOS_SECRET=0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
     AVISOS_DESTINO=51XXXXXXXXX
-    AVISOS_BAILEYS=http://127.0.0.1:PUERTO/enviar
+    AVISOS_PANEL=http://127.0.0.1:3000/api/mensaje
+    AVISOS_PANEL_USUARIO=...el USUARIO_PANEL del paso 3...
+    AVISOS_PANEL_CLAVE=...la CLAVE_PANEL del paso 3...
     AVISOS_DIAS=2
 
-  · AVISOS_DESTINO es el número que recibe los avisos, con código de país y sin el +.
-    Por ejemplo 51987654321.
-  · PUERTO es el puerto en el que ya escucha tu servidor de avisos. Si no te acuerdas,
-    `pm2 logs` suele decirlo, o `ss -ltnp | grep node`.
-  · AVISOS_DIAS es con cuántos días de anticipación avisa. Quedamos en 2.
+AVISOS_DESTINO es el número que recibe los avisos, con código de país y sin el +.
 
-La clave es un secreto, así que que no la pueda leer nadie más:
+Lleva dos claves, así que que no la pueda leer nadie más:
 
-    chmod 600 /ruta/del/servidor/.env.avisos
+    chmod 600 ~/transjer-notificaciones/.env.avisos
 
-Tu servidor de avisos también necesita AVISOS_SECRET para que la ruta nueva funcione. Si
-lo levantas con pm2 y un archivo .env propio, agrégale ahí la misma línea:
-
-    AVISOS_SECRET=0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
-
-Y reinícialo:
-
-    pm2 restart <nombre-del-proceso>
-    pm2 logs --lines 20
-
-En los logs tiene que salir:  [envio] ruta /enviar lista.
-Si en vez de eso sale un error diciendo que falta AVISOS_SECRET, es que el servidor no
-está leyendo el .env: revisa esa línea antes de seguir.
+El script lee este archivo él mismo. No hay que cargarlo antes con
+"set -a; . ./.env.avisos": por ahí, una clave con un espacio o con caracteres como $ o `
+se parte, el shell se queda con el primer trozo e intenta ejecutar el resto, y la variable
+llega a medias. El envío falla con un 401 que no se explica mirando el archivo, porque ahí
+la clave está bien escrita. Leyéndolo desde el script, el valor llega entero sea cual sea.
 
 
 ------------------------------------------------------------------------------
-PASO 4 — Probar sin mandar nada
+PASO 5 — Probar sin mandar nada
 ------------------------------------------------------------------------------
 
-    cd /ruta/del/servidor
-    set -a; . ./.env.avisos; set +a
+    cd ~/transjer-notificaciones
     node aviso-vencimientos.mjs --simular
 
-Tiene que imprimir el mensaje que mandaría, sin mandarlo y sin marcar nada.
+Imprime el mensaje que mandaría, sin mandarlo y sin marcar nada.
 
-Si algo falla, el mensaje te dice qué:
+Si dice "Nada vence en los próximos 2 día(s)", funcionó: es que de verdad no hay nada
+venciendo. Para verlo igual:
 
-    "No se pudo conectar con https://... (ENOTFOUND)"
-        → TRANSJER_URL está mal escrita.
-
-    "respondió 401"
-        → la clave del droplet y la de Vercel no son la misma, o falta el redeploy.
-
-    "Nada vence en los próximos 2 día(s)"
-        → funcionó: es que de verdad no hay nada venciendo. Para probarlo igual,
-          corre con AVISOS_DIAS=30 adelante del comando.
+    AVISOS_DIAS=30 node aviso-vencimientos.mjs --simular
 
 
 ------------------------------------------------------------------------------
-PASO 5 — Probar de verdad
+PASO 6 — Probar de verdad
 ------------------------------------------------------------------------------
 
     node aviso-vencimientos.mjs
 
-Tiene que llegarte el WhatsApp al número de AVISOS_DESTINO, y en pantalla:
+Tiene que llegarte el WhatsApp, y en pantalla:
 
     N cuota(s) por avisar.
     Mensaje enviado a 51XXXXXXXXX.
@@ -171,50 +143,92 @@ Córrelo una segunda vez seguida: tiene que decir "Nada vence…". Eso confirma 
 repetir el mismo aviso todos los días hasta que pagues, que es lo que hace que la gente
 deje de leer los avisos automáticos.
 
-Si el envío falla, no marca nada y sale con error: el aviso se reintenta mañana en vez de
-perderse en silencio.
+Si el envío falla no marca nada y sale con error, así que el aviso se reintenta mañana en
+vez de perderse en silencio.
 
 
 ------------------------------------------------------------------------------
-PASO 6 — Programarlo
+PASO 7 — Programarlo
 ------------------------------------------------------------------------------
+
+Como usuario transjer, no como root:
 
     crontab -e
 
-Y al final, de lunes a sábado a las 8 de la mañana:
+Y al final, de lunes a sábado a las 8 de la mañana, todo en una sola línea:
 
-    0 8 * * 1-6 cd /ruta/del/servidor && set -a && . ./.env.avisos && set +a && /usr/bin/node aviso-vencimientos.mjs >> /var/log/avisos-vencimientos.log 2>&1
+    0 8 * * 1-6 cd /home/transjer/transjer-notificaciones && /usr/bin/node aviso-vencimientos.mjs >> /home/transjer/avisos-vencimientos.log 2>&1
 
-(Todo en una sola línea.) Revisa que la hora del droplet sea la de Lima:
+Revisa que el droplet esté en hora de Lima:
 
     timedatectl
     # si no lo está:  sudo timedatectl set-timezone America/Lima
 
 A los días, para ver que viene corriendo:
 
-    tail -20 /var/log/avisos-vencimientos.log
+    tail -20 /home/transjer/avisos-vencimientos.log
 
 
 ------------------------------------------------------------------------------
-SI ALGO SE ROMPE MÁS ADELANTE
+QUÉ SIGNIFICA CADA ERROR
 ------------------------------------------------------------------------------
 
-No llega nada y el log dice "No se pudo conectar con http://127.0.0.1:PUERTO/enviar"
-    El servidor de avisos está caído. pm2 status.
+"No se pudo conectar con https://transjer-epp.vercel.app/... (ENOTFOUND)"
+    La dirección está mal escrita, o el droplet se quedó sin salida a internet.
 
-El log dice "respondió 503: WhatsApp no está conectado todavía"
+"/api/avisos/vencimientos respondió 401"
+    La AVISOS_SECRET del droplet y la de Vercel no son la misma.
+
+"El panel de avisos rechazó el acceso (401)"
+    AVISOS_PANEL_USUARIO o AVISOS_PANEL_CLAVE no coinciden con las del servidor de avisos.
+    Vuelve al paso 3.
+
+"No se pudo conectar con http://127.0.0.1:3000/api/mensaje (ECONNREFUSED)"
+    El servidor de avisos está caído:  su - transjer && pm2 list
+
+"El panel de avisos respondió 400: Celular inválido"
+    AVISOS_DESTINO está mal escrito.
+
+"El panel de avisos respondió 400: WhatsApp no está conectado"
     Baileys perdió la sesión. Entra al panel por Tailscale y vuelve a escanear el QR.
     El aviso no se marcó, así que se reintenta.
 
-El log dice "El número ... no tiene WhatsApp"
-    AVISOS_DESTINO está mal escrito.
-
 Llegó el aviso pero con cuotas de menos
-    Las que ya se avisaron no se repiten. Para forzar que vuelvan a salir, en la base:
+    Las ya avisadas no se repiten. Para forzar que vuelvan a salir, en la base:
         update obligation_installments set reminder_sent_at = null where id in (...);
 
-Quieres cambiar el número o los días
-    Edita .env.avisos. No hace falta tocar código ni volver a desplegar la web.
+Cambiar el número o los días de anticipación
+    Edita .env.avisos. No hace falta tocar código ni volver a desplegar nada.
 
-Quieres que avise a varios números
-    Avísame y lo cambio: hoy manda a uno solo.
+Que avise a varios números
+    Hoy manda a uno solo. Avísame y lo cambio.
+
+
+------------------------------------------------------------------------------
+UN DETALLE DE TU SERVER.JS, APARTE DE TODO ESTO
+------------------------------------------------------------------------------
+
+En la comprobación de la clave del panel:
+
+    const ok = recibido.length === esperado.length &&
+      crypto.timingSafeEqual(Buffer.from(recibido), Buffer.from(esperado));
+
+`recibido.length` cuenta caracteres y `Buffer.from(recibido)` cuenta bytes, que no es lo
+mismo cuando hay caracteres fuera del ASCII. Una cabecera con el mismo número de
+caracteres pero más bytes pasa el primer filtro y hace que timingSafeEqual lance una
+excepción: el servidor responde 500 en vez de 401.
+
+No deja entrar a nadie —no es un agujero de seguridad—, pero un pedido mal formado tumba
+el manejador. Se arregla comparando bytes con bytes:
+
+    const esperadoBuf = Buffer.from(esperado);
+    app.use((req, res, next) => {
+      const recibido = Buffer.from(req.headers.authorization || '');
+      const ok = recibido.length === esperadoBuf.length &&
+        crypto.timingSafeEqual(recibido, esperadoBuf);
+      if (ok) return next();
+      res.set('WWW-Authenticate', 'Basic realm="TransJer"').status(401).send('Acceso restringido');
+    });
+
+Lo probé contra una copia de tu middleware antes de decírtelo. Tú decides si vale la pena
+tocarlo: estando detrás de Tailscale, el impacto es bajo.

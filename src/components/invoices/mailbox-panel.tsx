@@ -35,6 +35,7 @@ function ActionButton({ action, label, icon, variant = "outline" }: {
 
 export type MailboxStatus = {
   configured: boolean;
+  tipo: "imap" | "graph" | null;
   missing: string[];
   mailbox: string | null;
   notificationUrl: string | null;
@@ -47,6 +48,9 @@ export type MailboxStatus = {
 };
 
 export function MailboxPanel({ status, canConfigure }: { status: MailboxStatus; canConfigure: boolean }) {
+  // Microsoft avisa cuando llega un correo; un buzón IMAP no, se revisa cada pocos
+  // minutos desde fuera. Por eso los botones de "avisos" solo aplican al primero.
+  const esGraph = status.tipo === "graph";
   const horasRestantes = status.minutesToExpiry !== null ? Math.round(status.minutesToExpiry / 60) : null;
   const porCaducar = horasRestantes !== null && horasRestantes < 24;
 
@@ -56,13 +60,17 @@ export function MailboxPanel({ status, canConfigure }: { status: MailboxStatus; 
         <div className="flex items-center gap-2.5">
           <Mail className="h-5 w-5 text-steel-400" aria-hidden />
           <h2 className="font-display text-lg font-semibold text-ink">Lectura automática del correo</h2>
-          {status.active ? <Badge tone="green">Activa</Badge> : status.configured ? <Badge tone="yellow">Inactiva</Badge> : <Badge>Sin configurar</Badge>}
+          {!status.configured
+            ? <Badge>Sin configurar</Badge>
+            : status.active || !esGraph
+              ? <Badge tone="green">Activa</Badge>
+              : <Badge tone="yellow">Inactiva</Badge>}
         </div>
         {/* Sin credenciales no se ofrecen acciones: solo fallarían. */}
         <div className="flex flex-wrap gap-2">
           {status.configured && <ActionButton action={syncMailboxNow} label="Revisar ahora" icon={<RefreshCw className="h-4 w-4" />} />}
           {status.configured && canConfigure && <ActionButton action={testMailbox} label="Probar conexión" icon={<PlugZap className="h-4 w-4" />} />}
-          {status.configured && canConfigure && !status.active && <ActionButton action={activateMailbox} label="Activar avisos" icon={<Zap className="h-4 w-4" />} variant="primary" />}
+          {esGraph && status.configured && canConfigure && !status.active && <ActionButton action={activateMailbox} label="Activar avisos" icon={<Zap className="h-4 w-4" />} variant="primary" />}
           {status.configured && canConfigure && status.active && <ActionButton action={renewMailbox} label="Renovar" icon={<RefreshCw className="h-4 w-4" />} />}
           {status.configured && canConfigure && status.active && (
             <ConfirmButton
@@ -82,8 +90,8 @@ export function MailboxPanel({ status, canConfigure }: { status: MailboxStatus; 
         {!status.configured ? (
           <div className="text-steel-600">
             <p>
-              Todavía no está conectada con el buzón. Para activarla, un administrador debe registrar la aplicación
-              en Microsoft 365 y cargar estas variables de entorno en Vercel:
+              Todavía no está conectada con el buzón. Para activarla, hay que cargar estas variables de entorno
+              en Vercel con los datos del servidor de correo:
             </p>
             <ul className="mt-2 flex flex-wrap gap-2">
               {status.missing.map((m) => <li key={m}><code className="rounded bg-steel-100 px-1.5 py-0.5 text-xs">{m}</code></li>)}
@@ -97,10 +105,10 @@ export function MailboxPanel({ status, canConfigure }: { status: MailboxStatus; 
               <dd className="text-ink-800">{status.mailbox}</dd>
             </div>
             <div>
-              <dt className="text-xs text-steel-500">Avisos vigentes hasta</dt>
-              <dd className={porCaducar ? "font-semibold text-red-700" : "text-ink-800"}>
-                {status.expiresAt ? formatDateTime(status.expiresAt) : "—"}
-                {horasRestantes !== null && <span className="ml-1 text-xs text-steel-500">({horasRestantes} h)</span>}
+              <dt className="text-xs text-steel-500">{esGraph ? "Avisos vigentes hasta" : "Cómo se lee"}</dt>
+              <dd className={esGraph && porCaducar ? "font-semibold text-red-700" : "text-ink-800"}>
+                {!esGraph ? "IMAP, revisando cada pocos minutos" : status.expiresAt ? formatDateTime(status.expiresAt) : "—"}
+                {esGraph && horasRestantes !== null && <span className="ml-1 text-xs text-steel-500">({horasRestantes} h)</span>}
               </dd>
             </div>
             <div>
@@ -119,7 +127,7 @@ export function MailboxPanel({ status, canConfigure }: { status: MailboxStatus; 
             <strong>Último error:</strong> {status.lastError}
           </p>
         )}
-        {status.configured && !status.active && (
+        {esGraph && status.configured && !status.active && (
           <p className="mt-3 rounded-md border border-brand/60 bg-brand-soft px-3 py-2 text-sm text-[#7A5A00]">
             Las credenciales están cargadas, pero los avisos no están activos. Pulsa <strong>Activar avisos</strong> para
             que cada correo que llegue se registre solo. La revisión diaria seguirá funcionando igualmente.

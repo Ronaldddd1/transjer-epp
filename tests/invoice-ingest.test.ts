@@ -10,7 +10,8 @@ import { zipSync, strToU8 } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
 import { appSettings, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "../src/db/schema";
-import type { MailboxConfig, GraphAttachment, GraphMessage } from "../src/server/graph";
+import type { GraphAttachment, GraphMessage } from "../src/server/graph";
+import type { MailboxConfig } from "../src/server/mailbox-config";
 import { ingestMessage, syncMailbox, type MailReader } from "../src/server/invoice-ingest";
 
 let fails = 0;
@@ -20,7 +21,7 @@ function check(name: string, cond: boolean, extra?: unknown) {
 }
 
 const CONFIG: MailboxConfig = {
-  tenantId: "t", clientId: "c", clientSecret: "s",
+  kind: "graph", tenantId: "t", clientId: "c", clientSecret: "s",
   mailbox: "facturas@transjer.com", webhookSecret: "secreto",
 };
 

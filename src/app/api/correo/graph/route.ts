@@ -1,5 +1,5 @@
 import { after, NextResponse, type NextRequest } from "next/server";
-import { readMailboxConfig } from "@/server/graph";
+import { readMailboxConfig } from "@/server/mailbox-config";
 import { ingestMessage } from "@/server/invoice-ingest";
 import { getSubscriptionState } from "@/server/mailbox-state";
 
@@ -24,6 +24,8 @@ export async function POST(req: NextRequest) {
   if (validation) return validation;
 
   const config = readMailboxConfig();
+  // Este aviso solo lo manda Microsoft. Con un buzón IMAP la ruta no tiene sentido.
+  if (config && config.kind !== "graph") return NextResponse.json({ error: "No aplica" }, { status: 404 });
   if (!config) return NextResponse.json({ error: "El buzón no está configurado" }, { status: 503 });
 
   let body: { value?: { subscriptionId?: string; clientState?: string; resourceData?: { id?: string } }[] };

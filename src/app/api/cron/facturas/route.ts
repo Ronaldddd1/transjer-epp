@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  createSubscription, getSubscription, readMailboxConfig, renewSubscription, notificationUrl,
+  createSubscription, getSubscription, renewSubscription, notificationUrl,
 } from "@/server/graph";
+import { readMailboxConfig } from "@/server/mailbox-config";
 import { syncMailbox } from "@/server/invoice-ingest";
 import { getSubscriptionState, minutesToExpiry, setSubscriptionState } from "@/server/mailbox-state";
 
@@ -27,8 +28,11 @@ export async function GET(req: NextRequest) {
 
   const salida: Record<string, unknown> = {};
 
-  // 1. Mantener viva la suscripción de avisos.
-  try {
+  // 1. Mantener viva la suscripción de avisos. Solo con Microsoft: un buzón IMAP no
+  //    avisa de nada, se revisa y punto.
+  if (config.kind !== "graph") {
+    salida.suscripcion = "no aplica: el buzón se lee por IMAP";
+  } else try {
     const state = await getSubscriptionState();
     const restante = minutesToExpiry(state);
     if (!state) {

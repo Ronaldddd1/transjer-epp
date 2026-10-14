@@ -6,8 +6,10 @@ import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
 import { computePayDueDate, invoiceNumber } from "@/lib/utils";
 import {
-  getAttachments, getMessage, listMessagesSince, type GraphAttachment, type GraphMessage, type MailboxConfig,
+  getAttachments, getMessage, listMessagesSince, type GraphAttachment, type GraphMessage,
 } from "./graph";
+import { imapReader } from "./imap";
+import type { MailboxConfig } from "./mailbox-config";
 import {
   customerWarning, findDuplicate, findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment,
 } from "./invoice-service";
@@ -32,10 +34,38 @@ export type MailReader = {
 };
 
 const graphReader: MailReader = {
-  getMessage,
-  getAttachments,
-  listMessagesSince: (config, since) => listMessagesSince(config, since),
+  getMessage: (config, id) => getMessage(comoGraph(config), id),
+  getAttachments: (config, id) => getAttachments(comoGraph(config), id),
+  listMessagesSince: (config, since) => listMessagesSince(comoGraph(config), since),
 };
+
+/** El lector de Microsoft solo sabe trabajar con su propia configuración. */
+function comoGraph(config: MailboxConfig) {
+  if (config.kind !== "graph") throw new Error("Se esperaba un buzón de Microsoft 365.");
+  return config;
+}
+
+const imapAdaptador: MailReader = {
+  getMessage: (config, id) => imapReader.getMessage(comoImap(config), id),
+  getAttachments: (config, id) => imapReader.getAttachments(comoImap(config), id),
+  listMessagesSince: (config, since) => imapReader.listMessagesSince(comoImap(config), since),
+};
+
+function comoImap(config: MailboxConfig) {
+  if (config.kind !== "imap") throw new Error("Se esperaba un buzón IMAP.");
+  return config;
+}
+
+/**
+ * El lector que corresponde al buzón configurado.
+ *
+ * Es el único punto del sistema que sabe de dónde salen los correos. Todo lo que viene
+ * después —leer el XML, crear la factura, apartar lo que no se pudo— es igual venga de
+ * Microsoft o de un buzón corriente.
+ */
+export function readerFor(config: MailboxConfig): MailReader {
+  return config.kind === "imap" ? imapAdaptador : graphReader;
+}
 
 export type IngestOutcome =
   | { result: "creada"; invoiceId: string; label: string }
@@ -56,7 +86,8 @@ function sender(message: GraphMessage) {
 /** El usuario del sistema con el que se firman las acciones automáticas. */
 const SYSTEM_USER: Pick<CurrentUser, "id" | "name"> | null = null;
 
-export async function ingestMessage(config: MailboxConfig, messageId: string, reader: MailReader = graphReader): Promise<IngestOutcome> {
+export async function ingestMessage(config: MailboxConfig, messageId: string, lector?: MailReader): Promise<IngestOutcome> {
+  const reader = lector ?? readerFor(config);
   const [already] = await db.select({ id: invoiceEmails.id }).from(invoiceEmails)
     .where(eq(invoiceEmails.messageId, messageId)).limit(1);
   if (already) return { result: "ya_registrado" };
@@ -234,7 +265,7 @@ export async function syncMailbox(config: MailboxConfig, options: { sinceDays?: 
   let lastMessageAt = state?.lastMessageAt ?? null;
 
   try {
-    const reader = options.reader ?? graphReader;
+    const reader = options.reader ?? readerFor(config);
     const messages = await reader.listMessagesSince(config, since);
     for (const message of messages) {
       summary.revisados++;
