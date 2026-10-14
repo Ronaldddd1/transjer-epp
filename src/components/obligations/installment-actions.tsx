@@ -1,9 +1,9 @@
 "use client";
 
-import { CalendarPlus, CheckCircle2, Coins, Trash2, Undo2 } from "lucide-react";
+import { CalendarPlus, CheckCircle2, Coins, Handshake, Trash2, Undo2 } from "lucide-react";
 import {
-  deleteObligation, extendSchedule, payInstallment, reopenInstallment, setInstallmentAmount,
-  setObligationStatus,
+  deleteObligation, extendSchedule, payInstallment, renegotiateAmount, reopenInstallment,
+  setInstallmentAmount, setObligationStatus,
 } from "@/actions/obligations";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
@@ -98,6 +98,64 @@ export function SetAmountModal({ installment, compact = false }: { installment: 
           <Field label="Observaciones" name="notes" error={errors.notes}>
             <Textarea name="notes" maxLength={1000} rows={2} />
           </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
+
+/**
+ * Cambiar el precio acordado de un servicio a partir de un mes.
+ *
+ * Lo de antes no se toca: una cochera que se pagó a 300 tiene que seguir figurando a 300,
+ * o los totales del año dejan de cuadrar con lo que de verdad salió de caja.
+ */
+export function RenegotiateModal({ obligation }: {
+  obligation: { id: string; name: string; currency: string; fixedAmount: string | null };
+}) {
+  // Por defecto, desde el mes que viene: lo normal es acordar un precio nuevo para
+  // adelante, no para el mes que ya está corriendo.
+  const hoy = todayLima();
+  const [y, m] = hoy.split("-").map(Number);
+  const mesSiguiente = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+
+  return (
+    <FormModal
+      title={`Renegociar ${obligation.name}`}
+      description="El precio nuevo rige desde el mes que elijas. Los meses anteriores se quedan como están."
+      submitLabel="Aplicar el precio nuevo"
+      size="sm"
+      action={(fd) => renegotiateAmount(obligation.id, fd)}
+      trigger={(open) => (
+        <Button variant="outline" size="sm" onClick={open} title="Cambiar el importe acordado">
+          <Handshake className="h-4 w-4" /> Renegociar
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <p className="rounded-md border border-steel-200 bg-steel-50 p-3 text-sm text-steel-600">
+            Hoy se paga <strong className="text-ink">{formatMoney(obligation.fixedAmount, obligation.currency)}</strong> al mes.
+          </p>
+          <Field label="Importe nuevo" name="amount" required error={errors.amount}>
+            <Input name="amount" defaultValue="" inputMode="decimal" placeholder="350.00" invalid={!!errors.amount} />
+          </Field>
+          <Field
+            label="Rige desde"
+            name="from"
+            required
+            error={errors.from}
+            hint="Se aplica a los vencimientos pendientes de ese mes en adelante."
+          >
+            <DateInput name="from" defaultValue={mesSiguiente} required invalid={!!errors.from} />
+          </Field>
+          <Field label="Motivo del acuerdo" name="reason" error={errors.reason} hint="Opcional. Queda en el historial.">
+            <Textarea name="reason" maxLength={300} rows={2} placeholder="Acuerdo con la playa por renovación anual." />
+          </Field>
+          <p className="rounded-md border border-brand/60 bg-brand-soft px-3 py-2 text-sm text-[#7A5A00]">
+            Las cuotas ya pagadas no se tocan, y las pendientes de meses anteriores conservan su importe.
+            Así queda registrado lo que se pagó en cada mes.
+          </p>
         </>
       )}
     </FormModal>

@@ -225,65 +225,37 @@ export type CalendarEntry = {
 };
 
 /**
- * Todo lo que sale de caja en un rango: facturas de proveedores y cuotas de obligaciones,
- * en una sola lista ordenada por fecha. Es la vista que necesita la encargada para saber
- * cuánto tiene que tener disponible esta semana.
+ * Las cuotas de préstamos y servicios que vencen en un rango, ordenadas por fecha.
+ *
+ * Las facturas de proveedores quedaron fuera a propósito: tienen su propia pantalla, con
+ * su plazo de pago y su detracción, y mezcladas aquí tapaban lo que este calendario viene
+ * a responder, que es qué compromisos fijos caen cada mes.
  */
 export async function listPaymentCalendar(from: string, to: string): Promise<CalendarEntry[]> {
-  const [facturas, cuotas] = await Promise.all([
-    db.select({
-      id: supplierInvoices.id,
-      dueDate: supplierInvoices.payDueDate,
-      series: supplierInvoices.series,
-      number: supplierInvoices.number,
-      supplierName: suppliers.businessName,
-      currency: supplierInvoices.currency,
-      total: supplierInvoices.total,
-      paymentTerm: supplierInvoices.paymentTerm,
-    })
-      .from(supplierInvoices)
-      .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
-      .where(and(
-        eq(supplierInvoices.status, "PENDIENTE"),
-        gte(supplierInvoices.payDueDate, from),
-        lte(supplierInvoices.payDueDate, to),
-      )),
-    db.select({
-      id: obligationInstallments.id,
-      obligationId: obligations.id,
-      dueDate: obligationInstallments.dueDate,
-      number: obligationInstallments.number,
-      name: obligations.name,
-      creditor: obligations.creditor,
-      type: obligations.type,
-      currency: obligations.currency,
-      total: obligationInstallments.total,
-    })
-      .from(obligationInstallments)
-      .innerJoin(obligations, eq(obligationInstallments.obligationId, obligations.id))
-      .where(and(
-        eq(obligationInstallments.status, "PENDIENTE"),
-        ne(obligations.status, "ANULADA"),
-        gte(obligationInstallments.dueDate, from),
-        lte(obligationInstallments.dueDate, to),
-      )),
-  ]);
+  const cuotas = await db.select({
+    id: obligationInstallments.id,
+    obligationId: obligations.id,
+    dueDate: obligationInstallments.dueDate,
+    number: obligationInstallments.number,
+    name: obligations.name,
+    creditor: obligations.creditor,
+    type: obligations.type,
+    currency: obligations.currency,
+    total: obligationInstallments.total,
+  })
+    .from(obligationInstallments)
+    .innerJoin(obligations, eq(obligationInstallments.obligationId, obligations.id))
+    .where(and(
+      eq(obligationInstallments.status, "PENDIENTE"),
+      ne(obligations.status, "ANULADA"),
+      gte(obligationInstallments.dueDate, from),
+      lte(obligationInstallments.dueDate, to),
+    ));
 
   const hoy = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(new Date());
 
-  const entries: CalendarEntry[] = [
-    ...facturas.map((f) => ({
-      kind: "FACTURA" as const,
-      id: f.id,
-      dueDate: f.dueDate,
-      title: `${f.series}-${f.number}`,
-      subtitle: f.supplierName,
-      currency: f.currency,
-      amount: f.total,
-      href: `/facturas/${f.id}`,
-      overdue: !!f.dueDate && f.dueDate < hoy,
-    })),
-    ...cuotas.map((c) => ({
+  return cuotas
+    .map((c) => ({
       kind: "OBLIGACION" as const,
       id: c.id,
       dueDate: c.dueDate,
@@ -293,10 +265,8 @@ export async function listPaymentCalendar(from: string, to: string): Promise<Cal
       amount: c.total,
       href: `/obligaciones/${c.obligationId}`,
       overdue: c.dueDate < hoy,
-    })),
-  ];
-
-  return entries.sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
+    }))
+    .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? ""));
 }
 
 /** Próximas cuotas para el panel del dashboard. */

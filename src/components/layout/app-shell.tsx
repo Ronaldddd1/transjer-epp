@@ -225,7 +225,7 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
 
       <main className="lg:pl-64">
         <div className="hazard-stripe hidden h-1 lg:block" aria-hidden />
-        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
+        <div className="mx-auto max-w-[1700px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</div>
       </main>
     </div>
   );

@@ -1,4 +1,4 @@
-import { AlertTriangle, ChevronLeft, ChevronRight, Landmark, Receipt } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Landmark } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +14,7 @@ import { listPaymentCalendar, type CalendarEntry } from "@/server/obligation-que
 export const metadata: Metadata = { title: "Calendario de pagos" };
 
 /**
- * Todo lo que sale de caja, mes a mes, con la forma de un calendario de pared.
+ * Las cuotas de préstamos y servicios, mes a mes, con la forma de un calendario de pared.
  *
  * Antes era una lista por días. Decía lo mismo, pero para saber cómo venía la semana había
  * que leerla entera; en la cuadrícula se ve de un vistazo dónde se juntan los pagos y qué
@@ -80,7 +80,7 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
     <>
       <PageHeader
         title="Calendario de pagos"
-        description="Facturas de proveedores y cuotas de préstamos y servicios, en el mes en que vencen."
+        description="Las cuotas de préstamos y servicios, en el mes en que vencen. Las facturas de proveedores están en su propia pantalla."
         actions={<ExportTable tabla="calendario" />}
       />
 
@@ -217,7 +217,7 @@ function Casilla({ fecha, entradas, hoy }: { fecha: string | null; entradas: Cal
 
 /** Un pago dentro de su día: lo justo para reconocerlo sin abrirlo. */
 function Chip({ entry }: { entry: CalendarEntry }) {
-  const Icon = entry.kind === "FACTURA" ? Receipt : Landmark;
+  const Icon = Landmark;
   return (
     <Link
       href={entry.href}
@@ -238,7 +238,7 @@ function Chip({ entry }: { entry: CalendarEntry }) {
 
 /** Una línea de la lista de lo vencido de antes. */
 function Entrada({ entry }: { entry: CalendarEntry }) {
-  const Icon = entry.kind === "FACTURA" ? Receipt : Landmark;
+  const Icon = Landmark;
   return (
     <li>
       <Link href={entry.href} className="flex items-center gap-3 px-4 py-2.5 hover:bg-red-50">

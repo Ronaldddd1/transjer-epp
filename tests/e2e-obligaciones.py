@@ -427,8 +427,11 @@ def main():
         check("y encabeza el mes que se está mirando",
               re.search(r"(Enero|Febrero|Marzo|Abril|Mayo|Junio|Julio|Agosto|Setiembre|Octubre|Noviembre|Diciembre) de \d{4}", cal) is not None)
         check("marca el día de hoy", page.locator("td.bg-brand-soft").count() >= 1)
-        check("el calendario junta facturas y cuotas de este mes",
-              f"Cochera {SELLO}" in cal and ("F049" in cal or "F001" in cal), cal[:0])
+        check("el calendario muestra las cuotas de este mes", f"Cochera {SELLO}" in cal, cal[:0])
+        # Las facturas de proveedores quedaron fuera a propósito: tienen su propia
+        # pantalla, y mezcladas aquí tapaban los compromisos fijos del mes.
+        check("y ya no mezcla las facturas de proveedores",
+              not re.search(r"\bF0\d{2}-\d+\b", cal), re.findall(r"\bF0\d{2}-\d+\b", cal)[:3])
         check("avisa de lo que viene vencido de antes", "Viene vencido de antes" in cal)
 
         # Moverse de mes cambia lo que se muestra, no la página.

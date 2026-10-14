@@ -4,7 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
   DeleteObligationButton, ExtendScheduleButton, ObligationStatusButton, PayInstallmentModal,
-  ReopenInstallmentButton, SetAmountModal,
+  RenegotiateModal, ReopenInstallmentButton, SetAmountModal,
 } from "@/components/obligations/installment-actions";
 import { ObligationFormModal } from "@/components/obligations/obligation-form-modal";
 import { ScheduleImportModal } from "@/components/obligations/schedule-import-modal";
@@ -73,6 +73,12 @@ export default async function ObligationDetailPage({ params }: { params: Promise
                 disbursedAt={obligation.disbursedAt}
                 hasSchedule={installments.length > 0}
               />
+            )}
+            {canManage && !esPrestamo && obligation.status === "ACTIVA" && (
+              <RenegotiateModal obligation={{
+                id: obligation.id, name: obligation.name,
+                currency: obligation.currency, fixedAmount: obligation.fixedAmount,
+              }} />
             )}
             {canManage && !esPrestamo && obligation.status === "ACTIVA" && <ExtendScheduleButton obligationId={obligation.id} />}
             {canManage && (

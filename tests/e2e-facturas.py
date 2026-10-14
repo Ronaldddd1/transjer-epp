@@ -110,11 +110,26 @@ with sync_playwright() as p:
     # --- 2. Listado y resumen por moneda
     page.goto(BASE + "/facturas")
     expect(page.get_by_role("heading", name="Facturas de proveedores")).to_be_visible()
-    expect(page.get_by_text("Pendientes de pago")).to_be_visible()
+    expect(page.get_by_text("Pendientes de pago").first).to_be_visible()
+    # Sin elegir pestaña se entra por "Pendientes de pago": es a lo que se entra, a pagar
+    # lo que falta. La tabla pagina de 20 en 20.
     vistas = filas(page)
-    # La tabla pagina de 20 en 20: se compara contra lo que cabe en la primera página.
-    esperadas = min(int(psql("select count(*) from supplier_invoices")), 20)
-    assert vistas == esperadas, f"la tabla muestra {vistas} facturas y deberían verse {esperadas}"
+    esperadas = min(int(psql("select count(*) from supplier_invoices where status='PENDIENTE'")), 20)
+    assert vistas == esperadas, f"la tabla muestra {vistas} facturas y deberían verse {esperadas} pendientes"
+    activa = page.locator("[role=tab][aria-selected=true]").inner_text()
+    assert "Pendientes" in activa, activa
+    # La pestaña de pagadas trae solo pagadas, que es lo que se pidió separar.
+    page.goto(BASE + "/facturas?estado=PAGADA")
+    estados = set(page.eval_on_selector_all("tbody tr td:nth-child(6)", "e => e.map(x => x.innerText.split('\\n')[0])"))
+    assert estados <= {"Pagada"}, estados
+    # Y el botón Ver queda a la vista sin tener que correr la tabla a la derecha.
+    caja = page.locator("tbody a:has-text('Ver')").first.bounding_box()
+    assert caja and caja["x"] + caja["width"] <= 1440 + 1, caja
+    ok("Pendientes y pagadas separadas, con el botón Ver siempre a la vista")
+
+    # Buscar no se queda dentro de la pestaña: una factura ya pagada tiene que aparecer
+    # igual, o parecería que no existe.
+    page.goto(BASE + "/facturas")
     # Se busca por su número: con el histórico importado, esa factura ya no cabe en la
     # primera página y antes la prueba daba por perdido algo que sí estaba.
     page.get_by_role("searchbox").fill("0871")

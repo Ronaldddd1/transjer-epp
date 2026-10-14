@@ -43,6 +43,22 @@ const pendiente = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.pendingA
 const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") : "—");
 
 /**
+ * El fondo de cada fila, según lo que haya que mirar primero.
+ *
+ * Rojo lo que ya venció y sigue sin pagarse; amarillo claro lo que todavía no vence pero
+ * hay que pagar antes de que acabe el mes. De un vistazo se separa lo urgente de lo que
+ * está en camino, sin tener que leer fecha por fecha.
+ */
+function fondoDeFila(o: ObligationRow, hoy: string) {
+  if (o.status !== "ACTIVA") return "bg-steel-50/60 [&>td]:text-steel-400";
+  if (o.overdueCount > 0) return "bg-red-50/60";
+  const venceEsteMes = !!o.nextDueDate && o.nextDueDate.slice(0, 7) === hoy.slice(0, 7);
+  // Las de monto variable sin recibo también se resaltan: hay que conseguir el importe
+  // antes de que se acabe el mes, y es justo lo que se suele olvidar.
+  return venceEsteMes || o.monthMissing > 0 ? "bg-brand-soft/50" : "";
+}
+
+/**
  * Las obligaciones de un tipo, agrupadas por concepto.
  *
  * Por concepto y no por entidad: en la práctica la entidad trae la placa o el número de
@@ -157,7 +173,7 @@ function TablaPrestamos({ grupos, hoy, segmentar }: {
           <Fragment key={g.concepto}>
             {segmentar && <FilaConcepto grupo={g} columnas={9} />}
             {g.filas.map((o) => (
-          <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
+          <Tr key={o.id} className={cn(fondoDeFila(o, hoy))}>
             <Nombre o={o} />
             <Td className="whitespace-nowrap text-right tabular text-steel-600">
               {o.principal ? formatMoney(o.principal, o.currency) : "—"}
@@ -210,7 +226,7 @@ function TablaPeriodicas({ grupos, hoy, segmentar }: {
           <Fragment key={g.concepto}>
             {segmentar && <FilaConcepto grupo={g} columnas={8} />}
             {g.filas.map((o) => (
-          <Tr key={o.id} className={cn(o.status !== "ACTIVA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
+          <Tr key={o.id} className={cn(fondoDeFila(o, hoy))}>
             <Nombre o={o} />
             <Td className="hidden whitespace-nowrap text-center tabular text-steel-600 lg:table-cell">
               {o.billingDay ? `día ${o.billingDay}` : "—"}
@@ -280,6 +296,16 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
             : "Nada arrastrado de meses anteriores."}
           {totalSinImporte > 0 && ` ${totalSinImporte} cuota(s) de monto variable todavía no suman: falta su recibo.`}
         </p>
+      </div>
+
+      {/* Qué significan los colores de las filas, para no tener que adivinarlo. */}
+      <div className="-mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-steel-500">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-sm border border-red-300 bg-red-100" aria-hidden /> Ya venció
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-3 w-3 rounded-sm border border-brand bg-brand-soft" aria-hidden /> Por pagar este mes
+        </span>
       </div>
 
       {tipos.map(({ type, filas }) => {

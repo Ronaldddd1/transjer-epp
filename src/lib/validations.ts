@@ -322,6 +322,18 @@ export const installmentAmountSchema = z.object({
   notes: optionalText(1000),
 });
 
+/**
+ * Renegociación del importe de un servicio.
+ *
+ * `from` es el mes desde el que rige el precio nuevo: lo anterior se queda como está,
+ * porque eso ya se pagó o ya se debe a su precio de entonces.
+ */
+export const renegotiationSchema = z.object({
+  amount: money("El importe nuevo"),
+  from: ymd,
+  reason: optionalText(300),
+});
+
 export const payInvoiceSchema = z.object({
   paidAt: ymd,
   paymentReference: optionalText(120),

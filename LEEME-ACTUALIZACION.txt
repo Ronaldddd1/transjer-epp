@@ -1,62 +1,93 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Lectura de facturas desde el correo, por IMAP
-=============================================
+Cuatro cambios pedidos
+======================
 
-El paso a paso está en FACTURAS-POR-CORREO.txt, con tus datos ya puestos.
-
-
-LO IMPORTANTE
--------------
-
-Transjer no tiene Microsoft 365, y el sistema estaba escrito solo para eso. El correo de
-la empresa vive en el mismo servidor que la página web: un buzón corriente, que se lee
-por IMAP.
-
-Resultó ser el camino más corto. No hay que registrar ninguna aplicación, ni pedir
-consentimiento de administrador, ni tocar permisos del dominio. Solo servidor, usuario y
-contraseña, en las variables de entorno de Vercel.
-
-El documento de Microsoft 365 que te pasé antes ya no aplica. No se lo mandes a Ángel.
+No hay migración y no hay librerías nuevas. Copias la carpeta sobre el proyecto y listo.
+(Si todavía no habías subido la entrega anterior, la del buzón IMAP, esa sí pedía
+`npm install`. Esta carpeta la incluye, así que córrelo igual por si acaso.)
 
 
-QUÉ TRAE ESTA ENTREGA
----------------------
+1. SE RESALTA LO QUE HAY QUE PAGAR ESTE MES
+-------------------------------------------
 
-src/server/imap.ts
-    El lector del buzón. Devuelve lo mismo que el de Microsoft, así que todo lo que viene
-    después —leer el XML, crear la factura, detectar duplicados, la bandeja de Por
-    revisar— no cambió ni una línea.
+En Préstamos y servicios, cada fila se pinta según lo que haya que mirar primero:
 
-src/server/mailbox-config.ts
-    Decide de dónde se leen los correos según qué variables estén cargadas. Microsoft 365
-    sigue soportado por si algún día la empresa lo contrata.
+    rojo claro      ya venció y sigue sin pagarse
+    amarillo claro  todavía no vence, pero hay que pagarlo antes de que acabe el mes
 
-El panel de Facturas → Correos
-    Ya no da por hecho Microsoft: muestra cómo se está leyendo el buzón, y los botones de
-    avisos automáticos solo aparecen cuando aplican.
+Debajo del total del mes hay una leyenda con los dos colores, para no tener que adivinar.
 
-Dos librerías nuevas (imapflow y mailparser), así que esta vez hay que correr
-`npm install` antes de publicar. La base de datos no cambia: no hay migración.
+También se resaltan en amarillo los servicios de monto variable a los que les falta el
+recibo: hay que conseguir el importe antes de fin de mes, y es justo lo que se olvida.
 
 
-UNA DIFERENCIA QUE SÍ IMPORTA
------------------------------
+2. RENEGOCIAR EL PRECIO DE UN SERVICIO
+--------------------------------------
 
-Microsoft avisaba cuando llegaba un correo. IMAP no avisa, hay que preguntar. Como el
-plan gratuito de Vercel solo permite una tarea al día, el droplet pregunta cada 10
-minutos. Es el mismo patrón de los avisos de vencimiento.
+En la ficha de cualquier servicio, alquiler, cochera, seguro o línea hay un botón nuevo:
+RENEGOCIAR.
+
+Pide el importe nuevo y desde qué mes rige. Por defecto propone el mes siguiente, que es
+lo normal: se acuerda un precio para adelante.
+
+Lo importante es lo que NO cambia:
+
+  · Las cuotas ya pagadas no se tocan nunca.
+  · Las pendientes de meses anteriores tampoco: si agosto quedó debiendo a 300, se sigue
+    debiendo 300.
+  · Solo cambian los vencimientos pendientes del mes elegido en adelante.
+
+Así el cronograma queda con el precio real de cada mes —300 hasta noviembre, 350 desde
+diciembre— y los totales del año siguen cuadrando con lo que de verdad salió de caja. Si
+el precio se aplicara hacia atrás, esos números dejarían de cuadrar y no habría forma de
+darse cuenta mirando la pantalla.
+
+El cambio queda en auditoría con quién, cuándo, desde qué mes y el motivo que escribas.
+
+Los préstamos no usan este botón: su cronograma viene del banco y se vuelve a cargar.
+
+
+3. FACTURAS: PENDIENTES Y PAGADAS SEPARADAS, Y LA TABLA MÁS ANCHA
+-----------------------------------------------------------------
+
+Arriba de la tabla hay cuatro pestañas con su número al lado:
+
+    Pendientes de pago · Pagadas · Observadas · Todas
+
+Al entrar se abre directo en PENDIENTES, que es a lo que se entra: a pagar lo que falta.
+Las pestañas conservan la búsqueda y los demás filtros.
+
+Una excepción pensada: si estás buscando algo, se muestran todas. Una búsqueda acotada a
+pendientes no encontraría una factura ya pagada y parecería que no existe.
+
+El filtro de Estado salió de la barra de filtros, porque ahora lo hacen las pestañas y
+tener lo mismo en dos sitios termina en que uno contradice al otro.
+
+Sobre el ancho: la columna de ACCIONES quedó fija a la derecha, así que el botón Ver está
+siempre a la vista y ya no hay que bajar hasta el final para encontrar la barra y correr
+la tabla a mano. Además todas las pantallas del sistema ganaron ancho (de 1280 a 1700
+píxeles), que es lo que más se nota en las tablas con muchas columnas.
+
+
+4. EL CALENDARIO DE PAGOS YA NO TRAE FACTURAS
+----------------------------------------------
+
+Queda solo con las cuotas de préstamos y servicios. Las facturas tienen su propia
+pantalla, con su plazo y su detracción, y mezcladas tapaban lo que el calendario viene a
+responder: qué compromisos fijos caen cada mes.
+
+Lo que exportas desde el calendario también queda sin facturas.
 
 
 LO QUE SE PROBÓ
 ---------------
 
-  309 comprobaciones de lógica  — todas pasan
+  323 comprobaciones de lógica  — todas pasan
   8 recorridos en el navegador  — todos pasan
 
-Entre las nuevas: que un correo con XML y PDF se convierta en factura con los adjuntos
-enteros, que el logotipo de la firma del remitente no se tome por adjunto, que cada correo
-se identifique sin confundirse con otro aunque el servidor reorganice el buzón, y que cada
-fallo de conexión diga qué variable revisar.
-
-Lo que NO se probó desde aquí: la conexión con mail.transjer.com. Este entorno no tiene
-salida a ese servidor. Esa prueba la hacemos juntos, como hicimos con el WhatsApp.
+Las nuevas de la renegociación son las que más importan: se crea una cochera a 300 con
+tres meses pagados y tres por pagar, se renegocia a 350 desde diciembre, y se comprueba
+uno por uno que agosto, setiembre y octubre sigan diciendo 300, que noviembre —pendiente
+pero anterior al acuerdo— también, y que lo efectivamente pagado siga sumando 900. Después
+una segunda renegociación a la baja, para confirmar que diciembre conserva sus 350 y que
+el cronograma termina guardando los tres precios a la vez.

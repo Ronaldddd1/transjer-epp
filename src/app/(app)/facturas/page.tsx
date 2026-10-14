@@ -7,6 +7,7 @@ import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invo
 import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
+import { TabLinks } from "@/components/ui/tab-links";
 import { PageHeader } from "@/components/ui/page-header";
 import { ExportTable } from "@/components/ui/export-table";
 import { Pagination } from "@/components/ui/pagination";
@@ -26,15 +27,27 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const user = await requirePageUser("invoices.view");
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp, 20);
-  const f = readInvoiceFilters(sp);
+  const filtros = readInvoiceFilters(sp);
+  /**
+   * Sin elegir nada se entra por "Pendientes de pago", que es a lo que se entra: a pagar
+   * lo que falta, no a mirar lo ya pagado.
+   *
+   * Salvo que se esté buscando algo. Una búsqueda acotada a pendientes no encontraría una
+   * factura ya pagada y parecería que no existe, que es peor que mostrar de más.
+   */
+  const porDefecto = !sp.estado && !filtros.q;
+  const f = porDefecto ? { ...filtros, status: "PENDIENTE" as const } : filtros;
   const canManage = can(user.role, "invoices.manage");
   const canPay = can(user.role, "invoices.pay");
   const cols = canManage || canPay ? 10 : 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
+  const [{ rows, total }, totals, totalesPorEstado, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
     listInvoices(f, pageSize, offset),
     invoiceTotals(f),
+    // Los mismos filtros pero sin el estado: así cada pestaña muestra cuántas hay en ella
+    // y no cero por estar mirando otra.
+    invoiceTotals({ ...f, status: undefined }),
     getSupplierOptions(),
     getClientOptions(),
     countEmailsToReview(),
@@ -48,6 +61,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const sum = (rows: typeof totals) => rows.reduce((s, r) => s + r.cantidad, 0);
   const amounts = (rows: typeof totals) =>
     rows.filter((r) => Number(r.importe) > 0).map((r) => formatMoney(r.importe, r.currency)).join(" · ") || "—";
+
+  const cuentaPorEstado = (estado: string) =>
+    totalesPorEstado.filter((t) => t.status === estado).reduce((n, t) => n + t.cantidad, 0);
+  const todasLasFacturas = totalesPorEstado.reduce((n, t) => n + t.cantidad, 0);
 
   const resumen = [
     { label: "Pendientes de pago", count: sum(pendientes), detail: amounts(pendientes), tone: "brand" as const },
@@ -140,10 +157,25 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
         ))}
       </dl>
 
+      {/* Pendientes y pagadas separadas: son dos trabajos distintos. La encargada entra a
+          pagar lo que falta, no a mirar lo que ya pagó. */}
+      <TabLinks
+        name="estado"
+        current={first(sp.estado) ?? (porDefecto ? "PENDIENTE" : "")}
+        base="/facturas"
+        params={sp}
+        className="mb-3"
+        tabs={[
+          { value: "PENDIENTE", label: "Pendientes de pago", count: cuentaPorEstado("PENDIENTE") },
+          { value: "PAGADA", label: "Pagadas", count: cuentaPorEstado("PAGADA") },
+          { value: "OBSERVADA", label: "Observadas", count: cuentaPorEstado("OBSERVADA") },
+          { value: "", label: "Todas", count: todasLasFacturas },
+        ]}
+      />
+
       <FilterBar
         searchPlaceholder="Buscar número, proveedor, RUC o guía"
         filters={[
-          { type: "select", name: "estado", label: "Estado", allLabel: "Todos", options: Object.entries(INVOICE_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "proveedor", label: "Proveedor", options: suppliers.map((s) => ({ value: s.id, label: s.name })) },
           { type: "select", name: "tipo", label: "Tipo", allLabel: "Todos", options: Object.entries(INVOICE_DOC_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "cliente", label: "Cliente", options: clients.map((c) => ({ value: c, label: c })) },
@@ -168,7 +200,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             <Th className="hidden 2xl:table-cell">Detracción</Th>
             <Th className="hidden 2xl:table-cell">Guía</Th>
             <Th className="hidden 2xl:table-cell">Pago</Th>
-            {(canManage || canPay) && <Th className="text-right">Acciones</Th>}
+            {/* Fija a la derecha: con muchas columnas, el botón Ver quedaba fuera de la
+                pantalla y había que bajar hasta el final para encontrar la barra y correr
+                la tabla a mano. */}
+            {(canManage || canPay) && <Th className="sticky right-0 z-10 bg-steel-50 text-right shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">Acciones</Th>}
           </tr>
         </thead>
         <tbody>
@@ -236,7 +271,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                   ) : "—"}
                 </Td>
                 {(canManage || canPay) && (
-                  <Td>
+                  <Td className="sticky right-0 z-10 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">
                     <div className="flex items-center justify-end gap-1">
                       {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && <PayInvoiceModal invoice={ref} compact />}
                       {canManage && i.status === "PENDIENTE" && <InvoiceReasonModal invoice={ref} action="observe" compact />}

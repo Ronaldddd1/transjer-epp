@@ -10,7 +10,7 @@ import { requireActionUser } from "@/lib/auth";
 import { monthlyDueDates } from "@/lib/amortization";
 import { formatMoney, OBLIGATION_TYPE_LABEL, todayLima } from "@/lib/utils";
 import {
-  installmentAmountSchema, obligationSchema, payInstallmentSchema, scheduleSchema,
+  installmentAmountSchema, obligationSchema, payInstallmentSchema, renegotiationSchema, scheduleSchema,
 } from "@/lib/validations";
 
 /**
@@ -277,6 +277,85 @@ export async function extendSchedule(id: string): Promise<ActionResult> {
 
     revalidatePath("/", "layout");
     return { ok: true, message: `Se agregaron ${creadas} vencimiento(s).` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Renegociación: cambia el importe mensual a partir de una fecha.
+ *
+ * Una cochera que costaba 300 se renegocia a 350. Lo de antes se pagó a 300 y así tiene
+ * que quedar: cambiar el importe hacia atrás borraría lo que de verdad pasó y dejaría los
+ * totales del año sin cuadrar con los pagos hechos.
+ *
+ * Por eso solo se tocan las cuotas pendientes que vencen desde el mes indicado. Las
+ * pagadas no se tocan nunca, y las pendientes anteriores tampoco: si una de agosto quedó
+ * debiendo a 300, se sigue debiendo 300.
+ *
+ * El histórico queda en el propio cronograma —cada mes con el importe que le tocó— y el
+ * cambio queda registrado en auditoría con quién, cuándo y desde cuándo rige.
+ */
+export async function renegotiateAmount(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("obligations.manage");
+    const data = renegotiationSchema.parse(formToObject(formData));
+    const obligation = await loadObligation(id);
+
+    if (obligation.type === "PRESTAMO") {
+      throw new BusinessError("Un préstamo no se renegocia por aquí: carga de nuevo el cronograma del banco.");
+    }
+    if (obligation.status !== "ACTIVA") throw new BusinessError("La obligación no está activa.");
+
+    // Desde el primer día del mes elegido: se renegocia por meses, no por días sueltos.
+    const desde = `${data.from.slice(0, 7)}-01`;
+
+    const { cambiadas, intactas } = await db.transaction(async (tx) => {
+      const afectadas = await tx.update(obligationInstallments)
+        .set({ total: data.amount, updatedAt: new Date() })
+        .where(and(
+          eq(obligationInstallments.obligationId, id),
+          eq(obligationInstallments.status, "PENDIENTE"),
+          sql`${obligationInstallments.dueDate} >= ${desde}`,
+        ))
+        .returning({ id: obligationInstallments.id });
+
+      // Las que quedan con el precio viejo, para decirlo en el mensaje: es la garantía de
+      // que no se borró nada hacia atrás.
+      const [{ previas }] = await tx
+        .select({ previas: sql<number>`count(*)::int` })
+        .from(obligationInstallments)
+        .where(and(
+          eq(obligationInstallments.obligationId, id),
+          sql`${obligationInstallments.dueDate} < ${desde}`,
+        ));
+
+      // El importe de la obligación se actualiza para que los meses que se generen más
+      // adelante salgan ya con el precio nuevo.
+      await tx.update(obligations)
+        .set({ fixedAmount: data.amount, variableAmount: false, updatedAt: new Date() })
+        .where(eq(obligations.id, id));
+
+      await logAudit({
+        user, action: "EDITAR", module: "OBLIGACIONES", recordId: id,
+        description: `${user.name} renegoció "${obligation.name}": ${formatMoney(obligation.fixedAmount, obligation.currency)}`
+          + ` → ${formatMoney(data.amount, obligation.currency)} desde ${desde.slice(0, 7)}.`
+          + ` Se actualizaron ${afectadas.length} vencimiento(s); ${previas} anterior(es) conservan el importe de antes.`,
+        oldData: { importe: obligation.fixedAmount },
+        newData: { importe: data.amount, desde, motivo: data.reason },
+      }, tx);
+
+      return { cambiadas: afectadas.length, intactas: previas };
+    });
+
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      message: cambiadas === 0
+        ? `No había vencimientos pendientes desde ${desde.slice(0, 7)}. El importe nuevo regirá para los que se generen.`
+        : `${cambiadas} vencimiento(s) quedaron en ${formatMoney(data.amount, obligation.currency)}.`
+          + (intactas > 0 ? ` Los ${intactas} anteriores conservan su importe.` : ""),
+    };
   } catch (e) {
     return toActionError(e);
   }
