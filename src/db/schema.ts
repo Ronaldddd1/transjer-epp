@@ -548,6 +548,68 @@ export const invoiceEmailsRelations = relations(invoiceEmails, ({ one, many }) =
 export const obligationsRelations = relations(obligations, ({ many }) => ({
   installments: many(obligationInstallments),
 }));
+/**
+ * Los vehículos de la flota, identificados por su placa.
+ *
+ * Existen para colgarles los documentos: SOAT, tarjeta de propiedad, de circulación y
+ * revisión técnica. Hasta ahora la placa solo aparecía escrita dentro del nombre de un
+ * seguro o una cochera, que sirve para leerlo pero no para buscar por unidad.
+ */
+export const vehicles = pgTable("vehicles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** Siempre con guion y en mayúsculas: BJA-838. Se normaliza antes de guardar. */
+  plate: varchar("plate", { length: 10 }).notNull().unique(),
+  /** Marca y modelo, o como la llamen en operaciones. */
+  description: varchar("description", { length: 160 }),
+  notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  isDemo: boolean("is_demo").notNull().default(false),
+  ...timestamps,
+}, (t) => [
+  index("vehicles_active_idx").on(t.active),
+]);
+
+/**
+ * Los documentos de un trabajador o de un vehículo.
+ *
+ * El archivo se guarda igual que los adjuntos de las facturas, con el mismo almacén, así
+ * que no hay dos formas distintas de guardar un PDF en el sistema.
+ *
+ * `expiresAt` es el motivo de que esto exista y no sea una carpeta compartida: el SOAT y
+ * la revisión técnica vencen cada año, y una unidad circulando con el SOAT vencido es una
+ * multa y un problema de seguro. Con la fecha guardada, el sistema avisa antes.
+ */
+export const documents = pgTable("documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** De quién es: uno de los dos va lleno, nunca los dos ni ninguno. */
+  employeeId: uuid("employee_id").references(() => employees.id, { onDelete: "cascade" }),
+  vehicleId: uuid("vehicle_id").references(() => vehicles.id, { onDelete: "cascade" }),
+  /** Qué documento es: SOAT, LICENCIA, TARJETA_PROPIEDAD… Ver DOCUMENT_KIND_LABEL. */
+  kind: varchar("kind", { length: 30 }).notNull().default("OTRO"),
+  /** Cómo lo llama la empresa, por si hay dos del mismo tipo. */
+  title: varchar("title", { length: 160 }),
+  issuedAt: date("issued_at"),
+  /** Sin fecha, el documento no caduca: una tarjeta de propiedad, por ejemplo. */
+  expiresAt: date("expires_at"),
+  notes: text("notes"),
+  filename: varchar("filename", { length: 250 }).notNull(),
+  contentType: varchar("content_type", { length: 120 }).notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  storageDriver: varchar("storage_driver", { length: 20 }).notNull(),
+  storageKey: varchar("storage_key", { length: 500 }),
+  content: bytea("content"),
+  uploadedBy: uuid("uploaded_by").references(() => users.id),
+  isDemo: boolean("is_demo").notNull().default(false),
+  ...timestamps,
+}, (t) => [
+  index("documents_employee_idx").on(t.employeeId),
+  index("documents_vehicle_idx").on(t.vehicleId),
+  index("documents_expires_idx").on(t.expiresAt),
+  check("documents_owner", sql`(${t.employeeId} is not null) <> (${t.vehicleId} is not null)`),
+  check("documents_size_positive", sql`${t.sizeBytes} > 0`),
+  check("documents_fechas_coherentes", sql`${t.expiresAt} is null or ${t.issuedAt} is null or ${t.expiresAt} >= ${t.issuedAt}`),
+]);
+
 export const obligationInstallmentsRelations = relations(obligationInstallments, ({ one }) => ({
   obligation: one(obligations, { fields: [obligationInstallments.obligationId], references: [obligations.id] }),
 }));
@@ -576,5 +638,7 @@ export type ObligationInstallment = typeof obligationInstallments.$inferSelect;
 export type ObligationType = ObligationTypeKey;
 export type ObligationStatus = (typeof obligationStatusEnum.enumValues)[number];
 export type InstallmentStatus = (typeof installmentStatusEnum.enumValues)[number];
+export type Vehicle = typeof vehicles.$inferSelect;
+export type DocumentRow = typeof documents.$inferSelect;
 export type EppReturn = typeof eppReturns.$inferSelect;
 export type ReturnCondition = (typeof returnConditionEnum.enumValues)[number];

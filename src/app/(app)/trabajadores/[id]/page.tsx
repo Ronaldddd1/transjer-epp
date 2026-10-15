@@ -5,6 +5,8 @@ import { notFound } from "next/navigation";
 import { DeliveryModal } from "@/components/deliveries/delivery-modal";
 import { ReturnModal } from "@/components/deliveries/return-modal";
 import { VoidDeliveryModal } from "@/components/deliveries/void-delivery-modal";
+import { DocumentFormModal } from "@/components/documents/document-actions";
+import { DocumentTable, LeyendaVencimientos } from "@/components/documents/document-table";
 import { EmployeeFormModal } from "@/components/employees/employee-form-modal";
 import { ReinstateButton, TerminationModal } from "@/components/employees/termination-modal";
 import { EmployeeStateBadge, ReturnConditionBadge, VoidedNote } from "@/components/ui/badge";
@@ -13,7 +15,8 @@ import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cn, formatDate, todayLima } from "@/lib/utils";
+import { cn, documentStatus, formatDate, todayLima } from "@/lib/utils";
+import { listDocumentsFor } from "@/server/document-queries";
 import {
   employeeHoldings, getEmployee, getEmployeeOptions, getProductOptions, listDeliveries, listReturns,
 } from "@/server/queries";
@@ -27,13 +30,17 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   if (!employee) notFound();
 
   const canDeliver = can(user.role, "deliveries.create") && employee.active;
-  const [{ rows }, holdings, devoluciones, products, employees] = await Promise.all([
+  // Quien no tiene acceso a documentos no ve la sección, igual que no ve el menú.
+  const verDocumentos = can(user.role, "documents.view");
+  const [{ rows }, holdings, devoluciones, products, employees, documentos] = await Promise.all([
     listDeliveries({ employeeId: id }),
     employeeHoldings(id),
     listReturns({ employeeId: id }),
     canDeliver ? getProductOptions() : Promise.resolve([]),
     canDeliver ? getEmployeeOptions() : Promise.resolve([]),
+    verDocumentos ? listDocumentsFor({ employeeId: id }) : Promise.resolve([]),
   ]);
+  const docsVencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
   const canVoid = can(user.role, "deliveries.void");
   const canReturn = can(user.role, "deliveries.create");
   const canManage = can(user.role, "employees.manage");
@@ -231,6 +238,40 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           )}
         </aside>
       </div>
+
+      {/* Sus papeles: licencia, SCTR, examen médico. Van aquí y no en una pantalla aparte
+          porque es donde se los busca —"¿cuándo le vence la licencia a este?"— y porque
+          así el mismo lugar responde qué tiene a su cargo y qué documentos le faltan. */}
+      {verDocumentos && (
+        <section className="mt-8">
+          <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="font-display text-xl font-semibold">Documentos</h2>
+              <p className="text-sm text-steel-500">
+                {documentos.length === 0
+                  ? "Todavía no tiene ninguno cargado."
+                  : `${documentos.length} documento(s)${docsVencidos.length > 0 ? ` · ${docsVencidos.length} vencido(s)` : ""}`}
+              </p>
+            </div>
+            {can(user.role, "documents.manage") && (
+              <DocumentFormModal
+                employeeId={employee.id}
+                etiqueta={`${employee.firstName} ${employee.lastName}`}
+              />
+            )}
+          </div>
+
+          {docsVencidos.length > 0 && (
+            <p className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+              Tiene {docsVencidos.length} documento(s) vencido(s):{" "}
+              {docsVencidos.map((d) => `${d.title ?? d.kind} (venció el ${formatDate(d.expiresAt)})`).join(", ")}.
+            </p>
+          )}
+
+          <LeyendaVencimientos />
+          <DocumentTable rows={documentos} canManage={can(user.role, "documents.manage")} />
+        </section>
+      )}
     </>
   );
 }

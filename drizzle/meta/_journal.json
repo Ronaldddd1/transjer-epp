@@ -85,6 +85,13 @@
       "when": 1791856736564,
       "tag": "0011_tipos_de_obligacion",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791955066264,
+      "tag": "0012_documentos",
+      "breakpoints": true
     }
   ]
 }

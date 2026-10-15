@@ -336,6 +336,104 @@ export const weekdayOf = (ymd: string) => new Date(`${ymd}T12:00:00Z`).getUTCDay
 /** Encabezados de la cuadrícula, empezando en domingo como los calendarios de pared. */
 export const WEEKDAYS = ["Dom.", "Lun.", "Mar.", "Mié.", "Jue.", "Vie.", "Sáb."] as const;
 
+// ---------- Documentos de trabajadores y vehículos ----------
+
+/**
+ * Los tipos de documento, separados por a quién pertenecen.
+ *
+ * Son los que la empresa maneja hoy. "Otro" existe para que nunca haya que esperar a una
+ * actualización del sistema para poder guardar un papel que no estaba en la lista.
+ */
+export const VEHICLE_DOCUMENT_KINDS = {
+  SOAT: "SOAT",
+  REVISION_TECNICA: "Revisión técnica",
+  TARJETA_PROPIEDAD: "Tarjeta de propiedad",
+  TARJETA_CIRCULACION: "Tarjeta de circulación",
+  POLIZA: "Póliza de seguro",
+  MTC: "Habilitación MTC",
+  OTRO_VEHICULO: "Otro documento del vehículo",
+} as const;
+
+export const EMPLOYEE_DOCUMENT_KINDS = {
+  DNI: "DNI",
+  LICENCIA: "Licencia de conducir",
+  EXAMEN_MEDICO: "Examen médico ocupacional",
+  CONTRATO: "Contrato",
+  CERTIFICADO: "Certificado o curso",
+  OTRO_TRABAJADOR: "Otro documento del trabajador",
+} as const;
+
+export const DOCUMENT_KIND_LABEL: Record<string, string> = {
+  ...VEHICLE_DOCUMENT_KINDS,
+  ...EMPLOYEE_DOCUMENT_KINDS,
+  OTRO: "Otro",
+};
+
+/**
+ * Cuáles conviene que lleven fecha de vencimiento.
+ *
+ * No es una obligación: el sistema no rechaza un SOAT sin fecha, porque a veces no se
+ * tiene a mano y es peor no guardar el archivo. Sirve para avisar en el formulario de que
+ * sin esa fecha nadie va a enterarse cuando caduque.
+ */
+export const DOCUMENT_KINDS_THAT_EXPIRE = new Set([
+  "SOAT", "REVISION_TECNICA", "POLIZA", "MTC", "LICENCIA", "EXAMEN_MEDICO", "CONTRATO",
+]);
+
+export type DocumentStatus = "VIGENTE" | "POR_VENCER" | "VENCIDO" | "SIN_FECHA";
+
+export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
+  VIGENTE: "Vigente",
+  POR_VENCER: "Por vencer",
+  VENCIDO: "Vencido",
+  SIN_FECHA: "Sin vencimiento",
+};
+
+/** Desde cuántos días antes se considera que un documento está por vencer. */
+export const DOCUMENT_WARNING_DAYS = 30;
+
+export function documentStatus(expiresAt: string | null | undefined, hoy = todayLima()): DocumentStatus {
+  if (!expiresAt) return "SIN_FECHA";
+  if (expiresAt < hoy) return "VENCIDO";
+  return expiresAt <= addDays(hoy, DOCUMENT_WARNING_DAYS) ? "POR_VENCER" : "VIGENTE";
+}
+
+/** Cuántos días faltan (o pasaron) para el vencimiento. Negativo si ya venció. */
+export function daysToExpiry(expiresAt: string | null | undefined, hoy = todayLima()): number | null {
+  if (!expiresAt) return null;
+  return Math.round((Date.parse(`${expiresAt}T12:00:00Z`) - Date.parse(`${hoy}T12:00:00Z`)) / DAY);
+}
+
+/**
+ * De qué documento se trata, deducido del nombre del archivo.
+ *
+ * Los nombres vienen de personas distintas y de escáneres distintos: "REVISION TECNICA",
+ * "Revisión Técnica 1" y "RT-D4D838" son el mismo papel. Se compara sin tildes ni
+ * mayúsculas. Lo que no reconoce queda como "otro": es preferible guardarlo y
+ * reclasificarlo después que dejarlo fuera y que nadie se acuerde.
+ */
+export function documentKindFromFilename(nombre: string): string {
+  const limpio = String(nombre ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+  if (/SOAT/.test(limpio)) return "SOAT";
+  if (/REVISION\s*TECNICA|\bRT[-_ ]/.test(limpio)) return "REVISION_TECNICA";
+  if (/TARJETA.*PROPIEDAD|[-_ ]RP\b/.test(limpio)) return "TARJETA_PROPIEDAD";
+  if (/TARJETA.*CIRCULACION|\bTUC\b|TIVE/.test(limpio)) return "TARJETA_CIRCULACION";
+  if (/POLIZA|SEGURO/.test(limpio)) return "POLIZA";
+  if (/\bMTC\b|HABILITACION/.test(limpio)) return "MTC";
+  return "OTRO_VEHICULO";
+}
+
+/**
+ * Una placa siempre escrita igual: mayúsculas y con guion. "bja838" y "BJA 838" son la
+ * misma unidad, y sin normalizar quedarían como dos vehículos distintos.
+ */
+export function normalizePlate(valor: string): string {
+  const limpio = String(valor ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (limpio.length < 5) return limpio;
+  // El formato peruano es de tres caracteres, guion, y tres más.
+  return `${limpio.slice(0, 3)}-${limpio.slice(3)}`;
+}
+
 export type PayDueInput = {
   paymentTerm: PaymentTermKey;
   termDays: number;

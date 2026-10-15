@@ -334,6 +334,28 @@ export const renegotiationSchema = z.object({
   reason: optionalText(300),
 });
 
+/** Un documento de un trabajador o de un vehículo. */
+export const documentSchema = z.object({
+  // Uno de los dos, nunca los dos: lo comprueba la acción, que es la que sabe si existen.
+  employeeId: optionalText(40),
+  vehicleId: optionalText(40),
+  kind: z.string().trim().min(1, "Elige qué documento es").max(30),
+  title: optionalText(160),
+  issuedAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  expiresAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  notes: optionalText(1000),
+}).superRefine((d, ctx) => {
+  if (d.expiresAt && d.issuedAt && d.expiresAt < d.issuedAt) {
+    ctx.addIssue({ code: "custom", path: ["expiresAt"], message: "No puede vencer antes de haberse emitido" });
+  }
+});
+
+export const vehicleSchema = z.object({
+  plate: requiredText("La placa", 10),
+  description: optionalText(160),
+  notes: optionalText(1000),
+});
+
 export const payInvoiceSchema = z.object({
   paidAt: ymd,
   paymentReference: optionalText(120),

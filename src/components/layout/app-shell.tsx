@@ -2,7 +2,7 @@
 
 import {
   ArrowLeftRight, BarChart3, Building2, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
-  HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
+  FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
   Tags, Undo2, Users, Wallet, X,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
@@ -37,6 +37,7 @@ const SECTIONS: NavSection[] = [
       { href: "/entregas/resumen", label: "Resumen de EPP", icon: ClipboardCheck, permission: "deliveries.view" },
       { href: "/devoluciones", label: "Devolución de EPP", icon: Undo2, permission: "deliveries.view" },
       { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+      { href: "/documentos", label: "Documentos", icon: FolderOpen, permission: "documents.view" },
     ],
   },
   {

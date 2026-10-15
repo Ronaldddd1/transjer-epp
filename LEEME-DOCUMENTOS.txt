@@ -1,0 +1,163 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+El color que se borraba, y el archivo de documentos
+===================================================
+
+Esta entrega tiene DOS cosas: el arreglo del sombreado que me indicaste, y el módulo
+nuevo de documentos de trabajadores y vehículos.
+
+ANTES DE SUBIRLA, dos comandos (en ese orden):
+
+    npm install
+    npm run db:migrate
+
+El `db:migrate` es obligatorio esta vez: el módulo de documentos crea dos tablas nuevas
+(vehículos y documentos). Si subes sin migrar, la pantalla de Documentos va a dar error.
+Corre la migración ANTES de hacer el push, como siempre.
+
+
+1. EL SOMBREADO: EL ROJO Y EL CURSOR
+------------------------------------
+
+Dos cosas estaban mal y las dos están arregladas.
+
+EL ROJO NO SE VEÍA. El tono que había era demasiado pálido y al lado del amarillo no se
+distinguía. Ahora el rojo es claramente rojo:
+
+    rojo claro      ya venció y sigue sin pagarse
+    amarillo claro  vence este mes, o falta el recibo del monto variable
+    gris            dado de baja o terminado
+
+EL COLOR SE BORRABA AL PASAR EL CURSOR. Eso pasaba porque todas las tablas del sistema
+aclaran la fila cuando pasas por encima, y ese aclarado tapaba el color del estado. Ahora
+la fila con color se oscurece un poco en vez de blanquearse: sigues viendo que es roja o
+amarilla, y además ves sobre cuál estás parado.
+
+El color se quita solo cuando se paga la cuota. No hay nada que apretar.
+
+Esto no afecta solo a Préstamos y servicios: la tabla es la misma en todo el sistema, así
+que donde haya filas con color ahora se mantiene igual.
+
+
+2. DOCUMENTOS DE TRABAJADORES Y VEHÍCULOS
+-----------------------------------------
+
+Menú nuevo: Almacén → DOCUMENTOS.
+
+Lo que hace que esto no sea una carpeta compartida de Windows es la fecha de vencimiento.
+Una unidad circulando con el SOAT vencido es una multa y un seguro que no responde, y en
+una carpeta eso no se ve: hay que abrir el PDF de cada una para enterarse.
+
+LA PANTALLA GENERAL
+
+Cuatro pestañas, con su número al lado:
+
+    Vencidos · Vencen en 30 días · Vigentes · Sin fecha · Todos
+
+Al entrar se abre directo en VENCIDOS si hay algo vencido; si no, en lo que vence pronto.
+Arriba sale el aviso de cuántos son. No hay que ir a buscarlo.
+
+Cada documento se busca por placa, por nombre, por DNI o por el nombre del archivo.
+
+QUÉ SE PUEDE GUARDAR
+
+De vehículos: SOAT, revisión técnica, tarjeta de propiedad, tarjeta de circulación (TUC),
+habilitación del MTC, póliza, y "otro documento" para lo que no entre en la lista.
+
+De trabajadores: licencia de conducir, DNI, certificado de salud, contrato, SCTR, examen
+médico, y también "otro documento".
+
+El archivo puede ser PDF o foto (lo que sale del escáner o de la cámara del celular).
+
+LA FLOTA
+
+Documentos → VEHÍCULOS lista las unidades con el estado de sus papeles: cuántos
+documentos tiene cada una, cuál es el primero que se le vence y cuántos ya están
+vencidos. Las filas van con los mismos colores de arriba.
+
+Entrando a una placa se ven todos sus documentos juntos y se le sube uno nuevo sin tener
+que elegir la unidad.
+
+Una unidad no se borra nunca: se DA DE BAJA. Deja de aparecer al subir documentos nuevos,
+pero sus papeles se conservan — el SOAT de una unidad vendida sigue siendo el respaldo de
+lo que circuló.
+
+LOS TRABAJADORES
+
+En la ficha de cada trabajador hay ahora una sección de documentos, con la misma lógica de
+vencimientos. Lo que se sube ahí sale también en la pantalla general.
+
+
+3. CARGAR DE UNA VEZ LA CARPETA QUE YA TIENES
+---------------------------------------------
+
+Probé el script con la carpeta que me mandaste: 17 placas, 57 archivos. Cargó 56.
+
+Para correrlo en tu máquina, apuntando a la carpeta donde están:
+
+    npm run import:documentos -- "C:\ruta\Nueva carpeta" --simular
+    npm run import:documentos -- "C:\ruta\Nueva carpeta"
+
+El primero no guarda nada: solo te dice qué va a hacer. Míralo antes de correr el
+segundo.
+
+Espera la estructura que ya usas: una subcarpeta por placa, y dentro los PDF. El tipo de
+documento lo deduce del nombre del archivo (CERTIFICADO_SOAT_BJA838.pdf → SOAT, REVISION
+TECNICA.pdf → revisión técnica, y así). Lo que no reconoce lo carga igual como "otro
+documento del vehículo", y lo reclasificas desde la web con el lápiz.
+
+Puedes repetirlo sin miedo: un archivo que ya está cargado para esa placa se salta.
+
+DOS COSAS QUE TIENES QUE SABER
+
+A) NO PONE FECHAS DE VENCIMIENTO. Las fechas están dentro del PDF y adivinarlas sería
+   inventar datos. Al terminar, el script te lista cuáles caducan y quedaron sin fecha
+   —los SOAT y las revisiones técnicas— para que las completes a mano desde la web, con
+   el lápiz de cada uno. Son unos 30 y toma un rato, pero mientras no estén puestas el
+   sistema no puede avisar de nada: es la parte que hace que esto sirva.
+
+B) UN ARCHIVO NO ENTRÓ: BVR727-RP.pdf, de 4.1 MB. Ahora mismo los archivos se guardan en
+   la propia base de datos y ahí el límite por archivo es de 3 MB. Tienes dos salidas:
+
+   · Configurar Vercel Blob en el proyecto. Es gratis en tu plan, sube el límite a 15 MB
+     y los archivos dejan de ocupar la base. Son tres clics en Vercel y una variable; si
+     quieres lo hacemos y te paso los pasos.
+   · O volver a escanear ese archivo en menor calidad.
+
+   Lo demás quedó cargado: un archivo grande no tumba la carga entera.
+
+
+4. LOS AVISOS POR WHATSAPP
+--------------------------
+
+Esta entrega NO cambia los avisos. Siguen avisando de las cuotas de préstamos y
+servicios, como hasta ahora.
+
+Cuando quieras que avisen también de los documentos por vencer —"el SOAT de BJA-838 vence
+en 15 días"— me dices y lo agrego al mismo script que ya corre en el servidor. Es un
+cambio corto, pero conviene hacerlo DESPUÉS de completar las fechas de vencimiento: si se
+activa antes, no tendría nada que avisar y parecería que no funciona.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  356 comprobaciones de lógica   — todas pasan
+  326 en el navegador, 9 recorridos — todos pasan (uno nuevo, de documentos)
+
+Lo que más importa de lo nuevo:
+
+  · El estado de cada documento en los bordes: el día que vence todavía cuenta como
+    vigente, el día siguiente ya está vencido, a 30 días justos avisa y a 31 todavía no.
+    Es donde se equivocan estas cosas.
+  · La placa se normaliza antes de guardarla: "bja838", "BJA 838" y "BJA-838" son la
+    misma unidad. Si no, los papeles de una no aparecerían al buscar la otra.
+  · La base rechaza lo que no tiene sentido: un documento sin dueño, uno que sea de un
+    trabajador y de un vehículo a la vez, uno que venza antes de emitirse, un archivo
+    vacío, una placa repetida.
+  · Un PDF real se descarga íntegro, byte por byte igual al que se subió, y se sube uno
+    desde el formulario de la web para comprobar que queda con su fecha.
+  · La ficha del trabajador muestra sus documentos y avisa si tiene alguno vencido.
+  · El enlace de descarga no sirve sin sesión abierta: si alguien lo reenvía por correo,
+    del otro lado no se abre nada.
+  · El color del sombreado se midió con el cursor encima y sin él, para confirmar que ya
+    no se borra.

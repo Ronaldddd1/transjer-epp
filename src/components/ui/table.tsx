@@ -19,8 +19,25 @@ export function Td({ className, ...props }: TdHTMLAttributes<HTMLTableCellElemen
   return <td className={cn("border-b border-steel-100 px-3 py-3 align-middle text-ink-800 xl:px-4", className)} {...props} />;
 }
 
-export function Tr({ children, className }: { children: ReactNode; className?: string }) {
-  return <tr className={cn("hover:bg-steel-50/70 [&:last-child>td]:border-b-0", className)}>{children}</tr>;
+/**
+ * Una fila de la tabla.
+ *
+ * `tone` es para las filas que llevan color por su estado —vencida, por pagar—. Va aparte
+ * del className porque esas filas no deben usar el resaltado gris de siempre al pasar el
+ * cursor: lo tapaba por completo y el color solo se veía mientras el ratón estuviera en
+ * otro lado, que es justo cuando no se está mirando esa fila. Con `tone`, el color manda
+ * y el cursor solo lo oscurece un poco.
+ */
+export function Tr({ children, className, tone }: {
+  children: ReactNode;
+  className?: string;
+  tone?: string;
+}) {
+  return (
+    <tr className={cn(!tone && "hover:bg-steel-50/70", tone, "[&:last-child>td]:border-b-0", className)}>
+      {children}
+    </tr>
+  );
 }
 
 export function EmptyRow({ colSpan, title, hint, action }: { colSpan: number; title: string; hint?: string; action?: ReactNode }) {

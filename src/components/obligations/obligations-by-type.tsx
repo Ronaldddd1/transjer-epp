@@ -50,12 +50,14 @@ const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") :
  * está en camino, sin tener que leer fecha por fecha.
  */
 function fondoDeFila(o: ObligationRow, hoy: string) {
-  if (o.status !== "ACTIVA") return "bg-steel-50/60 [&>td]:text-steel-400";
-  if (o.overdueCount > 0) return "bg-red-50/60";
+  if (o.status !== "ACTIVA") return "bg-steel-50/60 [&>td]:text-steel-400 hover:bg-steel-100/60";
+  // El color se va solo cuando se paga: al quedar la cuota pagada ya no hay vencidas y el
+  // próximo vencimiento pasa al mes siguiente, así que la fila vuelve a blanco sola.
+  if (o.overdueCount > 0) return "bg-red-100/70 hover:bg-red-100";
   const venceEsteMes = !!o.nextDueDate && o.nextDueDate.slice(0, 7) === hoy.slice(0, 7);
   // Las de monto variable sin recibo también se resaltan: hay que conseguir el importe
   // antes de que se acabe el mes, y es justo lo que se suele olvidar.
-  return venceEsteMes || o.monthMissing > 0 ? "bg-brand-soft/50" : "";
+  return venceEsteMes || o.monthMissing > 0 ? "bg-brand-soft hover:bg-[#FFEBA8]" : "";
 }
 
 /**
@@ -173,7 +175,7 @@ function TablaPrestamos({ grupos, hoy, segmentar }: {
           <Fragment key={g.concepto}>
             {segmentar && <FilaConcepto grupo={g} columnas={9} />}
             {g.filas.map((o) => (
-          <Tr key={o.id} className={cn(fondoDeFila(o, hoy))}>
+          <Tr key={o.id} tone={fondoDeFila(o, hoy)}>
             <Nombre o={o} />
             <Td className="whitespace-nowrap text-right tabular text-steel-600">
               {o.principal ? formatMoney(o.principal, o.currency) : "—"}
@@ -226,7 +228,7 @@ function TablaPeriodicas({ grupos, hoy, segmentar }: {
           <Fragment key={g.concepto}>
             {segmentar && <FilaConcepto grupo={g} columnas={8} />}
             {g.filas.map((o) => (
-          <Tr key={o.id} className={cn(fondoDeFila(o, hoy))}>
+          <Tr key={o.id} tone={fondoDeFila(o, hoy)}>
             <Nombre o={o} />
             <Td className="hidden whitespace-nowrap text-center tabular text-steel-600 lg:table-cell">
               {o.billingDay ? `día ${o.billingDay}` : "—"}
@@ -301,7 +303,7 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
       {/* Qué significan los colores de las filas, para no tener que adivinarlo. */}
       <div className="-mt-3 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-steel-500">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block h-3 w-3 rounded-sm border border-red-300 bg-red-100" aria-hidden /> Ya venció
+          <span className="inline-block h-3 w-3 rounded-sm border border-red-300 bg-red-100/70" aria-hidden /> Ya venció
         </span>
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-3 w-3 rounded-sm border border-brand bg-brand-soft" aria-hidden /> Por pagar este mes

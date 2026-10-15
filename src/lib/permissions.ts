@@ -15,6 +15,7 @@ export const PERMISSIONS = [
   "invoices.mailbox",
   "obligations.view", "obligations.manage", "obligations.pay",
   "detractions.view", "detractions.manage",
+  "documents.view", "documents.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -25,6 +26,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "movements.view", "movements.create",
     "deliveries.view", "deliveries.create",
     "employees.view",
+    "documents.view",
   ],
   // Jefe de almacén: manda en todo el módulo de EPP, sin usuarios ni facturas.
   JEFE_ALMACEN: [
@@ -33,6 +35,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "deliveries.view", "deliveries.create", "deliveries.void",
     "employees.view", "employees.manage",
     "categories.manage",
+    "documents.view", "documents.manage",
     "reports.view",
   ],
   // Administración y Finanzas: gestiona las facturas de proveedores, no el almacén.
@@ -41,6 +44,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "suppliers.manage",
     "obligations.view", "obligations.manage", "obligations.pay",
     "detractions.view", "detractions.manage",
+    "documents.view",
     "reports.view",
   ],
   // Encargada de detracciones: solo deposita y da cuenta del 4 % al Banco de la Nación.
