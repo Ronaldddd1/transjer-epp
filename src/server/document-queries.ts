@@ -3,7 +3,7 @@ import { and, asc, desc, eq, ilike, isNotNull, or, sql, type SQL } from "drizzle
 import { db } from "@/db";
 import { documents, employees, users, vehicles } from "@/db/schema";
 import {
-  DOCUMENT_WARNING_DAYS, first, normalizePlate, type SearchParamsRecord,
+  DOCUMENT_WARNING_DAYS, documentStatus, first, normalizePlate, type SearchParamsRecord,
 } from "@/lib/utils";
 
 /**
@@ -205,6 +205,155 @@ export async function listVehicles(q?: string) {
 }
 
 export type VehicleRow = Awaited<ReturnType<typeof listVehicles>>[number];
+
+/**
+ * Los cuatro papeles que no pueden faltar en una unidad que circula.
+ *
+ * El orden es el de la tabla y el de la urgencia: sin SOAT la unidad no sale, sin revisión
+ * técnica tampoco, la habilitación MTC es la que pide el cliente y la tarjeta de propiedad
+ * es la que pide la policía.
+ */
+export const DOCUMENTOS_CLAVE = ["SOAT", "REVISION_TECNICA", "MTC", "TARJETA_PROPIEDAD"] as const;
+export type DocumentoClave = (typeof DOCUMENTOS_CLAVE)[number];
+
+/** Lo que la tabla muestra de cada papel: la fecha, si hay archivo, y a dónde llevar el botón. */
+export type PapelResumen = {
+  id: string;
+  expiresAt: string | null;
+  tieneArchivo: boolean;
+} | null;
+
+/**
+ * De un tipo de documento, el que vale: el que vence más tarde.
+ *
+ * Una unidad acumula SOAT de varios años y el que importa es el vigente. Mirar el último
+ * subido daría el equivocado en cuanto alguien escanea un papel viejo que faltaba.
+ */
+function papel(kind: DocumentoClave, laUnidad: SQL) {
+  return sql<PapelResumen>`(
+    select json_build_object(
+      'id', d.id,
+      'expiresAt', d.expires_at::text,
+      'tieneArchivo', d.filename is not null
+    )
+    from ${documents} d
+    where d.vehicle_id = ${laUnidad} and d.kind = ${kind}
+    order by d.expires_at desc nulls last, d.created_at desc
+    limit 1
+  )`;
+}
+
+/**
+ * La flota con sus papeles puestos en columnas, una fila por placa.
+ *
+ * Es la vista que se usa de verdad: lo que se pregunta no es "qué documentos hay" sino "a
+ * esta unidad le falta algo para salir hoy". Con los documentos en una lista había que
+ * abrir unidad por unidad para responder eso.
+ */
+export async function listFleet(f: { q?: string; estado?: string; soloActivos?: boolean; id?: string } = {}) {
+  const laUnidad = sql.raw('"vehicles"."id"');
+  const condiciones: SQL[] = [];
+  if (f.q) {
+    const like = `%${f.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    condiciones.push(or(
+      ilike(vehicles.plate, like),
+      ilike(vehicles.description, like),
+      ilike(vehicles.brand, like),
+      ilike(vehicles.model, like),
+      ilike(employees.firstName, like),
+      ilike(employees.lastName, like),
+    )!);
+  }
+  if (f.soloActivos) condiciones.push(eq(vehicles.active, true));
+  if (f.id) condiciones.push(eq(vehicles.id, f.id));
+
+  const filas = await db.select({
+    id: vehicles.id,
+    plate: vehicles.plate,
+    description: vehicles.description,
+    brand: vehicles.brand,
+    model: vehicles.model,
+    year: vehicles.year,
+    capacityTn: vehicles.capacityTn,
+    capacityM3: vehicles.capacityM3,
+    mtcCode: vehicles.mtcCode,
+    hasGps: vehicles.hasGps,
+    active: vehicles.active,
+    driverId: vehicles.driverId,
+    driverName: sql<string | null>`nullif(concat_ws(' ', ${employees.firstName}, ${employees.lastName}), '')`,
+    driverDni: employees.dni,
+    soat: papel("SOAT", laUnidad),
+    revisionTecnica: papel("REVISION_TECNICA", laUnidad),
+    mtc: papel("MTC", laUnidad),
+    tarjetaPropiedad: papel("TARJETA_PROPIEDAD", laUnidad),
+    documentos: sql<number>`(select count(*)::int from ${documents} d where d.vehicle_id = ${laUnidad})`,
+    vencidos: sql<number>`(select count(*)::int from ${documents} d
+      where d.vehicle_id = ${laUnidad} and d.expires_at is not null and d.expires_at < ${hoy})`,
+    /** Los papeles del conductor también cuentan: sin licencia vigente no maneja. */
+    conductorVencidos: sql<number>`(select count(*)::int from ${documents} d
+      where ${vehicles.driverId} is not null and d.employee_id = ${vehicles.driverId}
+        and d.kind in ('DNI', 'LICENCIA')
+        and d.expires_at is not null and d.expires_at < ${hoy})`,
+    licencia: sql<PapelResumen>`(
+      select json_build_object('id', d.id, 'expiresAt', d.expires_at::text, 'tieneArchivo', d.filename is not null)
+      from ${documents} d
+      where ${vehicles.driverId} is not null and d.employee_id = ${vehicles.driverId} and d.kind = 'LICENCIA'
+      order by d.expires_at desc nulls last, d.created_at desc limit 1
+    )`,
+    dniConductor: sql<PapelResumen>`(
+      select json_build_object('id', d.id, 'expiresAt', d.expires_at::text, 'tieneArchivo', d.filename is not null)
+      from ${documents} d
+      where ${vehicles.driverId} is not null and d.employee_id = ${vehicles.driverId} and d.kind = 'DNI'
+      order by d.expires_at desc nulls last, d.created_at desc limit 1
+    )`,
+  })
+    .from(vehicles)
+    .leftJoin(employees, eq(vehicles.driverId, employees.id))
+    .where(condiciones.length ? and(...condiciones) : undefined)
+    // Las de baja al final; el resto por placa, que es como se las nombra.
+    .orderBy(desc(vehicles.active), asc(vehicles.plate));
+
+  if (!f.estado) return filas;
+  return filas.filter((v) => estadoFlota(v) === f.estado);
+}
+
+export type FleetRow = Awaited<ReturnType<typeof listFleet>>[number];
+
+/**
+ * En qué situación está una unidad, mirando sus cuatro papeles clave y los del conductor.
+ *
+ * FALTA pesa igual que VENCIDO a propósito: un SOAT que nunca se cargó y un SOAT caducado
+ * dejan a la unidad en el mismo sitio si la paran en la carretera.
+ */
+export function estadoFlota(v: {
+  soat: PapelResumen; revisionTecnica: PapelResumen; mtc: PapelResumen; tarjetaPropiedad: PapelResumen;
+  licencia?: PapelResumen; driverId?: string | null;
+  vencidos: number; conductorVencidos: number; active: boolean;
+}): "BAJA" | "VENCIDO" | "FALTA" | "POR_VENCER" | "AL_DIA" {
+  if (!v.active) return "BAJA";
+
+  const claves = [v.soat, v.revisionTecnica, v.mtc, v.tarjetaPropiedad];
+  if (v.vencidos > 0 || v.conductorVencidos > 0) return "VENCIDO";
+  if (claves.some((p) => p === null)) return "FALTA";
+  if (claves.some((p) => documentStatus(p?.expiresAt ?? null) === "POR_VENCER")) return "POR_VENCER";
+  if (v.licencia && documentStatus(v.licencia.expiresAt) === "POR_VENCER") return "POR_VENCER";
+  return "AL_DIA";
+}
+
+/** Cuántas unidades hay en cada situación, para las pestañas de arriba. */
+export async function fleetCounts() {
+  const filas = await listFleet();
+  const cuenta = { total: filas.length, vencido: 0, falta: 0, porVencer: 0, alDia: 0, baja: 0 };
+  for (const v of filas) {
+    const e = estadoFlota(v);
+    if (e === "VENCIDO") cuenta.vencido++;
+    else if (e === "FALTA") cuenta.falta++;
+    else if (e === "POR_VENCER") cuenta.porVencer++;
+    else if (e === "AL_DIA") cuenta.alDia++;
+    else cuenta.baja++;
+  }
+  return cuenta;
+}
 
 export async function getVehicle(id: string) {
   const [fila] = await db.select().from(vehicles).where(eq(vehicles.id, id)).limit(1);

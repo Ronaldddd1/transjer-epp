@@ -86,13 +86,17 @@ export function DocumentTable({ rows, canManage, mostrarDuenio = false }: {
               <span className="flex items-start gap-2">
                 <FileText className="mt-0.5 h-4 w-4 shrink-0 text-steel-400" aria-hidden />
                 <span className="min-w-0">
-                  <Link
-                    href={`/api/documentos/${d.id}`}
-                    target="_blank"
-                    className="font-semibold hover:underline"
-                  >
-                    {DOCUMENT_KIND_LABEL[d.kind] ?? d.kind}
-                  </Link>
+                  {d.filename ? (
+                    <Link
+                      href={`/api/documentos/${d.id}`}
+                      target="_blank"
+                      className="font-semibold hover:underline"
+                    >
+                      {DOCUMENT_KIND_LABEL[d.kind] ?? d.kind}
+                    </Link>
+                  ) : (
+                    <span className="font-semibold">{DOCUMENT_KIND_LABEL[d.kind] ?? d.kind}</span>
+                  )}
                   {d.title && <p className="text-xs text-steel-500">{d.title}</p>}
                 </span>
               </span>
@@ -115,19 +119,22 @@ export function DocumentTable({ rows, canManage, mostrarDuenio = false }: {
             <Td><VencimientoBadge expiresAt={d.expiresAt} /></Td>
             <Td className="hidden text-right text-xs text-steel-500 lg:table-cell">
               <span className="flex items-center justify-end gap-1">
-                <Paperclip className="h-3 w-3" aria-hidden />
-                {formatFileSize(d.sizeBytes)}
+                {d.filename
+                  ? <><Paperclip className="h-3 w-3" aria-hidden />{formatFileSize(d.sizeBytes)}</>
+                  : <span className="text-amber-700">Falta subirlo</span>}
               </span>
             </Td>
             <Td>
               <div className="flex items-center justify-end gap-1">
-                <Link
-                  href={`/api/documentos/${d.id}`}
-                  target="_blank"
-                  className="rounded-md px-2.5 py-1.5 text-sm font-medium text-steel-600 hover:bg-steel-100 hover:text-ink"
-                >
-                  Ver
-                </Link>
+                {d.filename && (
+                  <Link
+                    href={`/api/documentos/${d.id}`}
+                    target="_blank"
+                    className="rounded-md px-2.5 py-1.5 text-sm font-medium text-steel-600 hover:bg-steel-100 hover:text-ink"
+                  >
+                    Ver
+                  </Link>
+                )}
                 {canManage && (
                   <>
                     <EditDocumentModal

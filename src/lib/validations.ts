@@ -391,9 +391,39 @@ export const documentSchema = z.object({
   }
 });
 
+/** Un decimal opcional: en blanco es "no se sabe", no cero. */
+const decimalOpcional = (label: string, max: number) =>
+  z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ invalid_type_error: `${label} debe ser un número` })
+      .positive(`${label} debe ser mayor que cero`)
+      .max(max, `${label} no puede pasar de ${max}`)
+      .optional(),
+  ).transform((v) => (v === undefined ? null : String(v)));
+
 export const vehicleSchema = z.object({
   plate: requiredText("La placa", 10),
   description: optionalText(160),
+  brand: optionalText(60),
+  model: optionalText(60),
+  // El rango va de par con el CHECK de la tabla: un año de cuatro cifras mal tecleado
+  // (2206) pasaría la validación del formulario y lo rechazaría la base de datos con un
+  // error que no dice nada.
+  year: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ invalid_type_error: "El año debe ser un número" })
+      .int("El año debe ser un número entero")
+      .min(1970, "El año debe ser 1970 o posterior")
+      .max(2100, "El año no puede pasar de 2100")
+      .optional(),
+  ).transform((v) => (v === undefined ? null : v)),
+  capacityTn: decimalOpcional("La capacidad en toneladas", 9999),
+  capacityM3: decimalOpcional("La capacidad en metros cúbicos", 99999),
+  mtcCode: optionalText(40),
+  hasGps: checkbox,
+  /** En blanco significa "sin conductor asignado", que es un estado legítimo. */
+  driverId: z.string().trim().uuid("Elige un conductor de la lista").optional()
+    .or(z.literal("")).transform((v) => (v ? v : null)),
   notes: optionalText(1000),
 });
 

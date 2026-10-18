@@ -17,9 +17,13 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 
   const file = await getDocumentFile(id);
   if (!file) return NextResponse.json({ error: "El documento no existe" }, { status: 404 });
+  // Hay documentos cargados solo con su fecha de vencimiento, sin el PDF todavía.
+  if (!file.storageDriver || !file.filename || !file.contentType) {
+    return NextResponse.json({ error: "Este documento todavía no tiene archivo cargado" }, { status: 404 });
+  }
 
   try {
-    const data = await readFile(file);
+    const data = await readFile({ ...file, storageDriver: file.storageDriver });
     // Los PDF y las fotos se abren en el navegador, que es lo que se quiere al revisar un
     // SOAT; cualquier otra cosa se descarga.
     const enPantalla = file.contentType.includes("pdf") || file.contentType.startsWith("image/");

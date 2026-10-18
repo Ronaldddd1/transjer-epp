@@ -1,0 +1,156 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Documentos por vehículo, conductor asignado y control de archivos ilegibles
+===========================================================================
+
+Cuatro cambios. Uno pide migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, agrega datos de ficha a los vehículos
+
+
+1. DOCUMENTOS AHORA ES LA FLOTA, UNIDAD POR UNIDAD
+---------------------------------------------------
+
+La pantalla de Documentos ya no es una lista de papeles sueltos: es una fila por placa,
+con los cuatro que no pueden faltar en columnas.
+
+    Unidad · SOAT · Revisión técnica · MTC · Tarjeta de propiedad · Conductor · Estado
+
+Cada fecha va con su color —rojo vencido, amarillo si vence dentro de 30 días— y al lado
+un botón que abre el PDF de ese documento. Lo que no está cargado dice FALTA en rojo, con
+el mismo peso que lo vencido: en un control en la carretera, un SOAT que nunca se escaneó
+y uno caducado dejan a la unidad en el mismo sitio.
+
+La columna ESTADO resume la unidad entera:
+
+    Puede salir      los cuatro papeles están y ninguno vence pronto
+    Por vencer       alguno vence dentro de 30 días
+    Falta un papel   alguno de los cuatro no está cargado
+    Vencido          algo está vencido, suyo o de su conductor
+    De baja          unidad vendida o fuera de la flota
+
+Arriba, las pestañas filtran por esas situaciones, y la pantalla abre directamente en lo
+que urge. Se busca por placa, marca, modelo o nombre del conductor.
+
+La lista plana de antes no desapareció: está en TODOS LOS DOCUMENTOS, arriba a la derecha,
+y sirve para lo otro que se pregunta —"¿dónde está tal papel?"— sin importar de quién sea.
+La dirección anterior (/documentos/vehiculos) sigue funcionando: lleva a la flota.
+
+
+2. CADA VEHÍCULO TIENE CONDUCTOR, Y SE VEN SUS PAPELES
+-------------------------------------------------------
+
+En la ficha de la unidad, con EDITAR LA UNIDAD, se elige el conductor de la lista de
+trabajadores activos. Una vez asignado:
+
+  · En la tabla de flota sale su nombre, y debajo su DNI y su licencia con la fecha.
+  · En la ficha de la unidad tiene su propio recuadro, con enlace al PDF de cada uno.
+  · Si su licencia está vencida, la UNIDAD aparece en rojo. No es un detalle: el camión
+    puede estar impecable, pero sin licencia vigente no sale igual.
+
+Un trabajador cesado no se puede asignar. Y la ficha del trabajador sigue mostrando sus
+documentos donde siempre: esto no los movió de sitio, los muestra también junto al camión.
+
+La ficha de la unidad ahora guarda además marca, modelo, año, capacidad en TN y en m³,
+código MTC y si tiene GPS. Eso es lo que estaba en el Excel de mantenimiento.
+
+
+3. NO SE PUEDE SUBIR UN ARCHIVO QUE DESPUÉS NO SE VA A PODER VER
+-----------------------------------------------------------------
+
+Antes de guardarlo, el sistema abre el archivo y lo revisa. Se rechaza, con el motivo en
+palabras y no con un "error de validación":
+
+  · Una foto cuyo lado más largo no llega a 900 píxeles.
+    → "La foto es muy chica (520×390 px) y no se va a poder leer. Tómala de nuevo más
+       cerca o escanéala..."
+  · Un archivo de menos de 8 KB, que es lo que pesa un escaneo en blanco o cortado.
+  · Un PDF que se cortó a mitad de la subida (le falta el cierre).
+  · Un PDF con contraseña, que desde el sistema no se podría abrir.
+  · Un PDF sin páginas legibles.
+  · Un archivo que por dentro no es lo que dice ser: el Word o la captura a los que
+    alguien les cambió la extensión a .pdf. Eso se guardaba igual de bien y reventaba
+    meses después, cuando hacía falta mostrar el papel.
+
+Lo que el sistema NO juzga: si la foto está movida, torcida o le falta un borde. Eso solo
+lo ve una persona, y rechazarlo por las malas haría perder documentos buenos. Lo que hace
+es cerrar la puerta a lo que con seguridad no se va a poder leer.
+
+El límite de peso sigue siendo el de antes y no cambió.
+
+
+4. LA FICHA DE LA FLOTA SE CARGA DEL EXCEL DE MANTENIMIENTO
+------------------------------------------------------------
+
+    npm run import:flota -- "C:\ruta\MANTENIMIENTO_TRANSJER.xlsx" --simular
+    npm run import:flota -- "C:\ruta\MANTENIMIENTO_TRANSJER.xlsx"
+
+Lee la hoja INFORMACIÓN GENERAL y completa, de cada placa: marca, modelo, año, TN, m³,
+código MTC y GPS. De las fechas de SOAT y revisión técnica crea o completa el documento,
+PARA QUE EL SISTEMA AVISE CUANDO VENZAN, aunque el PDF todavía no esté escaneado.
+
+Eso es lo importante de este punto: la fecha sin el papel ya sirve. Esperar a tener el PDF
+es justamente lo que hace que un SOAT se venza sin que nadie se entere. Esos documentos
+salen en la tabla con la fecha y la nota "falta el PDF", y cuando el papel aparezca se
+adjunta AL MISMO documento —con el lápiz, campo "Adjuntar el archivo"—, no como uno nuevo:
+dos SOAT para la misma unidad, uno con la fecha y otro con el papel, es la receta para que
+nadie sepa cuál es el bueno.
+
+Reglas del script, para que se pueda repetir sin miedo:
+
+  · Nunca escribe un blanco encima de un dato que ya está. Si la celda del Excel está
+    vacía y el sistema tiene el dato cargado a mano, se queda el del sistema.
+  · Si el sistema tiene una fecha POSTERIOR a la del Excel, la respeta y lo avisa: quiere
+    decir que el papel ya se renovó y el Excel está viejo.
+  · Lo que está debajo de "CAMIONES VENDIDOS" se carga igual, pero dado de baja. Sus
+    papeles se conservan: son el respaldo de lo que circuló.
+  · Una fecha imposible (31/02) se descarta y el resto de la fila se carga igual.
+  · Al terminar lista lo que quedó sin fecha, para completarlo desde la web.
+
+El conductor NO está en el Excel, así que esa parte se asigna desde la web, unidad por
+unidad. Es un rato de trabajo una sola vez.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  540 comprobaciones de lógica   — todas pasan
+  10 recorridos en el navegador  — todos pasan (400 verificaciones)
+
+De lo nuevo, lo que más importa:
+
+  · Un papel que falta deja la unidad igual de parada que uno vencido.
+  · Si se vence UNO de los cuatro papeles, la unidad entera deja de poder salir: no se
+    promedian fechas ni se mira solo el SOAT.
+  · La licencia vencida del conductor pone en rojo a su unidad.
+  · De cada tipo se muestra el que vence MÁS TARDE, no el último subido: una unidad
+    acumula SOAT de varios años y el que importa es el vigente.
+  · Una foto de 640×480, un PDF cortado, uno con contraseña y un Word renombrado a .pdf:
+    los cuatro se rechazan, y ninguno de los motivos nombra un campo técnico.
+  · Una foto de 900 px justos pasa; una de celular, también.
+  · El PDF adjuntado a un documento que solo tenía la fecha entra en ESE documento, sin
+    crear otro y sin perder la fecha.
+  · Un documento sin archivo no ofrece un enlace de descarga que lleve a un error.
+  · Un enlace de descarga reenviado por correo sigue sin servirle a nadie sin sesión.
+  · El Excel de prueba se leyó entero: 18 unidades, las vendidas dadas de baja, la fila
+    de "TOTAL" ignorada y las capacidades en su columna aunque se mueva el orden.
+
+
+PARA SUBIRLO A PRODUCCIÓN
+-------------------------
+
+Desde la carpeta del proyecto, en este orden:
+
+    npm install
+    npm run db:migrate          ← primero la base, después el código
+    git add -A
+    git commit -m "Documentos por vehículo, conductor asignado y control de archivos"
+    git push
+
+Vercel publica solo al recibir el push. Comprueba antes que .env NO aparezca en
+`git status --short`: esa es la única regla que no se puede saltar.
+
+Después del despliegue, lo primero: correr el import de la flota con --simular, mirar lo
+que propone, y recién entonces sin --simular.

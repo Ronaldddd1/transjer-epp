@@ -605,7 +605,10 @@ export function receptionDate(invoice: { receivedAt?: Date | string | null; crea
   return new Intl.DateTimeFormat("en-CA", { timeZone: TIMEZONE }).format(new Date(raw));
 }
 
-export function formatFileSize(bytes: number) {
+export function formatFileSize(bytes: number | null | undefined) {
+  // Un documento puede estar registrado solo con su fecha de vencimiento, sin el PDF
+  // todavía: así se avisa de la caducidad aunque el papel no esté escaneado.
+  if (bytes === null || bytes === undefined) return "Sin archivo";
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;

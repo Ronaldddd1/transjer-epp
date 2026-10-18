@@ -589,12 +589,31 @@ export const vehicles = pgTable("vehicles", {
   plate: varchar("plate", { length: 10 }).notNull().unique(),
   /** Marca y modelo, o como la llamen en operaciones. */
   description: varchar("description", { length: 160 }),
+  // --- La ficha de la unidad, como la lleva mantenimiento en su cuadro ---
+  brand: varchar("brand", { length: 60 }),
+  model: varchar("model", { length: 60 }),
+  year: integer("year"),
+  capacityTn: numeric("capacity_tn", { precision: 6, scale: 2 }),
+  capacityM3: numeric("capacity_m3", { precision: 7, scale: 2 }),
+  /** Número de la constancia de habilitación del MTC. */
+  mtcCode: varchar("mtc_code", { length: 40 }),
+  hasGps: boolean("has_gps").notNull().default(false),
+  /**
+   * El conductor asignado a la unidad.
+   *
+   * Se guarda aquí, y no en el trabajador, porque una unidad tiene un conductor a la vez
+   * y un conductor puede quedarse sin unidad. Al cesar el trabajador, la unidad queda sin
+   * conductor en vez de desaparecer.
+   */
+  driverId: uuid("driver_id").references(() => employees.id, { onDelete: "set null" }),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
   isDemo: boolean("is_demo").notNull().default(false),
   ...timestamps,
 }, (t) => [
   index("vehicles_active_idx").on(t.active),
+  index("vehicles_driver_idx").on(t.driverId),
+  check("vehicles_year_valid", sql`${t.year} is null or (${t.year} >= 1970 and ${t.year} <= 2100)`),
 ]);
 
 /**
@@ -620,10 +639,17 @@ export const documents = pgTable("documents", {
   /** Sin fecha, el documento no caduca: una tarjeta de propiedad, por ejemplo. */
   expiresAt: date("expires_at"),
   notes: text("notes"),
-  filename: varchar("filename", { length: 250 }).notNull(),
-  contentType: varchar("content_type", { length: 120 }).notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  storageDriver: varchar("storage_driver", { length: 20 }).notNull(),
+  /**
+   * El archivo, cuando lo hay.
+   *
+   * Un documento puede existir sin PDF: se sabe que el SOAT vence el 6 de mayo aunque
+   * el escaneo todavía no esté cargado, y esa fecha es la que hace falta para avisar.
+   * Sin esto, completar los vencimientos obligaría a tener primero todos los archivos.
+   */
+  filename: varchar("filename", { length: 250 }),
+  contentType: varchar("content_type", { length: 120 }),
+  sizeBytes: integer("size_bytes"),
+  storageDriver: varchar("storage_driver", { length: 20 }),
   storageKey: varchar("storage_key", { length: 500 }),
   content: bytea("content"),
   uploadedBy: uuid("uploaded_by").references(() => users.id),
@@ -634,7 +660,10 @@ export const documents = pgTable("documents", {
   index("documents_vehicle_idx").on(t.vehicleId),
   index("documents_expires_idx").on(t.expiresAt),
   check("documents_owner", sql`(${t.employeeId} is not null) <> (${t.vehicleId} is not null)`),
-  check("documents_size_positive", sql`${t.sizeBytes} > 0`),
+  check("documents_size_positive", sql`${t.sizeBytes} is null or ${t.sizeBytes} > 0`),
+  // O está el archivo entero, o no está: medio archivo no se puede descargar.
+  check("documents_archivo_completo", sql`(${t.filename} is null) = (${t.storageDriver} is null)
+    and (${t.filename} is null) = (${t.sizeBytes} is null)`),
   check("documents_fechas_coherentes", sql`${t.expiresAt} is null or ${t.issuedAt} is null or ${t.expiresAt} >= ${t.issuedAt}`),
 ]);
 

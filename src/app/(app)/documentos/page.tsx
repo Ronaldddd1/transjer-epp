@@ -1,67 +1,74 @@
-import { AlertTriangle, Car } from "lucide-react";
+import { AlertTriangle, FileText, UserRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { DocumentFormModal } from "@/components/documents/document-actions";
-import { DocumentTable, LeyendaVencimientos } from "@/components/documents/document-table";
+import { DocumentFormModal, VehicleFormModal } from "@/components/documents/document-actions";
+import { FleetTable, LeyendaFlota } from "@/components/documents/fleet-table";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabLinks } from "@/components/ui/tab-links";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { first, type SearchParams } from "@/lib/utils";
 import {
-  DOCUMENT_KIND_LABEL, DOCUMENT_WARNING_DAYS, EMPLOYEE_DOCUMENT_KINDS, first,
-  VEHICLE_DOCUMENT_KINDS, type SearchParams,
-} from "@/lib/utils";
-import {
-  documentCounts, employeeOptions, listDocuments, readDocumentFilters, vehicleOptions,
+  documentCounts, employeeOptions, fleetCounts, listFleet, vehicleOptions,
 } from "@/server/document-queries";
 
 export const metadata: Metadata = { title: "Documentos" };
 
 /**
- * El archivo de documentos de trabajadores y vehículos.
+ * El archivo de documentos, ordenado por unidad.
  *
- * Entra directo por lo que está vencido o por vencer: de eso se trata tener esto en el
- * sistema en vez de en una carpeta compartida. Si no hay nada urgente, muestra todo.
+ * Una lista de papeles sueltos no responde la pregunta que se hace todos los días: ¿esta
+ * unidad puede salir hoy? Por eso la pantalla es una fila por placa con el SOAT, la
+ * revisión técnica, la habilitación MTC y la tarjeta de propiedad en columnas, el botón al
+ * PDF al lado de cada fecha, y el conductor asignado con sus propios papeles.
+ *
+ * La lista plana sigue existiendo en /documentos/todos, para cuando lo que se busca es un
+ * documento concreto y no una unidad.
  */
 export default async function DocumentsPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("documents.view");
   const sp = await searchParams;
   const canManage = can(user.role, "documents.manage");
 
-  const filtros = readDocumentFilters(sp);
-  const cuentas = await documentCounts();
+  const cuentas = await fleetCounts();
 
-  // Sin elegir pestaña se abre en lo que urge, si hay algo. Con todo en orden no tiene
-  // sentido abrir en una lista vacía, así que ahí se muestra todo.
-  const hayUrgente = cuentas.vencidos > 0 || cuentas.porVencer > 0;
-  const porDefecto = !sp.estado && !filtros.q && hayUrgente
-    ? (cuentas.vencidos > 0 ? "VENCIDO" : "POR_VENCER")
+  // Se abre en lo que urge, si hay algo. Con la flota en orden, abrir en una lista vacía
+  // no diría nada, así que ahí se muestra todo.
+  const hayUrgente = cuentas.vencido > 0 || cuentas.falta > 0;
+  const porDefecto = !sp.estado && !first(sp.q) && hayUrgente
+    ? (cuentas.vencido > 0 ? "VENCIDO" : "FALTA")
     : "";
   const estado = first(sp.estado) ?? porDefecto;
-  const f = { ...filtros, estado: estado || undefined };
+  const q = first(sp.q)?.trim() || undefined;
 
-  const [rows, vehiculos, trabajadores] = await Promise.all([
-    listDocuments(f),
+  const [rows, docs, vehiculos, trabajadores] = await Promise.all([
+    listFleet({ q, estado: estado || undefined }),
+    documentCounts(),
     canManage ? vehicleOptions() : Promise.resolve([]),
     canManage ? employeeOptions() : Promise.resolve([]),
   ]);
-
-  const tipos = { ...VEHICLE_DOCUMENT_KINDS, ...EMPLOYEE_DOCUMENT_KINDS };
 
   return (
     <>
       <PageHeader
         title="Documentos"
-        description="Los papeles de los trabajadores y de la flota, con su fecha de vencimiento."
+        description="La flota unidad por unidad, con sus papeles y su conductor."
         actions={
           <>
             <Link
-              href="/documentos/vehiculos"
+              href="/documentos/todos"
               className="inline-flex items-center gap-2 rounded-md border border-steel-200 bg-white px-3.5 py-2 text-sm font-medium text-steel-600 hover:border-steel-400 hover:text-ink"
             >
-              <Car className="h-4 w-4" aria-hidden /> Vehículos
+              <FileText className="h-4 w-4" aria-hidden /> Todos los documentos
             </Link>
+            <Link
+              href="/documentos/todos?de=TRABAJADOR"
+              className="inline-flex items-center gap-2 rounded-md border border-steel-200 bg-white px-3.5 py-2 text-sm font-medium text-steel-600 hover:border-steel-400 hover:text-ink"
+            >
+              <UserRound className="h-4 w-4" aria-hidden /> Trabajadores
+            </Link>
+            {canManage && <VehicleFormModal />}
             {canManage && (
               <DocumentFormModal
                 vehiculos={vehiculos.map((v) => ({ id: v.id, etiqueta: v.description ? `${v.plate} — ${v.description}` : v.plate }))}
@@ -72,15 +79,15 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
         }
       />
 
-      {cuentas.vencidos > 0 && (
+      {cuentas.vencido > 0 && (
         <Link
           href="/documentos?estado=VENCIDO"
           className="mb-4 flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400"
         >
           <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden />
           <span>
-            <strong>{cuentas.vencidos} documento(s)</strong> están vencidos. Una unidad con el SOAT o
-            la revisión técnica vencida no debería estar circulando.
+            <strong>{cuentas.vencido} unidad(es)</strong> tienen un papel vencido, suyo o de su
+            conductor. Circular así es una multa y un seguro que no responde.
           </span>
         </Link>
       )}
@@ -92,43 +99,36 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
         params={sp}
         className="mb-3"
         tabs={[
-          { value: "VENCIDO", label: "Vencidos", count: cuentas.vencidos },
-          { value: "POR_VENCER", label: `Vencen en ${DOCUMENT_WARNING_DAYS} días`, count: cuentas.porVencer },
-          { value: "VIGENTE", label: "Vigentes", count: cuentas.vigentes },
-          { value: "", label: "Todos", count: cuentas.total },
+          { value: "VENCIDO", label: "Con algo vencido", count: cuentas.vencido },
+          { value: "FALTA", label: "Falta un papel", count: cuentas.falta },
+          { value: "POR_VENCER", label: "Vencen en 30 días", count: cuentas.porVencer },
+          { value: "AL_DIA", label: "Pueden salir", count: cuentas.alDia },
+          { value: "", label: "Toda la flota", count: cuentas.total },
         ]}
       />
 
-      <FilterBar
-        searchPlaceholder="Buscar por placa, trabajador, DNI o nombre del archivo"
-        filters={[
-          { type: "select", name: "de", label: "De", allLabel: "Todos", options: [
-            { value: "VEHICULO", label: "Vehículos" },
-            { value: "TRABAJADOR", label: "Trabajadores" },
-          ] },
-          { type: "select", name: "tipo", label: "Tipo de documento", allLabel: "Todos",
-            options: Object.entries(tipos).map(([value, label]) => ({ value, label })) },
-        ]}
-      />
+      <FilterBar searchPlaceholder="Buscar por placa, marca, modelo o conductor" filters={[]} />
 
-      <LeyendaVencimientos />
-      <DocumentTable rows={rows} canManage={canManage} mostrarDuenio />
+      <LeyendaFlota />
+      <FleetTable rows={rows} />
 
       {rows.length === 0 && cuentas.total > 0 && (
         <p className="mt-3 text-sm text-steel-500">
-          No hay documentos con esos filtros.{" "}
-          <Link href="/documentos?estado=" className="underline">Ver todos</Link>
+          Ninguna unidad en esa situación.{" "}
+          <Link href="/documentos?estado=" className="underline">Ver toda la flota</Link>
         </p>
       )}
-      {cuentas.sinFecha > 0 && (
-        <p className="mt-3 text-sm text-steel-500">
-          {cuentas.sinFecha} documento(s) no tienen fecha de vencimiento. Si alguno caduca,
-          nadie se va a enterar: conviene completarla.{" "}
-          <Link href="/documentos?estado=SIN_FECHA" className="underline">Verlos</Link>
-        </p>
-      )}
-      <p className="mt-3 text-xs text-steel-500">
-        Tipos registrados: {Object.values(DOCUMENT_KIND_LABEL).slice(0, 4).join(", ")} y más.
+
+      <p className="mt-3 text-sm text-steel-500">
+        {docs.total} documento(s) guardados en total
+        {docs.sinFecha > 0 && (
+          <>
+            {", "}{docs.sinFecha} sin fecha de vencimiento: si alguno caduca, nadie se va a
+            enterar.{" "}
+            <Link href="/documentos/todos?estado=SIN_FECHA" className="underline">Verlos</Link>
+          </>
+        )}
+        {docs.sinFecha === 0 && "."}
       </p>
     </>
   );
