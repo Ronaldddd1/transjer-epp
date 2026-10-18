@@ -9,10 +9,11 @@
  *   npx tsx --conditions=react-server tests/totales.test.ts
  */
 import "dotenv/config";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
 import { obligationInstallments, obligations, supplierInvoices, suppliers } from "../src/db/schema";
-import { netoAPagar, todayLima } from "../src/lib/utils";
+import { netoAPagar, saldoAPagar, todayLima } from "../src/lib/utils";
+import { detractionFields } from "../src/server/invoice-service";
 import { listObligations } from "../src/server/obligation-queries";
 import { listSuppliers, supplierTotals } from "../src/server/invoice-queries";
 
@@ -72,6 +73,16 @@ async function main() {
   check("sin dólares de por medio, el total en dólares es cero",
     fila?.pendingUsd === "0" || Number(fila?.pendingUsd) === 0, fila?.pendingUsd);
 
+  // Con un adelanto entregado, lo que se le debe baja: esa parte ya la recibió.
+  await db.update(supplierInvoices).set({ advances: "600.00" })
+    .where(and(eq(supplierInvoices.series, "TT01"), eq(supplierInvoices.number, `${SELLO}1`)));
+  const conAdelanto = await supplierTotals({ q: `TOTALES ${SELLO}` });
+  check("el adelanto baja lo que se le debe", conAdelanto.pendingPen === "533.00", conAdelanto.pendingPen);
+  check("pero lo pagado no cambia: el adelanto también se le pagó",
+    conAdelanto.paidPen === "2266.00", conAdelanto.paidPen);
+  await db.update(supplierInvoices).set({ advances: null })
+    .where(and(eq(supplierInvoices.series, "TT01"), eq(supplierInvoices.number, `${SELLO}1`)));
+
   // El neto que muestra la pantalla sale de la misma cuenta.
   check("el neto a pagar coincide con lo que muestra la factura",
     netoAPagar("1180.00", "47.00") === "1133.00", netoAPagar("1180.00", "47.00"));
@@ -90,6 +101,39 @@ async function main() {
 
   const dentro = await supplierTotals({ q: `TOTALES ${SELLO}`, from: `${MES}-01`, to: `${MES}-28` });
   check("y el rango que las contiene las trae todas", dentro.facturas === 2, dentro);
+
+  // ---------- El adelanto se descuenta del pago ----------
+  // Un adelanto es plata que el proveedor ya recibió: pagarle el neto completo sería
+  // pagarle dos veces la misma parte.
+  check("sin adelanto, el saldo es el neto",
+    saldoAPagar("1180.00", "47.00", null) === "1133.00", saldoAPagar("1180.00", "47.00", null));
+  check("con adelanto, el saldo lo descuenta",
+    saldoAPagar("1180.00", "47.00", "500.00") === "633.00", saldoAPagar("1180.00", "47.00", "500.00"));
+  check("un adelanto que cubre todo deja saldo cero, no negativo",
+    saldoAPagar("1180.00", "47.00", "2000.00") === "0.00", saldoAPagar("1180.00", "47.00", "2000.00"));
+  check("sin detracción ni adelanto, el saldo es el total",
+    saldoAPagar("500.00", null, null) === "500.00", saldoAPagar("500.00", null, null));
+
+  // ---------- La detracción es solo del transporte ----------
+  const flete = detractionFields("5000.00", "PEN", "TRANSPORTE");
+  check("un flete sobre el umbral se detrae",
+    flete.detractionStatus === "PENDIENTE" && Number(flete.detractionAmount) === 200, flete);
+
+  const servicio = detractionFields("5000.00", "PEN", "SERVICIO");
+  check("el mismo importe, siendo servicio, no se detrae",
+    servicio.detractionStatus === "NO_APLICA" && Number(servicio.detractionAmount) === 0, servicio);
+
+  // El umbral de SUNAT son S/ 400: por debajo no se deposita nada.
+  const chico = detractionFields("400.00", "PEN", "TRANSPORTE");
+  check("un flete por debajo del umbral tampoco se detrae",
+    chico.detractionStatus === "NO_APLICA", chico);
+
+  const dolares = detractionFields("5000.00", "USD", "TRANSPORTE");
+  check("en dólares se sigue tratando a mano", dolares.detractionStatus === "NO_APLICA", dolares);
+
+  const sinClasificar = detractionFields("5000.00", "PEN", null);
+  check("sin clasificar se calcula como antes, para no perder las viejas",
+    sinClasificar.detractionStatus === "PENDIENTE", sinClasificar);
 
   // ---------- El total del mes de una obligación ----------
   // Una cochera de 300 al mes: dos cuotas en el mes, una pagada y otra no. Lo pendiente

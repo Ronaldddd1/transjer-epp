@@ -83,10 +83,20 @@ export async function assertNoDuplicate(tx: Tx | typeof db, input: Pick<InvoiceI
 
 /**
  * Valores de detracción que corresponden a un importe, listos para guardar.
- * Una operación por debajo del umbral queda en "No aplica" con monto cero, que es como
- * figuraba en el control en Excel.
+ *
+ * La detracción es del servicio de TRANSPORTE de carga: una factura de servicio no se
+ * detrae, así que queda en "No aplica" con monto cero, igual que una por debajo del
+ * umbral o en dólares. Mientras no se sepa de qué clase es (las anteriores a este
+ * cambio), se calcula como antes y se corrige al clasificarla.
  */
-export function detractionFields(total: string | number, currency = "PEN") {
+export function detractionFields(
+  total: string | number,
+  currency = "PEN",
+  serviceType?: InvoiceServiceTypeKey | null,
+) {
+  if (serviceType === "SERVICIO") {
+    return { detractionAmount: "0.00", detractionStatus: "NO_APLICA" as const };
+  }
   const d = detractionFor(total, DETRACTION_RATE, currency);
   return {
     detractionAmount: d.amount.toFixed(2),
@@ -176,7 +186,7 @@ export async function insertInvoice(
     advances: input.advances ?? null,
     // La detracción se calcula sola a partir del importe: 4 % del total con IGV, redondeado
     // al sol más próximo, y "no aplica" cuando la operación no supera los S/ 400.
-    ...detractionFields(input.total, input.currency),
+    ...detractionFields(input.total, input.currency, input.serviceType),
     createdBy: user?.id ?? null,
     isDemo: extra.isDemo ?? false,
   }).returning();

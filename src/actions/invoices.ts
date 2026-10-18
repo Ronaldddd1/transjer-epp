@@ -128,11 +128,14 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Act
       // Si el importe cambió, la detracción se recalcula. Pero una ya depositada no se
       // toca: el dinero está en el Banco de la Nación y reescribir la cifra haría que el
       // sistema dejara de cuadrar con la constancia.
-      const recalcular = before.detractionStatus !== "PAGADA" && data.total !== before.total;
+      // También se recalcula al cambiar de transporte a servicio: un servicio no lleva
+      // detracción, y dejar la vieja sería reclamar un depósito que no corresponde.
+      const recalcular = before.detractionStatus !== "PAGADA"
+        && (data.total !== before.total || data.serviceType !== before.serviceType);
       const [row] = await tx.update(supplierInvoices)
         .set({
           ...data,
-          ...(recalcular ? detractionFields(data.total, data.currency) : {}),
+          ...(recalcular ? detractionFields(data.total, data.currency, data.serviceType) : {}),
           ...(receivedDate ? { receivedAt: limaDayStart(receivedDate) } : {}),
           payDueDate: computePayDueDate({
             paymentTerm: data.paymentTerm,

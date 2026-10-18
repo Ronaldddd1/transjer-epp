@@ -7,7 +7,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
-import { formatMoney, todayLima } from "@/lib/utils";
+import { formatMoney, saldoAPagar, todayLima } from "@/lib/utils";
 
 export type InvoiceRef = {
   id: string;
@@ -16,6 +16,10 @@ export type InvoiceRef = {
   currency: string;
   total: string;
   supplierName: string;
+  /** La detracción va al Banco de la Nación, no al proveedor. */
+  detractionAmount?: string | null;
+  /** Lo que ya se le adelantó al proveedor a cuenta de esta factura. */
+  advances?: string | null;
 };
 
 const docLabel = (i: InvoiceRef) => `${i.series}-${i.number}`;
@@ -76,11 +80,30 @@ export function PayInvoiceModal({ invoice, variant = "primary", compact = false 
     >
       {({ errors }) => (
         <>
+          {/* La cuenta hecha, para no rehacerla a mano en cada pago: del total se baja la
+              detracción —que va al Banco de la Nación— y lo que ya se le adelantó al
+              proveedor. Lo de abajo es lo que se transfiere hoy. */}
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-steel-200 bg-steel-50 p-3 text-sm">
             <dt className="text-steel-500">Comprobante</dt><dd className="font-medium">{docLabel(invoice)}</dd>
             <dt className="text-steel-500">Proveedor</dt><dd className="font-medium">{invoice.supplierName}</dd>
-            <dt className="text-steel-500">Importe</dt>
-            <dd className="font-display text-base font-bold">{formatMoney(invoice.total, invoice.currency)}</dd>
+            <dt className="text-steel-500">Total</dt>
+            <dd className="font-medium tabular">{formatMoney(invoice.total, invoice.currency)}</dd>
+            {Number(invoice.detractionAmount ?? 0) > 0 && (
+              <>
+                <dt className="text-steel-500">Detracción</dt>
+                <dd className="tabular text-steel-600">− {formatMoney(invoice.detractionAmount, invoice.currency)}</dd>
+              </>
+            )}
+            {Number(invoice.advances ?? 0) > 0 && (
+              <>
+                <dt className="text-steel-500">Adelantos</dt>
+                <dd className="tabular text-steel-600">− {formatMoney(invoice.advances, invoice.currency)}</dd>
+              </>
+            )}
+            <dt className="border-t border-steel-200 pt-1.5 font-medium text-ink">A transferir</dt>
+            <dd className="border-t border-steel-200 pt-1.5 font-display text-base font-bold">
+              {formatMoney(saldoAPagar(invoice.total, invoice.detractionAmount, invoice.advances), invoice.currency)}
+            </dd>
           </dl>
           <Field label="Fecha de pago" name="paidAt" required error={errors.paidAt}>
             <DateInput name="paidAt" defaultValue={todayLima()} max={todayLima()} required invalid={!!errors.paidAt} />

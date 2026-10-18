@@ -196,6 +196,12 @@ export const supplierSchema = z.object({
 export const invoiceSchema = z.object({
   supplierId: z.string().uuid("Selecciona un proveedor"),
   docType: z.enum(["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"]),
+  /**
+   * Transporte o servicio. Decide dos cosas: el plazo de pago y si lleva detracción,
+   * que solo se deposita por el servicio de transporte de carga.
+   */
+  serviceType: z.enum(["TRANSPORTE", "SERVICIO"]).optional().or(z.literal(""))
+    .transform((v) => (v ? v : null)),
   series: requiredText("La serie", 8).transform((v) => v.toUpperCase()),
   number: requiredText("El número", 12).transform((v) => v.replace(/^0+(?=\d)/, "")),
   issueDate: ymd,

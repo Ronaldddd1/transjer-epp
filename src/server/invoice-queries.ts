@@ -282,7 +282,10 @@ function facturasDelProveedor(f: SupplierFilters, columna = elProveedor) {
   return sql.join(condiciones, sql` and `);
 }
 
+/** Lo que se le transfiere al proveedor: sin la detracción, que va al banco. */
 const neto = sql`(i.total - coalesce(i.detraction_amount, 0))`;
+/** Y lo que todavía falta transferirle: además, sin lo que ya se le adelantó. */
+const saldo = sql`greatest(i.total - coalesce(i.detraction_amount, 0) - coalesce(i.advances, 0), 0)`;
 
 export async function listSuppliers(opts: SupplierFilters = {}, limit = 20, offset = 0) {
   const where = and(
@@ -292,7 +295,7 @@ export async function listSuppliers(opts: SupplierFilters = {}, limit = 20, offs
   const suyas = facturasDelProveedor(opts);
   // Cada moneda por su lado: sumar soles con dólares daría un número que no es plata.
   const importe = (estado: "PENDIENTE" | "PAGADA", moneda: "PEN" | "USD") => sql<string>`(
-    select coalesce(sum(${neto}), 0)::text from ${supplierInvoices} i
+    select coalesce(sum(${estado === "PAGADA" ? neto : saldo}), 0)::text from ${supplierInvoices} i
     where ${suyas} and i.currency = ${moneda}
       and ${estado === "PAGADA" ? sql`i.status = 'PAGADA'` : sql`i.status in ('PENDIENTE','OBSERVADA')`})`;
   const [rows, [totals]] = await Promise.all([
@@ -336,10 +339,15 @@ export async function supplierTotals(f: SupplierFilters = {}) {
     condiciones.push(sql`(${ilike(suppliers.businessName, like(f.q))} or ${ilike(suppliers.ruc, like(f.q))})`);
   }
 
+  // Lo pendiente descuenta además los adelantos ya entregados; lo pagado no, porque ese
+  // adelanto también se le pagó a él.
   const importe = (estado: "PENDIENTE" | "PAGADA", moneda: "PEN" | "USD") => sql<string>`coalesce(sum(
     case when ${supplierInvoices.currency} = ${moneda}
       and ${estado === "PAGADA" ? sql`${supplierInvoices.status} = 'PAGADA'` : sql`${supplierInvoices.status} in ('PENDIENTE','OBSERVADA')`}
-    then (${supplierInvoices.total} - coalesce(${supplierInvoices.detractionAmount}, 0)) else 0 end), 0)::text`;
+    then ${estado === "PAGADA"
+      ? sql`(${supplierInvoices.total} - coalesce(${supplierInvoices.detractionAmount}, 0))`
+      : sql`greatest(${supplierInvoices.total} - coalesce(${supplierInvoices.detractionAmount}, 0) - coalesce(${supplierInvoices.advances}, 0), 0)`}
+    else 0 end), 0)::text`;
 
   const [fila] = await db.select({
     facturas: sql<number>`count(*)::int`,

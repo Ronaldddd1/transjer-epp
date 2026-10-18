@@ -13,7 +13,7 @@ import { can } from "@/lib/permissions";
 import {
   ATTACHMENT_KIND_LABEL, cn, formatDate, formatDateTime, formatFileSize, formatMoney,
   DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL,
-  invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL,
+  invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL, saldoAPagar,
 } from "@/lib/utils";
 import { getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -64,6 +64,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     || !!(invoice.plate || invoice.clientName || invoice.originCity || invoice.destinationCity);
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
   const ref = {
+    detractionAmount: invoice.detractionAmount, advances: invoice.advances,
     id: invoice.id, series: invoice.series, number: invoice.number,
     currency: invoice.currency, total: invoice.total, supplierName: invoice.supplierName,
   };
@@ -82,7 +83,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
           <>
             {canPay && editable && <PayInvoiceModal invoice={ref} />}
             {canManage && editable && <InvoiceFormModal suppliers={suppliers} invoice={{
-              id: invoice.id, supplierId: invoice.supplierId, docType: invoice.docType, series: invoice.series,
+              id: invoice.id, supplierId: invoice.supplierId, docType: invoice.docType,
+              serviceType: invoice.serviceType, series: invoice.series,
               number: invoice.number, issueDate: invoice.issueDate, dueDate: invoice.dueDate, serviceDate: invoice.serviceDate,
               currency: invoice.currency, subtotal: invoice.subtotal, igv: invoice.igv, total: invoice.total,
               description: invoice.description, grtNumber: invoice.grtNumber, notes: invoice.notes,
@@ -151,11 +153,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               <Dato label="Total"><strong>{formatMoney(invoice.total, invoice.currency)}</strong></Dato>
               {/* Lo que de verdad sale hacia el proveedor: la detracción va al Banco de
                   la Nación, así que el total nunca es lo que se le transfiere. */}
-              <Dato label="A pagar al proveedor">
-                <strong>{formatMoney(netoAPagar(invoice.total, invoice.detractionAmount), invoice.currency)}</strong>
+              <Dato label="Neto sin detracción">
+                {formatMoney(netoAPagar(invoice.total, invoice.detractionAmount), invoice.currency)}
               </Dato>
               <Dato label="Adelantos entregados">
                 {Number(invoice.advances ?? 0) > 0 ? formatMoney(invoice.advances, invoice.currency) : "—"}
+              </Dato>
+              {/* Lo que queda por transferirle: el neto menos lo ya adelantado. */}
+              <Dato label="Saldo a transferir">
+                <strong>{formatMoney(saldoAPagar(invoice.total, invoice.detractionAmount, invoice.advances), invoice.currency)}</strong>
               </Dato>
               <Dato label="Guía del transportista">{invoice.grtNumber ?? "—"}</Dato>
               <Dato label="Guía del remitente">{invoice.dispatchNote ?? "—"}</Dato>

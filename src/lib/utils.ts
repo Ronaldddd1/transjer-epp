@@ -366,6 +366,24 @@ export function netoAPagar(total: string | number | null | undefined, detraccion
   return (neto > 0 ? neto : 0).toFixed(2);
 }
 
+/**
+ * Lo que se transfiere el día del pago: el neto menos lo ya adelantado.
+ *
+ * Un adelanto es plata que el proveedor ya recibió, así que pagarle el neto completo
+ * sería pagarle dos veces la misma parte. Antes esa resta se hacía a mano factura por
+ * factura.
+ */
+export function saldoAPagar(
+  total: string | number | null | undefined,
+  detraccion: string | number | null | undefined,
+  adelantos: string | number | null | undefined,
+): string {
+  const neto = Number(netoAPagar(total, detraccion));
+  const a = Number(adelantos ?? 0);
+  const saldo = neto - (Number.isFinite(a) ? a : 0);
+  return (saldo > 0 ? saldo : 0).toFixed(2);
+}
+
 /** Número completo del comprobante: F001-2589 */
 export function invoiceNumber(series: string, number: string) {
   return `${series}-${number}`;

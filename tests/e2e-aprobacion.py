@@ -36,7 +36,10 @@ def psql(q):
 
 
 def limpiar():
-    ejecutar(f"delete from invoice_emails where message_id like 'e2e-{SELLO}%'")
+    ejecutar(f"delete from invoice_emails where message_id like 'e2e-%'")
+    # Las facturas de la serie de prueba, de esta corrida y de cualquier otra anterior
+    # que se haya cortado a medias.
+    ejecutar(f"delete from supplier_invoices where series = '{SERIE}'")
     ejecutar(f"delete from supplier_invoices where supplier_id in (select id from suppliers where ruc = '{RUC}')")
     ejecutar(f"delete from suppliers where ruc = '{RUC}'")
 
@@ -127,11 +130,18 @@ with sync_playwright() as p:
     page.wait_for_timeout(600)
 
     # --- Aceptar: recién aquí nace la factura ---
-    antes = int(psql(f"select count(*) from supplier_invoices where series = '{SERIE}'"))
+    antes = int(psql(f"select count(*) from supplier_invoices where series = '{SERIE}' and number like '{SELLO}%'"))
     check("antes de aceptar no hay ninguna factura registrada", antes == 0, antes)
 
     fila.get_by_role("button", name="Aceptar").click()
     page.wait_for_timeout(900)
+    # Se acepta como servicio aunque el concepto hable de un flete: lo decide la persona,
+    # no el texto, y de paso se comprueba que un servicio no lleve detracción.
+    page.get_by_role("dialog").locator("select[name=serviceType]").select_option("SERVICIO")
+    page.wait_for_timeout(400)
+    check("al elegir servicio el plazo pasa a 1 día",
+          page.get_by_role("dialog").locator("input[name=termDays]").input_value() == "1",
+          page.get_by_role("dialog").locator("input[name=termDays]").input_value())
     page.get_by_role("button", name="Aceptar y registrar").click()
     page.wait_for_timeout(2600)
 
@@ -183,10 +193,30 @@ with sync_playwright() as p:
     page.wait_for_timeout(1600)
     fila_f = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
     texto_f = fila_f.inner_text()
-    check("la tabla de facturas muestra el cliente y el destino",
-          "TIENDAS PERUANAS SA" in texto_f and "LOCAL" in texto_f, texto_f)
+    check("la tabla de facturas muestra el cliente y la ruta completa",
+          "TIENDAS PERUANAS SA" in texto_f and "LIMA → LOCAL" in texto_f, texto_f)
     check("y el importe a pagar sale sin la detracción",
           "1,133.00" in texto_f or "1,180.00" in texto_f, texto_f)
+
+    # Un adelanto entregado se descuenta solo de lo que queda por transferir.
+    ejecutar(f"update supplier_invoices set advances = 400 where series = '{SERIE}' and number = '{SELLO}3'")
+    page.reload(); page.wait_for_timeout(1800)
+    fila_ad = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
+    texto_ad = fila_ad.inner_text()
+    check("el adelanto aparece en su columna", "400.00" in texto_ad, texto_ad)
+    check("y el saldo baja lo adelantado", "733.00" in texto_ad, texto_ad)
+
+    fila_ad.get_by_role("button", name="Registrar pago").click()
+    page.wait_for_timeout(1000)
+    pago = page.get_by_role("dialog").inner_text()
+    check("al pagar se muestra la cuenta hecha", "Adelantos" in pago and "A transferir" in pago, pago[:300])
+    check("y lo que se transfiere ya tiene descontado el adelanto", "733.00" in pago, pago[:300])
+    page.keyboard.press("Escape"); page.wait_for_timeout(600)
+
+    # La detracción es del transporte: a una factura de servicio no se le calcula.
+    sinDetraccion = psql("select coalesce(detraction_amount,0)::text || '|' || detraction_status "
+                         f"from supplier_invoices where series = '{SERIE}' and number = '{SELLO}1'")
+    check("una factura de servicio no lleva detracción", sinDetraccion.startswith("0") and "NO_APLICA" in sinDetraccion, sinDetraccion)
 
     # --- Rechazar: el texto del correo se ve antes de enviarlo ---
     page.goto(f"{BASE}/facturas/correos")

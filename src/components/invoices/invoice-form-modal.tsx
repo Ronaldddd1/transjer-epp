@@ -9,7 +9,8 @@ import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import {
   computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_THRESHOLD, formatDate,
-  formatMoney, INVOICE_DOC_TYPE_LABEL, todayLima, type PaymentTermKey,
+  formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, todayLima,
+  type PaymentTermKey,
 } from "@/lib/utils";
 
 export type SupplierOption = {
@@ -22,6 +23,7 @@ export type InvoiceFormValues = {
   id: string;
   supplierId: string;
   docType: string;
+  serviceType: string | null;
   series: string;
   number: string;
   issueDate: string;
@@ -80,7 +82,12 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
     if (value === "CONTADO") setGuide("");
   };
 
-  const detraccion = detractionFor(total, undefined, currency);
+  // La detracción es del transporte de carga: en un servicio no se deposita nada, y el
+  // aviso del formulario tiene que decir lo mismo que después guarda el sistema.
+  const [clase, setClase] = useState<string>(invoice?.serviceType ?? "");
+  const detraccion = clase === "SERVICIO"
+    ? { applies: false, amount: 0, netPayable: Number(total) || 0 }
+    : detractionFor(total, undefined, currency);
 
   const vence = computePayDueDate({
     paymentTerm: term,
@@ -148,6 +155,20 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
           <Field label="Tipo" name="docType" required error={errors.docType} className="sm:col-span-2">
             <Select name="docType" defaultValue={invoice?.docType ?? "FACTURA"}>
               {Object.entries(INVOICE_DOC_TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Select>
+          </Field>
+          {/* De esto depende el plazo de pago y la detracción: solo el transporte de
+              carga se detrae. */}
+          <Field
+            label="Transporte o servicio"
+            name="serviceType"
+            error={errors.serviceType}
+            hint="El transporte lleva detracción; un servicio, no."
+            className="sm:col-span-2"
+          >
+            <Select name="serviceType" value={clase} onChange={(e) => setClase(e.target.value)}>
+              <option value="">Sin clasificar</option>
+              {Object.entries(INVOICE_SERVICE_TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </Select>
           </Field>
           <Field label="Serie" name="series" required error={errors.series} hint="Ejemplo: F001" className="sm:col-span-2">

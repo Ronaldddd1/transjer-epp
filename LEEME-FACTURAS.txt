@@ -92,13 +92,18 @@ Las columnas ahora son:
 
     Comprobante · Proveedor · Emisión · Recibida · A pagar · Adelanto · Vence · Estado
 
-  · PROVEEDOR ya no muestra el RUC; debajo van el cliente y el destino, que es lo que se
-    busca cuando alguien pregunta por una factura. La placa va en gris, en tercera línea.
+  · PROVEEDOR ya no muestra el RUC; debajo van el cliente y la ruta completa
+    (LIMA → TRUJILLO), que es lo que se busca cuando alguien pregunta por una factura.
+    Con solo el destino no se distinguen dos viajes al mismo sitio. La placa va en gris,
+    en tercera línea.
   · RECIBIDA es la fecha en que llegó el correo, que es desde cuando corre el plazo.
-  · A PAGAR es el total MENOS la detracción: lo que de verdad se le transfiere al
-    proveedor. Debajo, en chico, el total y la detracción descontada, para que la resta
-    se vea.
-  · ADELANTO son los pagos a cuenta ya entregados.
+  · A PAGAR es lo que falta transferirle: el total MENOS la detracción Y MENOS los
+    adelantos ya entregados. Debajo, en chico, la resta completa, para que se vea de
+    dónde sale.
+  · ADELANTO son los pagos a cuenta ya entregados. Al pulsar Pagar, la ventana muestra
+    la cuenta hecha —total, detracción, adelantos y "A transferir"— y ese último número
+    ya tiene todo descontado. Un adelanto es plata que el proveedor ya recibió: pagarle
+    el neto completo sería pagarle dos veces la misma parte.
   · Salieron la columna de GUÍA y el botón OBSERVAR, que ocupaban el ancho que hacía
     falta. Observar sigue estando dentro de la factura, al abrirla.
   · El botón Ver es ahora un ojo, y queda fijo a la derecha.
@@ -108,11 +113,34 @@ viaje, adelantos, quién pagó— está dentro de VER, que además ahora muestra
 (transporte o servicio), el importe a pagar al proveedor y las dos guías por separado.
 
 
-6. PROVEEDORES: CUÁNTO SE LES DEBE
+6. LA DETRACCIÓN ES SOLO DEL TRANSPORTE
+---------------------------------------
+
+Una factura de SERVICIO ya no genera detracción: queda en "No aplica" con monto cero, y
+no aparece en la pantalla de Detracciones. El depósito del 4 % al Banco de la Nación es
+por el servicio de transporte de carga.
+
+La regla se aplica sola al aceptar un comprobante, y también al registrar una factura a
+mano: el formulario de Nueva factura tiene ahora el selector "Transporte o servicio", y
+el aviso de detracción que muestra abajo cambia con lo que elijas.
+
+Si una factura ya registrada se reclasifica de transporte a servicio, la detracción se
+recalcula sola — salvo que ya esté depositada: ahí no se toca, porque el dinero está en
+el Banco de la Nación y reescribir la cifra dejaría al sistema sin cuadrar con la
+constancia.
+
+Las facturas anteriores a este cambio, que no tienen clase, conservan su detracción tal
+como está.
+
+
+7. PROVEEDORES: CUÁNTO SE LES DEBE
 ----------------------------------
 
-Arriba de la lista, tres tarjetas: PENDIENTE DE PAGO, PAGADO y FACTURAS EN TOTAL. Los
-montos van sin la detracción, igual que en la tabla de facturas.
+Arriba de la lista, tres tarjetas: PENDIENTE DE PAGO, PAGADO y FACTURAS EN TOTAL.
+
+Lo PENDIENTE va sin la detracción y sin los adelantos: es lo que todavía falta
+transferirle. Lo PAGADO va sin la detracción pero CON los adelantos, porque ese dinero
+también se le pagó a él.
 
 Y cada proveedor muestra en su fila cuánto se le debe y cuánto se le pagó, no solo
 cuántas facturas tiene.
@@ -131,7 +159,7 @@ pagado, en las dos monedas.
 LO QUE SE PROBÓ
 ---------------
 
-  475 comprobaciones de lógica   — todas pasan
+  486 comprobaciones de lógica   — todas pasan
   10 recorridos en el navegador  — todos pasan
 
 De lo nuevo, lo que más importa:
@@ -148,3 +176,8 @@ De lo nuevo, lo que más importa:
     acotan de verdad al filtrar por destino o por fechas.
   · El total del mes de una obligación no cambia al pagarla: lo que baja es el saldo.
   · Editar el código o la cantidad de un EPP no le hace perder su historial.
+  · Un adelanto baja el saldo a transferir y lo que se le debe al proveedor, pero no lo
+    que se le pagó. Un adelanto mayor que la factura deja el saldo en cero, no en
+    negativo.
+  · El mismo importe se detrae si es transporte y no se detrae si es servicio; por
+    debajo de S/ 400 o en dólares sigue sin detraerse, como antes.

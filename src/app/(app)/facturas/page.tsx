@@ -16,7 +16,7 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL,
-  INVOICE_STATUS_LABEL, DETRACTION_STATUS_LABEL, invoiceNumber, netoAPagar, pageParams,
+  INVOICE_STATUS_LABEL, DETRACTION_STATUS_LABEL, invoiceNumber, pageParams, saldoAPagar,
   PAYMENT_TERM_LABEL, todayLima, type SearchParams,
 } from "@/lib/utils";
 import { countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
@@ -214,12 +214,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             />
           )}
           {rows.map((i) => {
-            const ref = { id: i.id, series: i.series, number: i.number, currency: i.currency, total: i.total, supplierName: i.supplierName };
+            const ref = {
+              id: i.id, series: i.series, number: i.number, currency: i.currency, total: i.total,
+              supplierName: i.supplierName, detractionAmount: i.detractionAmount, advances: i.advances,
+            };
             // Lo que de verdad se le transfiere al proveedor: el total menos la
             // detracción, que va al Banco de la Nación. Es la cifra con la que se paga,
             // y tenerla calculada a mano cada vez era de las cosas que más se erraba.
-            const aPagar = netoAPagar(i.total, i.detractionAmount);
             const adelanto = Number(i.advances ?? 0);
+            // Lo que falta transferirle: del total se baja la detracción y lo que ya se
+            // le adelantó. Un adelanto es plata que el proveedor ya tiene.
+            const aPagar = saldoAPagar(i.total, i.detractionAmount, i.advances);
             return (
               <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
                 <Td>
@@ -234,9 +239,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                   <p className="font-medium">{i.supplierName}</p>
                   {/* Debajo, de quién fue el flete y a dónde: es lo que se busca cuando
                       alguien pregunta por una factura, más que el RUC. */}
-                  {(i.clientName || i.destinationCity) && (
+                  {(i.clientName || i.originCity || i.destinationCity) && (
                     <p className="text-xs text-steel-500">
-                      {[i.clientName, i.destinationCity].filter(Boolean).join(" · ")}
+                      {[
+                        i.clientName,
+                        // La ruta completa: de dónde salió y a dónde fue. Con solo el
+                        // destino no se distinguen dos viajes al mismo sitio.
+                        [i.originCity, i.destinationCity].filter(Boolean).join(" → ") || null,
+                      ].filter(Boolean).join(" · ")}
                     </p>
                   )}
                   {i.plate && <p className="text-xs text-steel-400">{i.plate}</p>}
@@ -245,9 +255,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                 <Td className="whitespace-nowrap tabular text-steel-600">{formatDate(i.receivedAt ?? i.createdAt)}</Td>
                 <Td className={cn("whitespace-nowrap text-right", i.status === "ANULADA" && "line-through")}>
                   <span className="font-display text-base font-bold tabular">{formatMoney(aPagar, i.currency)}</span>
-                  {Number(i.detractionAmount ?? 0) > 0 && (
-                    <p className="text-xs text-steel-500" title="Total del comprobante y detracción descontada">
-                      {formatMoney(i.total, i.currency)} − {formatMoney(i.detractionAmount, i.currency)}
+                  {(Number(i.detractionAmount ?? 0) > 0 || adelanto > 0) && (
+                    <p className="text-xs text-steel-500" title="Total del comprobante, menos la detracción y los adelantos">
+                      {formatMoney(i.total, i.currency)}
+                      {Number(i.detractionAmount ?? 0) > 0 && <> − {formatMoney(i.detractionAmount, i.currency)}</>}
+                      {adelanto > 0 && <> − {formatMoney(i.advances, i.currency)}</>}
                     </p>
                   )}
                 </Td>

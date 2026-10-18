@@ -307,7 +307,9 @@ with sync_playwright() as p:
     resumen = page.inner_text("body")
     assert "Pendiente de pago" in resumen and "Pagado" in resumen, resumen[:200]
     # El total de arriba tiene que cuadrar con la base: lo pendiente sin la detracción.
-    esperado = psql("select to_char(coalesce(sum(i.total - coalesce(i.detraction_amount,0)),0),'FM999G999G999D00') "
+    # Lo que falta transferir: sin la detracción y sin lo ya adelantado.
+    esperado = psql("select to_char(coalesce(sum(greatest(i.total - coalesce(i.detraction_amount,0) "
+                    "- coalesce(i.advances,0), 0)),0),'FM999G999G999D00') "
                     "from supplier_invoices i where i.status in ('PENDIENTE','OBSERVADA') and i.currency='PEN'")
     assert esperado.replace(",", ",") in resumen, (esperado, resumen[:400])
     ok("Proveedores: el total pendiente cuadra con las facturas")
@@ -318,7 +320,8 @@ with sync_playwright() as p:
     if destino:
         page.goto(BASE + f"/proveedores?destino={destino.replace(' ', '+')}")
         page.wait_for_timeout(1200)
-        soloDestino = psql("select to_char(coalesce(sum(i.total - coalesce(i.detraction_amount,0)),0),'FM999G999G999D00') "
+        soloDestino = psql("select to_char(coalesce(sum(greatest(i.total - coalesce(i.detraction_amount,0) "
+                           "- coalesce(i.advances,0), 0)),0),'FM999G999G999D00') "
                            f"from supplier_invoices i where i.status in ('PENDIENTE','OBSERVADA') and i.currency='PEN' "
                            f"and i.destination_city = '{destino}'")
         assert soloDestino in page.inner_text("body"), (destino, soloDestino)
