@@ -28,7 +28,10 @@ export function TabLinks({ name, tabs, current, base, params, className }: {
       const texto = Array.isArray(valor) ? valor[0] : valor;
       if (texto) query.set(clave, texto);
     }
-    if (value) query.set(name, value);
+    // La pestaña de "todas" también escribe su parámetro, vacío. Si se omitiera, la
+    // dirección quedaría igual que al entrar sin elegir nada y la pantalla volvería a
+    // aplicar su filtro por defecto: el botón parecería no funcionar.
+    query.set(name, value);
     const cadena = query.toString();
     return cadena ? `${base}?${cadena}` : base;
   };

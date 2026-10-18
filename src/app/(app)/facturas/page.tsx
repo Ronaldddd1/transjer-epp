@@ -36,7 +36,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
    * Salvo que se esté buscando algo. Una búsqueda acotada a pendientes no encontraría una
    * factura ya pagada y parecería que no existe, que es peor que mostrar de más.
    */
-  const porDefecto = !sp.estado && !filtros.q;
+  // "Todas" llega como estado="" y eso es una elección, no la ausencia de una.
+  const porDefecto = first(sp.estado) === undefined && !filtros.q;
   const f = porDefecto ? { ...filtros, status: "PENDIENTE" as const } : filtros;
   const canManage = can(user.role, "invoices.manage");
   const canPay = can(user.role, "invoices.pay");
@@ -162,7 +163,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           pagar lo que falta, no a mirar lo que ya pagó. */}
       <TabLinks
         name="estado"
-        current={first(sp.estado) ?? (porDefecto ? "PENDIENTE" : "")}
+        current={porDefecto ? "PENDIENTE" : first(sp.estado) ?? ""}
         base="/facturas"
         params={sp}
         className="mb-3"

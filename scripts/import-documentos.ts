@@ -34,7 +34,21 @@ import { DOCUMENT_KIND_LABEL, documentKindFromFilename, normalizePlate } from ".
 import { describeDriver, maxBytesFor, putFile, safeName } from "../src/server/storage";
 
 const SIMULAR = process.argv.includes("--simular");
-const CARPETA = process.argv.find((a) => !a.startsWith("--") && !a.endsWith(".ts") && !a.includes("node"));
+
+/**
+ * La carpeta, aguantando que venga partida.
+ *
+ * En PowerShell, `npm run ... -- "D:\DESCARGAS\Nueva carpeta"` llega al script sin las
+ * comillas, así que la ruta se parte en dos por el espacio. Por eso se prueba primero con
+ * todo junto: es lo que el usuario escribió.
+ */
+function rutaDeLaCarpeta(): string | undefined {
+  const partes = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const candidatos = [partes.join(" "), ...partes];
+  return candidatos.find((c) => c && fs.existsSync(c) && fs.statSync(c).isDirectory());
+}
+
+const CARPETA = rutaDeLaCarpeta();
 
 const EXTENSIONES: Record<string, string> = {
   ".pdf": "application/pdf",
@@ -45,9 +59,15 @@ const EXTENSIONES: Record<string, string> = {
 };
 
 async function main() {
-  if (!CARPETA || !fs.existsSync(CARPETA)) {
-    console.error("Indica la carpeta que tiene una subcarpeta por placa.");
-    console.error('   npm run import:documentos -- "C:\\\\ruta\\\\Nueva carpeta" --simular');
+  if (!CARPETA) {
+    const dados = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+    console.error("No encontré la carpeta que tiene una subcarpeta por placa.");
+    if (dados.length) console.error(`   Busqué: ${dados.join(" ")}`);
+    console.error("");
+    console.error("   npm run import:documentos -- \"D:\\ruta\\Nueva carpeta\" --simular");
+    console.error("");
+    console.error("   Si PowerShell se come las comillas de una ruta con espacios:");
+    console.error("   npx tsx --conditions=react-server scripts/import-documentos.ts \"D:\\ruta con espacios\" --simular");
     process.exit(1);
   }
 

@@ -118,8 +118,22 @@ with sync_playwright() as p:
           fila.locator("a[href^='/api/documentos/']").count() >= 3,
           fila.locator("a[href^='/api/documentos/']").count())
 
-    # Una unidad sin uno de los cuatro papeles pesa igual que una vencida.
     ejecutar(f"insert into vehicles (plate) values ('{PLACA2}')")
+    page.reload()
+    page.wait_for_timeout(1500)
+
+    # La pestaña de "toda la flota" tiene que poder ganarle al filtro de entrada. Si al
+    # pulsarla la pantalla volviera a aplicar su filtro por defecto, el botón parecería
+    # roto: fue así hasta que la dirección pasó a decir "estado=" en vez de no decir nada.
+    page.get_by_role("tab", name=re.compile("Toda la flota")).click()
+    page.wait_for_timeout(1600)
+    activa = page.locator("[role=tab][aria-selected=true]").inner_text()
+    check("la pestaña 'Toda la flota' se queda seleccionada al pulsarla",
+          "Toda la flota" in activa, activa)
+    check("y muestra también las unidades que no tienen nada vencido",
+          PLACA2 in page.content() and PLACA in page.content())
+
+    # Una unidad sin uno de los cuatro papeles pesa igual que una vencida.
     page.goto(f"{BASE}/documentos?estado=FALTA")
     page.wait_for_timeout(1400)
     check("la pestaña de 'falta un papel' trae la unidad sin documentos",

@@ -35,11 +35,14 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
 
   // Se abre en lo que urge, si hay algo. Con la flota en orden, abrir en una lista vacía
   // no diría nada, así que ahí se muestra todo.
+  // "Toda la flota" llega como estado="" y eso es una elección, no la ausencia de una:
+  // solo cuando el parámetro no viene se aplica el filtro de entrada.
+  const sinElegir = first(sp.estado) === undefined;
   const hayUrgente = cuentas.vencido > 0 || cuentas.falta > 0;
-  const porDefecto = !sp.estado && !first(sp.q) && hayUrgente
+  const porDefecto = sinElegir && !first(sp.q) && hayUrgente
     ? (cuentas.vencido > 0 ? "VENCIDO" : "FALTA")
     : "";
-  const estado = first(sp.estado) ?? porDefecto;
+  const estado = sinElegir ? porDefecto : first(sp.estado)!;
   const q = first(sp.q)?.trim() || undefined;
 
   const [rows, docs, vehiculos, trabajadores] = await Promise.all([

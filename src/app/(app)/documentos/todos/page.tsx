@@ -35,11 +35,14 @@ export default async function TodosLosDocumentosPage({ searchParams }: { searchP
 
   // Sin elegir pestaña se abre en lo que urge, si hay algo. Con todo en orden no tiene
   // sentido abrir en una lista vacía, así que ahí se muestra todo.
+  // "Todos" llega como estado="" y eso es una elección, no la ausencia de una: solo
+  // cuando el parámetro no viene se aplica el filtro de entrada.
+  const sinElegir = first(sp.estado) === undefined;
   const hayUrgente = cuentas.vencidos > 0 || cuentas.porVencer > 0;
-  const porDefecto = !sp.estado && !filtros.q && hayUrgente
+  const porDefecto = sinElegir && !filtros.q && hayUrgente
     ? (cuentas.vencidos > 0 ? "VENCIDO" : "POR_VENCER")
     : "";
-  const estado = first(sp.estado) ?? porDefecto;
+  const estado = sinElegir ? porDefecto : first(sp.estado)!;
   const f = { ...filtros, estado: estado || undefined };
 
   const [rows, vehiculos, trabajadores] = await Promise.all([

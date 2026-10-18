@@ -23,6 +23,7 @@
  */
 import "dotenv/config";
 import fs from "node:fs";
+
 import ExcelJS from "exceljs";
 import { and, eq } from "drizzle-orm";
 import { db } from "../src/db";
@@ -30,7 +31,21 @@ import { documents, vehicles } from "../src/db/schema";
 import { normalizePlate } from "../src/lib/utils";
 
 const SIMULAR = process.argv.includes("--simular");
-const ARCHIVO = process.argv.slice(2).find((a) => a.toLowerCase().endsWith(".xlsx"));
+
+/**
+ * La ruta del Excel, aguantando que venga partida.
+ *
+ * En PowerShell, `npm run ... -- "D:\DESCARGAS\Nueva carpeta\archivo.xlsx"` llega al
+ * script sin las comillas, así que la ruta se parte en dos por el espacio de "Nueva
+ * carpeta". Por eso se prueba primero con todo junto: es lo que el usuario escribió.
+ */
+function rutaDelExcel(): string | undefined {
+  const partes = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+  const candidatos = [partes.join(" "), ...partes];
+  return candidatos.find((c) => c && c.toLowerCase().endsWith(".xlsx") && fs.existsSync(c));
+}
+
+const ARCHIVO = rutaDelExcel();
 
 /** Quita acentos y espacios de sobra: los encabezados del Excel cambian de un año a otro. */
 function normalizar(v: unknown): string {
@@ -252,9 +267,44 @@ async function fijarFecha(vehicleId: string, kind: string, expiresAt: string) {
 }
 
 async function main() {
-  if (!ARCHIVO || !fs.existsSync(ARCHIVO)) {
-    console.error("Indica el Excel de mantenimiento (.xlsx).");
-    console.error('   npm run import:flota -- "C:\\\\ruta\\\\MANTENIMIENTO_TRANSJER.xlsx" --simular');
+  if (!ARCHIVO) {
+    const dados = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+    const pedido = dados.join(" ");
+    console.error("No encontré el Excel de mantenimiento (.xlsx).");
+    if (pedido) console.error(`   Busqué: ${pedido}`);
+
+    // En vez de dejar al usuario adivinando, se mira la carpeta y se le dicen los Excel
+    // que SÍ están. Casi siempre el archivo existe y lo que falla es una letra del nombre,
+    // una subcarpeta de más, o la extensión que Windows esconde.
+    // La carpeta, cortando por cualquiera de las dos barras: este script se ejecuta en
+    // Windows pero se prueba en Linux, y path.dirname solo entiende la del sistema.
+    const corte = Math.max(pedido.lastIndexOf("\\"), pedido.lastIndexOf("/"));
+    const carpeta = corte > 0 ? pedido.slice(0, corte) : "";
+
+    if (carpeta) {
+      if (fs.existsSync(carpeta) && fs.statSync(carpeta).isDirectory()) {
+        const excels = fs.readdirSync(carpeta).filter((n) => /\.xlsx?$/i.test(n));
+        console.error("");
+        if (excels.length) {
+          console.error(`   En "${carpeta}" los Excel que hay son:`);
+          for (const n of excels) console.error(`      ${n}`);
+          console.error("   Copia el nombre tal cual, con su extensión.");
+        } else {
+          const sub = fs.readdirSync(carpeta, { withFileTypes: true })
+            .filter((e) => e.isDirectory()).map((e) => e.name);
+          console.error(`   La carpeta "${carpeta}" existe, pero no tiene ningún Excel.`);
+          if (sub.length) console.error(`   Tiene estas subcarpetas: ${sub.slice(0, 10).join(", ")}`);
+        }
+      } else {
+        console.error("");
+        console.error(`   Esa carpeta tampoco existe: ${carpeta}`);
+        console.error("   Búscalo con:");
+        console.error('      Get-ChildItem D:\\ -Recurse -Filter "MANTENIMIENTO*" -ErrorAction SilentlyContinue | Select-Object FullName');
+      }
+    }
+
+    console.error("");
+    console.error("   npm run import:flota -- \"D:\\ruta\\MANTENIMIENTO_TRANSJER.xlsx\" --simular");
     process.exit(1);
   }
 

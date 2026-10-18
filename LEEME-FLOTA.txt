@@ -84,8 +84,15 @@ El límite de peso sigue siendo el de antes y no cambió.
 4. LA FICHA DE LA FLOTA SE CARGA DEL EXCEL DE MANTENIMIENTO
 ------------------------------------------------------------
 
-    npm run import:flota -- "C:\ruta\MANTENIMIENTO_TRANSJER.xlsx" --simular
-    npm run import:flota -- "C:\ruta\MANTENIMIENTO_TRANSJER.xlsx"
+    npm run import:flota -- "D:\DESCARGAS\Nueva carpeta\MANTENIMIENTO_TRANSJER.xlsx" --simular
+    npm run import:flota -- "D:\DESCARGAS\Nueva carpeta\MANTENIMIENTO_TRANSJER.xlsx"
+
+Las rutas con espacios ya no dan problema: PowerShell le quita las comillas a lo que pasa
+`npm run`, y la ruta llegaba partida en dos por el espacio de "Nueva carpeta". Ahora el
+script la vuelve a juntar. Lo mismo se corrigió en `npm run import:documentos`. Si aun así
+algo falla, esta forma no pasa por npm y nunca pierde las comillas:
+
+    npx tsx --conditions=react-server scripts/import-flota.ts "D:\ruta con espacios\archivo.xlsx" --simular
 
 Lee la hoja INFORMACIÓN GENERAL y completa, de cada placa: marca, modelo, año, TN, m³,
 código MTC y GPS. De las fechas de SOAT y revisión técnica crea o completa el documento,
