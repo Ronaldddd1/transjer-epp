@@ -42,7 +42,7 @@ export async function createProduct(formData: FormData): Promise<ActionResult> {
 export async function updateProduct(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("products.manage");
-    const data = productEditSchema.parse(formToObject(formData));
+    const { stock, ...data } = productEditSchema.parse(formToObject(formData));
 
     await db.transaction(async (tx) => {
       const [before] = await tx.select().from(products).where(eq(products.id, id));
@@ -59,6 +59,23 @@ export async function updateProduct(id: string, formData: FormData): Promise<Act
       }
 
       const [after] = await tx.update(products).set(data).where(eq(products.id, id)).returning();
+
+      /**
+       * La cantidad corregida entra como un ajuste, no como un valor escrito encima.
+       * Si se escribiera directo, el stock dejaría de cuadrar con los movimientos y la
+       * diferencia no tendría ni fecha ni responsable.
+       */
+      if (stock !== before.stock) {
+        await applyMovement(tx, {
+          productId: id,
+          type: "AJUSTE",
+          quantity: stock,
+          reason: "Corrección de registro",
+          notes: `Corregido desde la ficha del EPP (antes ${before.stock}).`,
+          user,
+          auditDescription: `${user.name} corrigió la cantidad de ${after.code}: de ${before.stock} a ${stock}.`,
+        });
+      }
       await logAudit({
         user, action: "EDITAR", module: "PRODUCTOS", recordId: id,
         description: data.code !== before.code

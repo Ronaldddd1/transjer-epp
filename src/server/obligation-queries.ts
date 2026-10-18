@@ -115,6 +115,22 @@ const obligationColumns = {
     where i.obligation_id = ${laObligacion} and ${pending} and i.total is null
       and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
   /**
+   * El total del mes: TODAS las cuotas que vencen dentro del mes, pagadas o no.
+   *
+   * Es distinto de monthAmount, que es lo que falta pagar. Con un solo número no se podía
+   * responder "cuánto nos cuesta la cochera al mes": a mitad de mes, lo pendiente ya no
+   * dice cuánto era el compromiso, y a fin de mes, con todo pagado, decía cero.
+   */
+  monthTotal: sql<string>`(select coalesce(sum(i.total), 0)::text from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and i.status <> 'ANULADA'
+      and i.due_date >= date_trunc('month', ${today})::date
+      and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
+  /** De ese total, lo que ya se pagó. */
+  monthPaid: sql<string>`(select coalesce(sum(coalesce(i.paid_amount, i.total)), 0)::text from ${obligationInstallments} i
+    where i.obligation_id = ${laObligacion} and i.status = 'PAGADA'
+      and i.due_date >= date_trunc('month', ${today})::date
+      and i.due_date < (date_trunc('month', ${today}) + interval '1 month')::date)`,
+  /**
    * La parte de lo de este mes que en realidad viene arrastrada de meses anteriores.
    * Se separa para poder decirlo: si no, el total del mes parece más alto de lo que
    * corresponde a este mes y nadie entiende de dónde sale la diferencia.

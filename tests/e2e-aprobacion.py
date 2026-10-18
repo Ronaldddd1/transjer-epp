@@ -41,6 +41,10 @@ def limpiar():
     ejecutar(f"delete from suppliers where ruc = '{RUC}'")
 
 
+CONCEPTO = ("POR EL SERVICIO DE TRANSPORTE DE CARGA LIMA- LOCAL CON FECHA 13/10/2026 "
+            "S/G/R/T/E VT01-007988 S/G/R/E/T EG03 - 00000349 CLIENTE TIENDAS PERUANAS SA CON PLACA BBR-905")
+
+
 def comprobante(numero):
     """Los datos como los deja el lector del XML."""
     return {
@@ -53,8 +57,11 @@ def comprobante(numero):
     }
 
 
-def correo(sufijo, numero):
-    datos = json.dumps(comprobante(numero)).replace("'", "''").replace('"', '\\"')
+def correo(sufijo, numero, concepto=None):
+    datos_dict = comprobante(numero)
+    if concepto:
+        datos_dict["description"] = concepto
+    datos = json.dumps(datos_dict).replace("'", "''").replace('"', '\\"')
     ejecutar(
         "insert into invoice_emails (message_id, subject, from_address, from_name, received_at, status, attachment_count, parsed) "
         f"values ('e2e-{SELLO}-{sufijo}', 'Factura {SERIE}-{numero}', 'facturacion@prueba.pe', 'Prueba SAC', "
@@ -66,6 +73,7 @@ def correo(sufijo, numero):
 limpiar()
 aceptar_id = correo("ok", f"{SELLO}1")
 rechazar_id = correo("no", f"{SELLO}2")
+transporte_id = correo("flete", f"{SELLO}3", CONCEPTO)
 
 with sync_playwright() as p:
     nav = p.chromium.launch()
@@ -135,6 +143,50 @@ with sync_playwright() as p:
           psql(f"select decided_by is not null from invoice_emails where id = '{aceptar_id}'") == "t")
     check("el proveedor se dio de alta al aceptar",
           psql(f"select count(*) from suppliers where ruc = '{RUC}'") == "1")
+
+    # --- Una factura de transporte: el tipo, el plazo y los datos del viaje ---
+    page.goto(f"{BASE}/facturas/correos")
+    page.wait_for_timeout(1600)
+    fila_t = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
+    fila_t.get_by_role("button", name="Aceptar").click()
+    page.wait_for_timeout(1000)
+    dlg = page.get_by_role("dialog")
+
+    # El tipo viene propuesto por el concepto, que habla de un flete.
+    check("propone que es factura de transporte",
+          dlg.locator("select[name=serviceType]").input_value() == "TRANSPORTE",
+          dlg.locator("select[name=serviceType]").input_value())
+    check("y propone 15 días de plazo",
+          dlg.locator("input[name=termDays]").input_value() == "15",
+          dlg.locator("input[name=termDays]").input_value())
+
+    # Los datos del viaje salen leídos del concepto, listos para revisar.
+    check("la placa viene leída del concepto",
+          dlg.locator("input[name=plate]").input_value() == "BBR-905",
+          dlg.locator("input[name=plate]").input_value())
+    check("el cliente también",
+          dlg.locator("input[name=clientName]").input_value() == "TIENDAS PERUANAS SA",
+          dlg.locator("input[name=clientName]").input_value())
+    check("y el destino",
+          dlg.locator("input[name=destinationCity]").input_value() == "LOCAL",
+          dlg.locator("input[name=destinationCity]").input_value())
+
+    dlg.get_by_role("button", name="Aceptar y registrar").click()
+    page.wait_for_timeout(2600)
+    guardado = psql(f"select service_type || '|' || term_days || '|' || coalesce(plate,'') || '|' || coalesce(client_name,'') "
+                    f"from supplier_invoices where series = '{SERIE}' and number = '{SELLO}3'")
+    check("queda registrada como transporte, a 15 días y con su viaje",
+          guardado == f"TRANSPORTE|15|BBR-905|TIENDAS PERUANAS SA", guardado)
+
+    # Y en la tabla de facturas se ve el cliente y el destino debajo del proveedor.
+    page.goto(f"{BASE}/facturas?q={SERIE}-{SELLO}3")
+    page.wait_for_timeout(1600)
+    fila_f = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
+    texto_f = fila_f.inner_text()
+    check("la tabla de facturas muestra el cliente y el destino",
+          "TIENDAS PERUANAS SA" in texto_f and "LOCAL" in texto_f, texto_f)
+    check("y el importe a pagar sale sin la detracción",
+          "1,133.00" in texto_f or "1,180.00" in texto_f, texto_f)
 
     # --- Rechazar: el texto del correo se ve antes de enviarlo ---
     page.goto(f"{BASE}/facturas/correos")

@@ -1,7 +1,7 @@
 import "server-only";
 import {
   ATTACHMENT_KIND_LABEL, DETRACTION_STATUS_LABEL, formatDate, formatDateTime, INSTALLMENT_STATUS_LABEL,
-  INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
+  INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
   EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
   PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
   STOCK_STATUS_LABEL, stockStatus,
@@ -49,6 +49,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         columns: [
           { key: "comprobante", header: "Comprobante", width: 14 },
           { key: "tipo", header: "Tipo", width: 12 },
+          { key: "clase", header: "Transporte o servicio", width: 18 },
           { key: "proveedor", header: "Proveedor", width: 30 },
           { key: "ruc", header: "RUC", width: 13 },
           { key: "emision", header: "Emisión", width: 11 },
@@ -74,7 +75,8 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "pago", header: "Fecha de pago", width: 12 },
           { key: "detraccionEstado", header: "Estado detracción", width: 15 },
           { key: "constancia", header: "N.º constancia", width: 14 },
-          { key: "grt", header: "Guía de remisión", width: 14 },
+          { key: "grt", header: "Guía del transportista", width: 16 },
+          { key: "guiaRemitente", header: "Guía del remitente", width: 16 },
           { key: "contacto", header: "Contacto", width: 18 },
           { key: "origenRegistro", header: "Origen del registro", width: 15 },
           { key: "concepto", header: "Concepto", width: 30 },
@@ -85,6 +87,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           return {
             comprobante: invoiceNumber(i.series, i.number),
             tipo: INVOICE_DOC_TYPE_LABEL[i.docType],
+            clase: i.serviceType ? INVOICE_SERVICE_TYPE_LABEL[i.serviceType] : "sin clasificar",
             proveedor: i.supplierName,
             ruc: i.supplierRuc ?? "pendiente",
             emision: fecha(i.issueDate),
@@ -111,6 +114,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
             detraccionEstado: DETRACTION_STATUS_LABEL[i.detractionStatus],
             constancia: texto(i.detractionReceipt),
             grt: texto(i.grtNumber),
+            guiaRemitente: texto(i.dispatchNote),
             contacto: texto(i.contactName),
             origenRegistro: INVOICE_SOURCE_LABEL[i.source],
             concepto: texto(i.description),
@@ -183,8 +187,13 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
     title: "Proveedores",
     permission: "suppliers.manage",
     async build(sp) {
-      const q = typeof sp.q === "string" ? sp.q : undefined;
-      const { rows } = await listSuppliers({ q }, 5000, 0);
+      // El Excel sale con los mismos filtros que la pantalla: si se miró un destino o un
+      // rango de fechas, el archivo trae eso y no todo.
+      const texto1 = (k: string) => (typeof sp[k] === "string" && sp[k] ? (sp[k] as string) : undefined);
+      const { rows } = await listSuppliers(
+        { q: texto1("q"), from: texto1("from"), to: texto1("to"), destino: texto1("destino") },
+        5000, 0,
+      );
       return [{
         title: "Proveedores",
         columns: [
@@ -197,7 +206,12 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "condicion", header: "Condición pactada", width: 16 },
           { key: "plazo", header: "Días de plazo", width: 12, align: "right" },
           { key: "facturas", header: "Facturas", width: 10, align: "right" },
-          { key: "pendientes", header: "Pendientes", width: 11, align: "right" },
+          { key: "pendientes", header: "Facturas pendientes", width: 13, align: "right" },
+          { key: "pendienteSoles", header: "Pendiente S/", width: 14, align: "right" },
+          { key: "pendienteDolares", header: "Pendiente US$", width: 14, align: "right" },
+          { key: "pagadas", header: "Facturas pagadas", width: 13, align: "right" },
+          { key: "pagadoSoles", header: "Pagado S/", width: 14, align: "right" },
+          { key: "pagadoDolares", header: "Pagado US$", width: 14, align: "right" },
           { key: "estado", header: "Estado", width: 10 },
           { key: "observaciones", header: "Observaciones", width: 34 },
         ],
@@ -212,12 +226,20 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           plazo: s.defaultTermDays,
           facturas: s.invoiceCount,
           pendientes: s.pendingCount,
+          // Sin la detracción: es lo que de verdad se le transfiere al proveedor.
+          pendienteSoles: money(s.pendingPen),
+          pendienteDolares: money(s.pendingUsd),
+          pagadas: s.paidCount,
+          pagadoSoles: money(s.paidPen),
+          pagadoDolares: money(s.paidUsd),
           estado: s.active ? "Activo" : "Inactivo",
           observaciones: texto(s.notes),
         })),
         summary: [
           { label: "Proveedores", value: rows.length },
           { label: "Sin RUC", value: rows.filter((s) => !s.ruc).length },
+          { label: "Pendiente S/", value: Number(rows.reduce((t, s) => t + Number(s.pendingPen), 0).toFixed(2)) },
+          { label: "Pagado S/", value: Number(rows.reduce((t, s) => t + Number(s.paidPen), 0).toFixed(2)) },
         ],
       }];
     },

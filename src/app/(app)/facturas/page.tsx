@@ -1,4 +1,4 @@
-import { AlertTriangle, Building2, CalendarClock, FileClock, Mail } from "lucide-react";
+import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
@@ -15,8 +15,9 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
-  cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_STATUS_LABEL,
-  DETRACTION_STATUS_LABEL, invoiceNumber, pageParams, PAYMENT_TERM_LABEL, todayLima, type SearchParams,
+  cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL,
+  INVOICE_STATUS_LABEL, DETRACTION_STATUS_LABEL, invoiceNumber, netoAPagar, pageParams,
+  PAYMENT_TERM_LABEL, todayLima, type SearchParams,
 } from "@/lib/utils";
 import { countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -39,7 +40,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const f = porDefecto ? { ...filtros, status: "PENDIENTE" as const } : filtros;
   const canManage = can(user.role, "invoices.manage");
   const canPay = can(user.role, "invoices.pay");
-  const cols = canManage || canPay ? 10 : 9;
+  const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
   const [{ rows, total }, totals, totalesPorEstado, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
@@ -193,17 +194,15 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           <tr>
             <Th>Comprobante</Th>
             <Th>Proveedor</Th>
-            <Th className="hidden 2xl:table-cell">Emisión</Th>
+            <Th className="hidden xl:table-cell">Emisión</Th>
+            <Th>Recibida</Th>
+            <Th className="text-right">A pagar</Th>
+            <Th className="hidden text-right xl:table-cell">Adelanto</Th>
             <Th>Vence</Th>
-            <Th className="text-right">Importe</Th>
             <Th>Estado</Th>
-            <Th className="hidden 2xl:table-cell">Detracción</Th>
-            <Th className="hidden 2xl:table-cell">Guía</Th>
-            <Th className="hidden 2xl:table-cell">Pago</Th>
-            {/* Fija a la derecha: con muchas columnas, el botón Ver quedaba fuera de la
-                pantalla y había que bajar hasta el final para encontrar la barra y correr
-                la tabla a mano. */}
-            {(canManage || canPay) && <Th className="sticky right-0 z-10 bg-steel-50 text-right shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">Acciones</Th>}
+            {/* Fija a la derecha: el botón de pagar y el de ver tienen que estar siempre
+                a la vista, sin correr la tabla. */}
+            <Th className="sticky right-0 z-10 bg-steel-50 text-right shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">Acciones</Th>
           </tr>
         </thead>
         <tbody>
@@ -216,26 +215,45 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           )}
           {rows.map((i) => {
             const ref = { id: i.id, series: i.series, number: i.number, currency: i.currency, total: i.total, supplierName: i.supplierName };
+            // Lo que de verdad se le transfiere al proveedor: el total menos la
+            // detracción, que va al Banco de la Nación. Es la cifra con la que se paga,
+            // y tenerla calculada a mano cada vez era de las cosas que más se erraba.
+            const aPagar = netoAPagar(i.total, i.detractionAmount);
+            const adelanto = Number(i.advances ?? 0);
             return (
               <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
                 <Td>
                   <Link href={`/facturas/${i.id}`} className="font-semibold tabular hover:underline">{invoiceNumber(i.series, i.number)}</Link>
                   <p className="text-xs text-steel-500">
-                    {INVOICE_DOC_TYPE_LABEL[i.docType]}
+                    {i.serviceType ? INVOICE_SERVICE_TYPE_LABEL[i.serviceType] : INVOICE_DOC_TYPE_LABEL[i.docType]}
                     {i.source === "CORREO" && <span className="ml-1 text-steel-400">· del correo</span>}
                   </p>
-                  <p className="text-xs text-steel-500 2xl:hidden">Emitida {formatDate(i.issueDate)}</p>
+                  <p className="text-xs text-steel-500 xl:hidden">Emitida {formatDate(i.issueDate)}</p>
                 </Td>
                 <Td>
                   <p className="font-medium">{i.supplierName}</p>
-                  <p className="text-xs text-steel-500">{i.supplierRuc ? `RUC ${i.supplierRuc}` : "RUC pendiente"}</p>
-                  {(i.clientName || i.plate) && (
+                  {/* Debajo, de quién fue el flete y a dónde: es lo que se busca cuando
+                      alguien pregunta por una factura, más que el RUC. */}
+                  {(i.clientName || i.destinationCity) && (
                     <p className="text-xs text-steel-500">
-                      {[i.clientName, i.plate, i.destinationCity].filter(Boolean).join(" · ")}
+                      {[i.clientName, i.destinationCity].filter(Boolean).join(" · ")}
+                    </p>
+                  )}
+                  {i.plate && <p className="text-xs text-steel-400">{i.plate}</p>}
+                </Td>
+                <Td className="hidden whitespace-nowrap tabular text-steel-600 xl:table-cell">{formatDate(i.issueDate)}</Td>
+                <Td className="whitespace-nowrap tabular text-steel-600">{formatDate(i.receivedAt ?? i.createdAt)}</Td>
+                <Td className={cn("whitespace-nowrap text-right", i.status === "ANULADA" && "line-through")}>
+                  <span className="font-display text-base font-bold tabular">{formatMoney(aPagar, i.currency)}</span>
+                  {Number(i.detractionAmount ?? 0) > 0 && (
+                    <p className="text-xs text-steel-500" title="Total del comprobante y detracción descontada">
+                      {formatMoney(i.total, i.currency)} − {formatMoney(i.detractionAmount, i.currency)}
                     </p>
                   )}
                 </Td>
-                <Td className="hidden whitespace-nowrap tabular text-steel-600 2xl:table-cell">{formatDate(i.issueDate)}</Td>
+                <Td className="hidden whitespace-nowrap text-right tabular text-steel-600 xl:table-cell">
+                  {adelanto > 0 ? formatMoney(i.advances, i.currency) : "—"}
+                </Td>
                 <Td>
                   {i.status === "PENDIENTE" ? (
                     <>
@@ -246,39 +264,22 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                     <span className="whitespace-nowrap text-steel-500">{i.payDueDate ? `Vencía ${formatDate(i.payDueDate)}` : "—"}</span>
                   )}
                 </Td>
-                <Td className={cn("whitespace-nowrap text-right font-display text-base font-bold tabular", i.status === "ANULADA" && "line-through")}>
-                  {formatMoney(i.total, i.currency)}
-                </Td>
                 <Td>
                   <InvoiceStatusBadge status={i.status} dueDate={i.payDueDate} />
                   {i.statusReason && i.status !== "PAGADA" && (
-                    <p className="mt-1 line-clamp-2 w-40 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
+                    <p className="mt-1 line-clamp-2 w-36 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
                   )}
                 </Td>
-                <Td className="hidden 2xl:table-cell">
-                  <DetractionBadge status={i.detractionStatus} />
-                  {i.detractionStatus !== "NO_APLICA" && (
-                    <p className="mt-1 whitespace-nowrap text-xs text-steel-500">{formatMoney(i.detractionAmount, i.currency)}</p>
-                  )}
+                <Td className="sticky right-0 z-10 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">
+                  <div className="flex items-center justify-end gap-1">
+                    {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && <PayInvoiceModal invoice={ref} compact />}
+                    {/* Observar salió de la fila: se usa poco y ocupaba el ancho que hacía
+                        falta para lo que sí se mira. Sigue estando dentro de Ver. */}
+                    <ButtonLink href={`/facturas/${i.id}`} variant="ghost" size="sm" title="Ver la factura" aria-label="Ver la factura">
+                      <Eye className="h-4 w-4" />
+                    </ButtonLink>
+                  </div>
                 </Td>
-                <Td className="hidden whitespace-nowrap text-steel-600 2xl:table-cell">{i.grtNumber ?? "—"}</Td>
-                <Td className="hidden text-steel-600 2xl:table-cell">
-                  {i.paidAt ? (
-                    <>
-                      <span className="whitespace-nowrap tabular">{formatDate(i.paidAt)}</span>
-                      {i.paidByName && <p className="text-xs text-steel-500">{i.paidByName}</p>}
-                    </>
-                  ) : "—"}
-                </Td>
-                {(canManage || canPay) && (
-                  <Td className="sticky right-0 z-10 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">
-                    <div className="flex items-center justify-end gap-1">
-                      {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && <PayInvoiceModal invoice={ref} compact />}
-                      {canManage && i.status === "PENDIENTE" && <InvoiceReasonModal invoice={ref} action="observe" compact />}
-                      <ButtonLink href={`/facturas/${i.id}`} variant="ghost" size="sm">Ver</ButtonLink>
-                    </div>
-                  </Td>
-                )}
               </Tr>
             );
           })}

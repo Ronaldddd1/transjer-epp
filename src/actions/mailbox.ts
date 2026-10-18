@@ -191,14 +191,30 @@ export async function approveEmail(id: string, formData: FormData): Promise<Acti
     }
 
     const resultado = await db.transaction((tx) => registerApprovedEmail(tx, email, user, {
+      serviceType: data.serviceType,
       paymentTerm: data.paymentTerm,
       termDays: data.termDays,
       description: data.description,
+      // Solo las facturas de transporte llevan datos de viaje. En un servicio corriente
+      // una placa o un cliente serían datos sueltos que después nadie sabría de dónde salieron.
+      viaje: data.serviceType === "TRANSPORTE" ? {
+        serviceDate: data.serviceDate,
+        plate: data.plate,
+        clientName: data.clientName,
+        originCity: data.originCity,
+        destinationCity: data.destinationCity,
+        grtNumber: data.grtNumber,
+        dispatchNote: data.dispatchNote,
+      } : undefined,
     }));
 
     revalidatePath("/", "layout");
     if (!resultado.ok) return { ok: false, message: resultado.error };
-    return { ok: true, message: `Comprobante aceptado. Quedó registrado como factura ${resultado.label}.` };
+    return {
+      ok: true,
+      message: `Comprobante aceptado. Quedó registrado como factura ${resultado.label}`
+        + `${data.serviceType === "TRANSPORTE" ? " de transporte." : " de servicio."}`,
+    };
   } catch (e) {
     return toActionError(e);
   }

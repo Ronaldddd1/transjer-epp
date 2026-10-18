@@ -38,6 +38,9 @@ function porMoneda(filas: ObligationRow[], campo: (o: ObligationRow) => string |
 }
 
 const delMes = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthAmount);
+/** Todo lo que cuesta el mes, esté pagado o no: el compromiso, no el saldo. */
+const totalDelMesCompleto = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthTotal);
+const pagadoDelMes = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthPaid);
 const arrastrado = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthOverdue);
 const pendiente = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.pendingAmount);
 const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") : "—");
@@ -281,6 +284,8 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
     .filter((g) => g.filas.length > 0);
 
   const totalDelMes = delMes(rows);
+  const compromisoDelMes = totalDelMesCompleto(rows);
+  const yaPagado = pagadoDelMes(rows);
   const totalArrastrado = arrastrado(rows);
   const totalSinImporte = rows.reduce((s, o) => s + o.monthMissing, 0);
 
@@ -289,8 +294,15 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
       {/* Lo primero que hay que saber a fin de mes: cuánta plata hay que tener lista. */}
       <div className="rounded-lg border border-ink bg-ink px-4 py-3 text-white">
         <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
-          <span className="text-sm text-steel-300">Total a pagar este mes</span>
+          <span className="text-sm text-steel-300">Falta pagar este mes</span>
           <span className="font-display text-2xl font-bold text-brand">{juntar(totalDelMes)}</span>
+        </div>
+        <div className="mt-1 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-ink-700 pt-1.5">
+          <span className="text-sm text-steel-300">Total del mes, pagado o no</span>
+          <span className="font-display text-lg font-semibold text-white">
+            {juntar(compromisoDelMes)}
+            {yaPagado.length > 0 && <span className="ml-2 text-sm font-normal text-steel-400">· ya pagado {juntar(yaPagado)}</span>}
+          </span>
         </div>
         <p className="mt-0.5 text-xs text-steel-400">
           {totalArrastrado.length > 0
@@ -320,10 +332,14 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
             key={type}
             title={OBLIGATION_TYPE_PLURAL[type]}
             action={
+              /* Dos números, no uno: el total del mes es lo que cuesta ese tipo de
+                 obligación —y no cambia porque se vaya pagando— y al lado lo que todavía
+                 falta. Antes solo estaba el segundo, y a fin de mes, con todo pagado,
+                 decía cero: no había dónde ver cuánto se gastó. */
               <span className="text-sm text-steel-500">
-                {filas.length} · este mes{" "}
-                <strong className="font-display text-base text-ink">{juntar(delMes(filas))}</strong>
-                <span className="text-steel-400"> · falta pagar {juntar(pendiente(filas))}</span>
+                {filas.length} · total del mes{" "}
+                <strong className="font-display text-base text-ink">{juntar(totalDelMesCompleto(filas))}</strong>
+                <span className="text-steel-400"> · falta pagar {juntar(delMes(filas))}</span>
                 {vencidas > 0 && <span className="ml-2 font-semibold text-red-700">{vencidas} cuota(s) vencida(s)</span>}
               </span>
             }

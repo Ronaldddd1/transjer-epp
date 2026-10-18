@@ -4,7 +4,10 @@ import type { Tx } from "@/db";
 import { invoiceAttachments, invoiceEmails, type InvoiceEmail } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { computePayDueDate, invoiceNumber, type PaymentTermKey } from "@/lib/utils";
+import {
+  computePayDueDate, invoiceNumber, TERM_DAYS_BY_SERVICE_TYPE,
+  type InvoiceServiceTypeKey, type PaymentTermKey,
+} from "@/lib/utils";
 import { findDuplicate, findOrCreateSupplier, insertInvoice } from "./invoice-service";
 import type { ParsedInvoice } from "./sunat-xml";
 
@@ -21,6 +24,18 @@ export type ApprovalOverrides = {
   paymentTerm?: PaymentTermKey;
   termDays?: number;
   description?: string | null;
+  /** Transporte o servicio, lo que decide quien aprueba. */
+  serviceType?: InvoiceServiceTypeKey;
+  /** Datos del viaje, leídos del concepto y corregidos a mano si hacía falta. */
+  viaje?: {
+    serviceDate?: string | null;
+    plate?: string | null;
+    clientName?: string | null;
+    originCity?: string | null;
+    destinationCity?: string | null;
+    grtNumber?: string | null;
+    dispatchNote?: string | null;
+  };
 };
 
 export type ApprovalResult =
@@ -73,7 +88,13 @@ export async function registerApprovedEmail(
    * cuando alguien anote la entrega física de la guía, que el sistema no puede saber.
    */
   const paymentTerm = overrides.paymentTerm ?? supplier.defaultPaymentTerm;
-  const termDays = overrides.termDays ?? supplier.defaultTermDays;
+  /**
+   * El plazo sale de lo que se compró: un flete se paga a 15 días de recibida la
+   * factura y un servicio corriente al contado. Quien aprueba puede cambiarlo, pero el
+   * número propuesto ya es el de la regla.
+   */
+  const termDays = overrides.termDays
+    ?? (overrides.serviceType ? TERM_DAYS_BY_SERVICE_TYPE[overrides.serviceType] : supplier.defaultTermDays);
   const recepcion = email.receivedAt;
   const recepcionYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(recepcion);
 
@@ -86,7 +107,16 @@ export async function registerApprovedEmail(
     igv: parsed.igv,
     total: parsed.total,
     description: overrides.description ?? parsed.description,
-    grtNumber: parsed.grtNumber,
+    serviceType: overrides.serviceType ?? null,
+    // La guía del transportista puede venir en el XML o leerse del concepto; lo que
+    // escribió quien aprueba manda sobre las dos.
+    grtNumber: overrides.viaje?.grtNumber ?? parsed.grtNumber,
+    dispatchNote: overrides.viaje?.dispatchNote ?? null,
+    serviceDate: overrides.viaje?.serviceDate ?? null,
+    plate: overrides.viaje?.plate ?? null,
+    clientName: overrides.viaje?.clientName ?? null,
+    originCity: overrides.viaje?.originCity ?? null,
+    destinationCity: overrides.viaje?.destinationCity ?? null,
     source: "CORREO",
     receivedAt: recepcion,
     paymentTerm,

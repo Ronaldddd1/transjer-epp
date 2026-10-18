@@ -1,0 +1,150 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Transporte o servicio, datos del viaje leídos del XML, y totales
+================================================================
+
+Seis cambios. Uno pide migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, agrega dos columnas a las facturas
+
+
+1. INVENTARIO: LA CANTIDAD SE EDITA DESDE LA FICHA
+--------------------------------------------------
+
+Al editar un EPP ahora aparece el campo CANTIDAD, junto a la marca, el color y lo demás.
+
+Si la corriges, NO se escribe encima del stock: entra como un ajuste de inventario, con
+fecha, responsable y la nota "Corregido desde la ficha del EPP (antes 40)". Es la misma
+operación que hacías con el botón Ajuste, pero sin salir de la ficha.
+
+Se hace así a propósito: si el número se escribiera directo, el stock dejaría de cuadrar
+con los movimientos y la diferencia no tendría ni fecha ni culpable.
+
+
+2. COMPROBANTES: TRANSPORTE O SERVICIO
+--------------------------------------
+
+Al aceptar un comprobante, lo primero que se pregunta es qué clase de factura es:
+
+    FACTURA DE TRANSPORTE   un flete. Se paga a 15 días de recibido el correo.
+    FACTURA DE SERVICIO     todo lo demás. Al contado, 1 día.
+
+El sistema propone el tipo mirando el concepto del XML, pero decide la persona. Al
+cambiar de uno a otro, los días de plazo cambian solos — dejarlos como estaban sería la
+forma más fácil de que una factura venza quince días tarde.
+
+Importante: la regla nueva de vencimientos rige SOLO para las facturas que entren de
+ahora en adelante. Las que ya están registradas conservan su fecha límite, como quedamos.
+Las que ya tenían datos de viaje cargados quedaron marcadas como transporte, para que el
+histórico no salga vacío en los filtros nuevos.
+
+
+3. LOS DATOS DEL VIAJE SE LEEN DEL CONCEPTO
+-------------------------------------------
+
+De un concepto como este:
+
+    POR EL SERVICIO DE TRANSPORTE DE CARGA LIMA- LOCAL CON FECHA 13/10/2026
+    S/G/R/T/E VT01-007988 S/G/R/E/T EG03 - 00000349 CLIENTE TIENDAS PERUANAS SA
+    CON PLACA BBR-905
+
+el sistema saca, y los muestra ya puestos en el formulario de aceptar:
+
+    Fecha del servicio      13/10/2026
+    Origen / Destino        LIMA / LOCAL
+    Cliente                 TIENDAS PERUANAS SA
+    Placa                   BBR-905
+    Guía del transportista  VT01-007988   (la S/G/R/T/E)
+    Guía del remitente      EG03-00000349 (la S/G/R/E/T)
+
+Se muestran para REVISARLOS, no para confiar en ellos: se corrigen ahí mismo antes de
+aceptar. Lo que no se pudo leer queda vacío y se completa a mano.
+
+Las dos guías se guardan por separado. Se diferencian solo en el orden de dos letras
+(T/E contra E/T) y confundirlas pondría la guía del cliente donde SUNAT pide la del
+transportista.
+
+Esto no es una plantilla rígida: cada dato se busca por su cuenta, así que si un
+transportista escribe distinto y falta uno, los otros cinco salen igual.
+
+
+4. PRÉSTAMOS Y SERVICIOS: LOS DOS MONTOS
+----------------------------------------
+
+Cada tipo de obligación muestra ahora dos números:
+
+    total del mes S/ 3,010.00 · falta pagar S/ 1,280.00
+
+El primero es lo que cuesta ese tipo este mes, esté pagado o no. El segundo es el saldo,
+que es lo único que había antes. A fin de mes, con todo pagado, el saldo decía cero y no
+quedaba dónde ver cuánto se gastó.
+
+Arriba, en la banda negra, lo mismo para el total: "Falta pagar este mes" y, debajo,
+"Total del mes, pagado o no", con cuánto se lleva pagado.
+
+
+5. FACTURAS: LA TABLA SE REHIZO
+-------------------------------
+
+Las columnas ahora son:
+
+    Comprobante · Proveedor · Emisión · Recibida · A pagar · Adelanto · Vence · Estado
+
+  · PROVEEDOR ya no muestra el RUC; debajo van el cliente y el destino, que es lo que se
+    busca cuando alguien pregunta por una factura. La placa va en gris, en tercera línea.
+  · RECIBIDA es la fecha en que llegó el correo, que es desde cuando corre el plazo.
+  · A PAGAR es el total MENOS la detracción: lo que de verdad se le transfiere al
+    proveedor. Debajo, en chico, el total y la detracción descontada, para que la resta
+    se vea.
+  · ADELANTO son los pagos a cuenta ya entregados.
+  · Salieron la columna de GUÍA y el botón OBSERVAR, que ocupaban el ancho que hacía
+    falta. Observar sigue estando dentro de la factura, al abrirla.
+  · El botón Ver es ahora un ojo, y queda fijo a la derecha.
+
+Todo lo que salió de la tabla —RUC, guías, detracción, condición de pago, datos del
+viaje, adelantos, quién pagó— está dentro de VER, que además ahora muestra el tipo
+(transporte o servicio), el importe a pagar al proveedor y las dos guías por separado.
+
+
+6. PROVEEDORES: CUÁNTO SE LES DEBE
+----------------------------------
+
+Arriba de la lista, tres tarjetas: PENDIENTE DE PAGO, PAGADO y FACTURAS EN TOTAL. Los
+montos van sin la detracción, igual que en la tabla de facturas.
+
+Y cada proveedor muestra en su fila cuánto se le debe y cuánto se le pagó, no solo
+cuántas facturas tiene.
+
+Se segmenta con los filtros de arriba: por proveedor (buscándolo), por DESTINO y por
+rango de FECHAS de emisión. Los tres números de arriba se recalculan con lo que esté
+filtrado, así que "cuánto le debemos a este proveedor por los viajes a Trujillo en
+octubre" sale poniendo tres filtros.
+
+Soles y dólares van siempre separados: sumarlos daría un número que no es plata.
+
+El Excel de proveedores sale con esos mismos filtros y trae las columnas de pendiente y
+pagado, en las dos monedas.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  475 comprobaciones de lógica   — todas pasan
+  10 recorridos en el navegador  — todos pasan
+
+De lo nuevo, lo que más importa:
+
+  · El concepto de ejemplo que me pasaste se lee completo: fecha, ruta, cliente, placa y
+    las dos guías, sin confundir una con otra. Escrito en minúsculas, con "de X a Y" o
+    con la guía como "G.R.T." también se lee.
+  · Lo que no está, no se inventa: sin fecha en el concepto, la fecha queda vacía; una
+    fecha imposible (31/02) se descarta y el resto del concepto se lee igual.
+  · Una factura aceptada como transporte queda con 15 días de plazo y su viaje cargado;
+    una de servicio, con 1 día y sin datos de viaje.
+  · La fecha límite se cuenta desde que llegó el correo, no desde la emisión.
+  · Los totales de proveedores descuentan la detracción, no cuentan las anuladas, y se
+    acotan de verdad al filtrar por destino o por fechas.
+  · El total del mes de una obligación no cambia al pagarla: lo que baja es el saldo.
+  · Editar el código o la cantidad de un EPP no le hace perder su historial.

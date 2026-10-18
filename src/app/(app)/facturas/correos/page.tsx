@@ -19,6 +19,7 @@ import { can } from "@/lib/permissions";
 import {
   cn, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, invoiceNumber, pageParams, type SearchParams,
 } from "@/lib/utils";
+import { leerConceptoTransporte, pareceTransporte } from "@/server/concepto-transporte";
 import { notificationUrl } from "@/server/graph";
 import { missingMailboxSettings, readMailboxConfig } from "@/server/mailbox-config";
 import {
@@ -104,6 +105,16 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
     replyError: e.replyError,
     decidedAt: e.decidedAt?.toISOString() ?? null,
     decidedByName: e.decidedByName,
+    // El concepto del XML se lee aquí, en el servidor, y viaja ya leído: así el
+    // formulario de aceptar abre con la fecha, la placa, el cliente y la ruta puestas.
+    ...(() => {
+      const concepto = (e.parsed as ComprobanteLeido | null)?.description ?? null;
+      const viaje = leerConceptoTransporte(concepto);
+      return {
+        pareceTransporte: pareceTransporte(concepto),
+        viaje: { ...viaje, leido: Object.values(viaje).some(Boolean) },
+      };
+    })(),
   });
 
   return (

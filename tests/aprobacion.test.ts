@@ -15,7 +15,8 @@ import {
   auditLogs, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
 } from "../src/db/schema";
 import { REJECT_REASON_LABEL, rejectionEmailBody } from "../src/lib/utils";
-import { registerApprovedEmail } from "../src/server/invoice-approval";
+import { leerConceptoTransporte } from "../src/server/concepto-transporte";
+import { parsedOf, registerApprovedEmail } from "../src/server/invoice-approval";
 import { readSmtpConfig } from "../src/server/mailer";
 
 let fails = 0;
@@ -126,6 +127,57 @@ async function main() {
     .where(and(eq(auditLogs.module, "CORREO"), eq(auditLogs.recordId, resultado.invoiceId))).limit(1);
   check("la aceptación queda en auditoría con el nombre de quien decidió",
     !!registro && registro.description.includes(quien.name), registro?.description);
+
+  // ---------- Transporte: plazo de 15 días y datos del viaje ----------
+  // Un flete no se paga igual que un servicio, y los datos del viaje salen del concepto
+  // del XML: si se guardaran mal, el control de fletes dejaría de cuadrar.
+  const flete = await correoPorAprobar("flete");
+  await db.update(invoiceEmails).set({
+    parsed: {
+      ...COMPROBANTE,
+      number: `${SELLO}9`,
+      description: "POR EL SERVICIO DE TRANSPORTE DE CARGA LIMA- LOCAL CON FECHA 13/10/2026 "
+        + "S/G/R/T/E VT01-007988 S/G/R/E/T EG03 - 00000349 CLIENTE TIENDAS PERUANAS SA CON PLACA BBR-905",
+    },
+  }).where(eq(invoiceEmails.id, flete.id));
+  const [conViaje] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, flete.id));
+
+  const leido = leerConceptoTransporte(parsedOf(conViaje)?.description);
+  const aceptadoFlete = await db.transaction((tx) => registerApprovedEmail(tx, conViaje, quien, {
+    serviceType: "TRANSPORTE",
+    viaje: leido,
+  }));
+  check("un flete se acepta igual", aceptadoFlete.ok === true, aceptadoFlete);
+  if (aceptadoFlete.ok) {
+    const [transporte] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, aceptadoFlete.invoiceId));
+    check("queda marcada como factura de transporte", transporte?.serviceType === "TRANSPORTE", transporte?.serviceType);
+    check("con 15 días de plazo", transporte?.termDays === 15, transporte?.termDays);
+    check("la placa sale del concepto", transporte?.plate === "BBR-905", transporte?.plate);
+    check("el cliente también", transporte?.clientName === "TIENDAS PERUANAS SA", transporte?.clientName);
+    check("y el destino", transporte?.destinationCity === "LOCAL", transporte?.destinationCity);
+    check("la fecha del servicio es la del concepto, no la del correo",
+      transporte?.serviceDate === "2026-10-13", transporte?.serviceDate);
+    check("la guía del transportista se guarda aparte de la del remitente",
+      transporte?.grtNumber === "VT01-007988" && transporte?.dispatchNote === "EG03-00000349", transporte);
+
+    // El correo llegó el 3 de octubre: 15 días después es el 18.
+    check("la fecha límite se cuenta desde que llegó el correo",
+      transporte?.payDueDate === "2026-10-18", transporte?.payDueDate);
+  }
+
+  // Un servicio corriente, en cambio, vence al día siguiente y no lleva datos de viaje.
+  const servicio = await correoPorAprobar("servicio");
+  await db.update(invoiceEmails).set({ parsed: { ...COMPROBANTE, number: `${SELLO}8` } })
+    .where(eq(invoiceEmails.id, servicio.id));
+  const [soloServicio] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, servicio.id));
+  const aceptadoServicio = await db.transaction((tx) => registerApprovedEmail(tx, soloServicio, quien, {
+    serviceType: "SERVICIO",
+  }));
+  if (aceptadoServicio.ok) {
+    const [serv] = await db.select().from(supplierInvoices).where(eq(supplierInvoices.id, aceptadoServicio.invoiceId));
+    check("un servicio queda con 1 día de plazo", serv?.termDays === 1, serv?.termDays);
+    check("y sin datos de viaje", !serv?.plate && !serv?.clientName, serv);
+  }
 
   // ---------- No se registra dos veces lo mismo ----------
   // El mismo comprobante llega otra vez (reenvío del proveedor) y alguien intenta

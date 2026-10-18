@@ -12,7 +12,8 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   ATTACHMENT_KIND_LABEL, cn, formatDate, formatDateTime, formatFileSize, formatMoney,
-  DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, invoiceNumber, PAYMENT_TERM_LABEL,
+  DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL,
+  invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL,
 } from "@/lib/utils";
 import { getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -57,7 +58,10 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   };
   const neto = Number(invoice.total) - Number(invoice.detractionAmount ?? 0);
   const saldo = neto - Number(invoice.advances ?? 0);
-  const tieneServicio = !!(invoice.plate || invoice.clientName || invoice.originCity || invoice.destinationCity);
+  // El cuadro del viaje se muestra en toda factura de transporte, aunque esté vacía: lo
+  // que falta ahí es justo lo que hay que completar a mano.
+  const tieneServicio = invoice.serviceType === "TRANSPORTE"
+    || !!(invoice.plate || invoice.clientName || invoice.originCity || invoice.destinationCity);
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
   const ref = {
     id: invoice.id, series: invoice.series, number: invoice.number,
@@ -131,7 +135,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         <div className="grid min-w-0 gap-4">
           <Panel title="Datos del comprobante">
             <dl className="grid grid-cols-2 divide-x divide-y divide-steel-100 border-t border-steel-100 sm:grid-cols-3">
-              <Dato label="Tipo">{INVOICE_DOC_TYPE_LABEL[invoice.docType]}</Dato>
+              <Dato label="Tipo">
+                {INVOICE_DOC_TYPE_LABEL[invoice.docType]}
+                {invoice.serviceType && (
+                  <span className="text-steel-500"> · {INVOICE_SERVICE_TYPE_LABEL[invoice.serviceType]}</span>
+                )}
+              </Dato>
               <Dato label="Número">{invoiceNumber(invoice.series, invoice.number)}</Dato>
               <Dato label="Moneda">{invoice.currency === "USD" ? "Dólares (US$)" : "Soles (S/)"}</Dato>
               <Dato label="Emisión">{formatDate(invoice.issueDate)}</Dato>
@@ -140,7 +149,16 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               <Dato label="Subtotal">{formatMoney(invoice.subtotal, invoice.currency)}</Dato>
               <Dato label="IGV">{formatMoney(invoice.igv, invoice.currency)}</Dato>
               <Dato label="Total"><strong>{formatMoney(invoice.total, invoice.currency)}</strong></Dato>
-              <Dato label="Guía de remisión">{invoice.grtNumber ?? "—"}</Dato>
+              {/* Lo que de verdad sale hacia el proveedor: la detracción va al Banco de
+                  la Nación, así que el total nunca es lo que se le transfiere. */}
+              <Dato label="A pagar al proveedor">
+                <strong>{formatMoney(netoAPagar(invoice.total, invoice.detractionAmount), invoice.currency)}</strong>
+              </Dato>
+              <Dato label="Adelantos entregados">
+                {Number(invoice.advances ?? 0) > 0 ? formatMoney(invoice.advances, invoice.currency) : "—"}
+              </Dato>
+              <Dato label="Guía del transportista">{invoice.grtNumber ?? "—"}</Dato>
+              <Dato label="Guía del remitente">{invoice.dispatchNote ?? "—"}</Dato>
               <Dato label="Origen">{INVOICE_SOURCE_LABEL[invoice.source]}</Dato>
               <Dato label="Llegó el correo">{formatDate(invoice.receptionDate)}</Dato>
               <Dato label="Condición">{PAYMENT_TERM_LABEL[invoice.paymentTerm]} · {invoice.termDays} día(s)</Dato>

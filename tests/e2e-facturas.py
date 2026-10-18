@@ -120,10 +120,12 @@ with sync_playwright() as p:
     assert "Pendientes" in activa, activa
     # La pestaña de pagadas trae solo pagadas, que es lo que se pidió separar.
     page.goto(BASE + "/facturas?estado=PAGADA")
-    estados = set(page.eval_on_selector_all("tbody tr td:nth-child(6)", "e => e.map(x => x.innerText.split('\\n')[0])"))
+    # El estado va en la penúltima columna, justo antes de las acciones.
+    estados = set(page.eval_on_selector_all(
+        "tbody tr td:nth-last-child(2)", "e => e.map(x => x.innerText.split('\\n')[0])"))
     assert estados <= {"Pagada"}, estados
-    # Y el botón Ver queda a la vista sin tener que correr la tabla a la derecha.
-    caja = page.locator("tbody a:has-text('Ver')").first.bounding_box()
+    # Y el ojo de ver queda a la vista sin tener que correr la tabla a la derecha.
+    caja = page.locator("tbody a[title='Ver la factura']").first.bounding_box()
     assert caja and caja["x"] + caja["width"] <= 1440 + 1, caja
     ok("Pendientes y pagadas separadas, con el botón Ver siempre a la vista")
 
@@ -298,6 +300,29 @@ with sync_playwright() as p:
     page.get_by_role("button", name="Desactivar", exact=True).last.click()
     toast(page, "factura(s) pendiente(s)")
     ok("Bloquea desactivar un proveedor con facturas por pagar")
+
+    # --- 14b. Proveedores: cuánto se les debe y cuánto se les pagó
+    page.goto(BASE + "/proveedores")
+    page.wait_for_timeout(1200)
+    resumen = page.inner_text("body")
+    assert "Pendiente de pago" in resumen and "Pagado" in resumen, resumen[:200]
+    # El total de arriba tiene que cuadrar con la base: lo pendiente sin la detracción.
+    esperado = psql("select to_char(coalesce(sum(i.total - coalesce(i.detraction_amount,0)),0),'FM999G999G999D00') "
+                    "from supplier_invoices i where i.status in ('PENDIENTE','OBSERVADA') and i.currency='PEN'")
+    assert esperado.replace(",", ",") in resumen, (esperado, resumen[:400])
+    ok("Proveedores: el total pendiente cuadra con las facturas")
+
+    # Segmentar por destino deja solo lo de ese destino.
+    destino = psql("select destination_city from supplier_invoices where destination_city is not null "
+                   "and status in ('PENDIENTE','OBSERVADA') limit 1")
+    if destino:
+        page.goto(BASE + f"/proveedores?destino={destino.replace(' ', '+')}")
+        page.wait_for_timeout(1200)
+        soloDestino = psql("select to_char(coalesce(sum(i.total - coalesce(i.detraction_amount,0)),0),'FM999G999G999D00') "
+                           f"from supplier_invoices i where i.status in ('PENDIENTE','OBSERVADA') and i.currency='PEN' "
+                           f"and i.destination_city = '{destino}'")
+        assert soloDestino in page.inner_text("body"), (destino, soloDestino)
+        ok("Proveedores: el total se puede segmentar por destino")
 
     # --- 15. Bandeja de correos y su estado
     page.goto(BASE + "/facturas/correos")

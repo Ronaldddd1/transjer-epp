@@ -4,13 +4,15 @@ import { AlertTriangle, Check, Eye, FileText, Mail, MailX, X } from "lucide-reac
 import { useMemo, useState } from "react";
 import { approveEmail, rejectEmail } from "@/actions/mailbox";
 import { Button } from "@/components/ui/button";
+import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
 import { Modal } from "@/components/ui/modal";
 import {
   DEFAULT_TERM_DAYS, formatDate, formatDateTime, formatFileSize, formatMoney,
-  INVOICE_DOC_TYPE_LABEL, invoiceNumber, REJECT_REASON_LABEL, rejectionEmailBody,
-  type PaymentTermKey, type RejectReasonKey,
+  INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, invoiceNumber, REJECT_REASON_LABEL,
+  rejectionEmailBody, TERM_DAYS_BY_SERVICE_TYPE,
+  type InvoiceServiceTypeKey, type PaymentTermKey, type RejectReasonKey,
 } from "@/lib/utils";
 
 /**
@@ -56,6 +58,19 @@ export type CorreoParaDecidir = {
   replyError: string | null;
   decidedAt: string | null;
   decidedByName: string | null;
+  /** Si el concepto tiene pinta de viaje, para proponer el tipo al aprobar. */
+  pareceTransporte?: boolean;
+  /** Lo que se pudo leer del concepto del XML: fecha, placa, cliente, ruta y guías. */
+  viaje?: {
+    leido: boolean;
+    serviceDate: string | null;
+    plate: string | null;
+    clientName: string | null;
+    originCity: string | null;
+    destinationCity: string | null;
+    grtNumber: string | null;
+    dispatchNote: string | null;
+  } | null;
 };
 
 export function etiquetaComprobante(c: ComprobanteLeido | null) {
@@ -225,13 +240,26 @@ export function AceptarModal({ correo, condicion }: {
   /** Lo acordado con ese proveedor, si ya está registrado. */
   condicion?: { paymentTerm: PaymentTermKey; termDays: number } | null;
 }) {
+  // El tipo viene propuesto por lo que dice el concepto, pero lo decide la persona: es
+  // justo lo que vino a hacer a esta pantalla.
+  const [tipo, setTipo] = useState<InvoiceServiceTypeKey>(correo.pareceTransporte ? "TRANSPORTE" : "SERVICIO");
   const [term, setTerm] = useState<PaymentTermKey>(condicion?.paymentTerm ?? "CONTADO");
-  const [termDays, setTermDays] = useState(String(condicion?.termDays ?? DEFAULT_TERM_DAYS.CONTADO));
+  const [termDays, setTermDays] = useState(String(TERM_DAYS_BY_SERVICE_TYPE[correo.pareceTransporte ? "TRANSPORTE" : "SERVICIO"]));
+
+  const cambiarTipo = (valor: InvoiceServiceTypeKey) => {
+    setTipo(valor);
+    // Al cambiar de transporte a servicio el plazo cambia solo: 15 días contra 1. Dejarlo
+    // como estaba sería la forma más fácil de que una factura venza quince días tarde.
+    setTerm("CONTADO");
+    setTermDays(String(TERM_DAYS_BY_SERVICE_TYPE[valor]));
+  };
 
   const cambiarTerm = (valor: PaymentTermKey) => {
     setTerm(valor);
-    setTermDays(String(DEFAULT_TERM_DAYS[valor]));
+    setTermDays(String(valor === "CONTADO" ? TERM_DAYS_BY_SERVICE_TYPE[tipo] : DEFAULT_TERM_DAYS.CREDITO));
   };
+
+  const viaje = correo.viaje;
 
   return (
     <FormModal
@@ -249,6 +277,57 @@ export function AceptarModal({ correo, condicion }: {
       {({ errors }) => (
         <div className="grid gap-4">
           <DatosComprobante correo={correo} />
+
+          <Field
+            label="¿Qué clase de factura es?"
+            name="serviceType"
+            required
+            error={errors.serviceType}
+            hint={tipo === "TRANSPORTE"
+              ? "Un flete se paga a 15 días de recibida la factura."
+              : "Un servicio corriente se paga al contado."}
+          >
+            <Select name="serviceType" value={tipo} onChange={(e) => cambiarTipo(e.target.value as InvoiceServiceTypeKey)}>
+              {Object.entries(INVOICE_SERVICE_TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </Select>
+          </Field>
+
+          {tipo === "TRANSPORTE" && (
+            /* Lo que se pudo leer del concepto del XML. Se muestra para revisarlo, no
+               para confiar en ello: lo que entre mal aquí es lo que después no cuadra
+               con el control de fletes. */
+            <div className="rounded-lg border border-steel-200 p-4">
+              <p className="mb-3 text-sm font-semibold text-ink">
+                Datos del viaje
+                <span className="ml-2 font-normal text-steel-500">
+                  {viaje?.leido ? "leídos del concepto · revísalos" : "no se pudieron leer del concepto · complétalos"}
+                </span>
+              </p>
+              <div className="grid gap-4 sm:grid-cols-3">
+                <Field label="Fecha del servicio" name="serviceDate" error={errors.serviceDate}>
+                  <DateInput name="serviceDate" defaultValue={viaje?.serviceDate ?? ""} invalid={!!errors.serviceDate} />
+                </Field>
+                <Field label="Placa" name="plate" error={errors.plate}>
+                  <Input name="plate" defaultValue={viaje?.plate ?? ""} maxLength={24} className="uppercase" />
+                </Field>
+                <Field label="Cliente" name="clientName" error={errors.clientName}>
+                  <Input name="clientName" defaultValue={viaje?.clientName ?? ""} maxLength={120} />
+                </Field>
+                <Field label="Origen" name="originCity" error={errors.originCity}>
+                  <Input name="originCity" defaultValue={viaje?.originCity ?? ""} maxLength={80} />
+                </Field>
+                <Field label="Destino" name="destinationCity" error={errors.destinationCity}>
+                  <Input name="destinationCity" defaultValue={viaje?.destinationCity ?? ""} maxLength={120} />
+                </Field>
+                <Field label="Guía del transportista" name="grtNumber" error={errors.grtNumber}>
+                  <Input name="grtNumber" defaultValue={viaje?.grtNumber ?? correo.comprobante?.grtNumber ?? ""} maxLength={40} />
+                </Field>
+                <Field label="Guía del remitente" name="dispatchNote" error={errors.dispatchNote} className="sm:col-span-3">
+                  <Input name="dispatchNote" defaultValue={viaje?.dispatchNote ?? ""} maxLength={40} />
+                </Field>
+              </div>
+            </div>
+          )}
 
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm}>

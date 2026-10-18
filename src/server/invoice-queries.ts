@@ -148,6 +148,8 @@ const invoiceColumns = {
   statusReason: supplierInvoices.statusReason,
   source: supplierInvoices.source,
   receivedAt: supplierInvoices.receivedAt,
+  serviceType: supplierInvoices.serviceType,
+  dispatchNote: supplierInvoices.dispatchNote,
   contactName: supplierInvoices.contactName,
   plate: supplierInvoices.plate,
   clientName: supplierInvoices.clientName,
@@ -256,11 +258,43 @@ export async function getInvoiceEmail(invoiceId: string) {
 
 // ---------- Proveedores ----------
 
-export async function listSuppliers(opts: { q?: string; active?: boolean } = {}, limit = 20, offset = 0) {
+export type SupplierFilters = {
+  q?: string;
+  active?: boolean;
+  /** Las facturas que entran en los totales: por fecha de emisión y por destino. */
+  from?: string;
+  to?: string;
+  destino?: string;
+};
+
+/**
+ * Los totales de cada proveedor, acotados a lo que se esté mirando.
+ *
+ * El mismo tramo de SQL se usa para la fila de cada proveedor y para el resumen de
+ * arriba, para que los dos números no puedan contradecirse. La detracción se descuenta
+ * porque es lo que de verdad se le paga al proveedor: lo otro va al Banco de la Nación.
+ */
+function facturasDelProveedor(f: SupplierFilters, columna = elProveedor) {
+  const condiciones = [sql`i.supplier_id = ${columna}`, sql`i.status <> 'ANULADA'`];
+  if (f.from) condiciones.push(sql`i.issue_date >= ${f.from}::date`);
+  if (f.to) condiciones.push(sql`i.issue_date <= ${f.to}::date`);
+  if (f.destino) condiciones.push(sql`i.destination_city = ${f.destino}`);
+  return sql.join(condiciones, sql` and `);
+}
+
+const neto = sql`(i.total - coalesce(i.detraction_amount, 0))`;
+
+export async function listSuppliers(opts: SupplierFilters = {}, limit = 20, offset = 0) {
   const where = and(
     opts.active !== undefined ? eq(suppliers.active, opts.active) : undefined,
     opts.q ? or(ilike(suppliers.businessName, like(opts.q)), ilike(suppliers.ruc, like(opts.q)), ilike(suppliers.tradeName, like(opts.q))) : undefined,
   );
+  const suyas = facturasDelProveedor(opts);
+  // Cada moneda por su lado: sumar soles con dólares daría un número que no es plata.
+  const importe = (estado: "PENDIENTE" | "PAGADA", moneda: "PEN" | "USD") => sql<string>`(
+    select coalesce(sum(${neto}), 0)::text from ${supplierInvoices} i
+    where ${suyas} and i.currency = ${moneda}
+      and ${estado === "PAGADA" ? sql`i.status = 'PAGADA'` : sql`i.status in ('PENDIENTE','OBSERVADA')`})`;
   const [rows, [totals]] = await Promise.all([
     db.select({
       id: suppliers.id,
@@ -275,12 +309,64 @@ export async function listSuppliers(opts: { q?: string; active?: boolean } = {},
       defaultTermDays: suppliers.defaultTermDays,
       active: suppliers.active,
       isDemo: suppliers.isDemo,
-      invoiceCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${elProveedor})`,
-      pendingCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = ${elProveedor} and i.status = 'PENDIENTE')`,
+      invoiceCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where ${suyas})`,
+      pendingCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where ${suyas} and i.status in ('PENDIENTE','OBSERVADA'))`,
+      paidCount: sql<number>`(select count(*)::int from ${supplierInvoices} i where ${suyas} and i.status = 'PAGADA')`,
+      pendingPen: importe("PENDIENTE", "PEN"),
+      pendingUsd: importe("PENDIENTE", "USD"),
+      paidPen: importe("PAGADA", "PEN"),
+      paidUsd: importe("PAGADA", "USD"),
     }).from(suppliers).where(where).orderBy(asc(suppliers.businessName)).limit(limit).offset(offset),
     db.select({ total: count() }).from(suppliers).where(where),
   ]);
   return { rows, total: totals?.total ?? 0 };
+}
+
+/**
+ * El resumen de arriba: lo mismo que suman las filas, pero de TODOS los proveedores que
+ * cumplen el filtro, no solo de los que caben en la página.
+ */
+export async function supplierTotals(f: SupplierFilters = {}) {
+  const condiciones: SQL[] = [sql`${supplierInvoices.status} <> 'ANULADA'`];
+  if (f.from) condiciones.push(sql`${supplierInvoices.issueDate} >= ${f.from}::date`);
+  if (f.to) condiciones.push(sql`${supplierInvoices.issueDate} <= ${f.to}::date`);
+  if (f.destino) condiciones.push(sql`${supplierInvoices.destinationCity} = ${f.destino}`);
+  if (f.active !== undefined) condiciones.push(sql`${suppliers.active} = ${f.active}`);
+  if (f.q) {
+    condiciones.push(sql`(${ilike(suppliers.businessName, like(f.q))} or ${ilike(suppliers.ruc, like(f.q))})`);
+  }
+
+  const importe = (estado: "PENDIENTE" | "PAGADA", moneda: "PEN" | "USD") => sql<string>`coalesce(sum(
+    case when ${supplierInvoices.currency} = ${moneda}
+      and ${estado === "PAGADA" ? sql`${supplierInvoices.status} = 'PAGADA'` : sql`${supplierInvoices.status} in ('PENDIENTE','OBSERVADA')`}
+    then (${supplierInvoices.total} - coalesce(${supplierInvoices.detractionAmount}, 0)) else 0 end), 0)::text`;
+
+  const [fila] = await db.select({
+    facturas: sql<number>`count(*)::int`,
+    pendientes: sql<number>`count(*) filter (where ${supplierInvoices.status} in ('PENDIENTE','OBSERVADA'))::int`,
+    pagadas: sql<number>`count(*) filter (where ${supplierInvoices.status} = 'PAGADA')::int`,
+    pendingPen: importe("PENDIENTE", "PEN"),
+    pendingUsd: importe("PENDIENTE", "USD"),
+    paidPen: importe("PAGADA", "PEN"),
+    paidUsd: importe("PAGADA", "USD"),
+  })
+    .from(supplierInvoices)
+    .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
+    .where(and(...condiciones));
+
+  return fila ?? {
+    facturas: 0, pendientes: 0, pagadas: 0,
+    pendingPen: "0", pendingUsd: "0", paidPen: "0", paidUsd: "0",
+  };
+}
+
+/** Los destinos ya usados, para el filtro. */
+export async function getDestinationOptions() {
+  const rows = await db.selectDistinct({ name: supplierInvoices.destinationCity })
+    .from(supplierInvoices)
+    .where(sql`${supplierInvoices.destinationCity} is not null and ${supplierInvoices.destinationCity} <> ''`)
+    .orderBy(asc(supplierInvoices.destinationCity));
+  return rows.map((r) => r.name!).filter(Boolean);
 }
 
 export async function getSupplierOptions() {

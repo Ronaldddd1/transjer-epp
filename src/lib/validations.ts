@@ -57,9 +57,21 @@ export const productBaseSchema = z.object({
  */
 export const productEditSchema = productBaseSchema.extend({
   code: requiredText("El código", 30).transform((v) => v.toUpperCase()),
+  /**
+   * La cantidad también se corrige desde la ficha. No se escribe directo sobre el stock:
+   * la diferencia entra como un ajuste de inventario, para que el historial siga
+   * explicando de dónde sale cada unidad.
+   */
+  stock: intField("La cantidad"),
 });
 
-export const productCreateSchema = productEditSchema.extend({
+/**
+ * El alta no pide la cantidad: la pide como "stock inicial", que además deja su
+ * movimiento de entrada. Si heredara el `stock` de la edición, el formulario de alta
+ * pediría un campo que no tiene y no dejaría registrar nada.
+ */
+export const productCreateSchema = productBaseSchema.extend({
+  code: requiredText("El código", 30).transform((v) => v.toUpperCase()),
   initialStock: intField("El stock inicial"),
 });
 
@@ -395,10 +407,21 @@ export const observeInvoiceSchema = z.object({
  * la pacta la empresa con el proveedor.
  */
 export const approveEmailSchema = z.object({
+  /** Transporte o servicio: de ahí sale el plazo y los datos que se piden. */
+  serviceType: z.enum(["TRANSPORTE", "SERVICIO"], { required_error: "Indica si es transporte o servicio" }),
   paymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
   termDays: z.coerce.number().int("Los días deben ser un número entero")
     .min(0, "No puede ser negativo").max(365, "Son demasiados días").default(0),
   description: optionalText(250),
+  // Datos del viaje. Vienen leídos del concepto del XML y se pueden corregir antes de
+  // aceptar: lo que entra mal aquí es lo que después no cuadra con el control de fletes.
+  serviceDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  plate: optionalText(24),
+  clientName: optionalText(120),
+  originCity: optionalText(80),
+  destinationCity: optionalText(120),
+  grtNumber: optionalText(40),
+  dispatchNote: optionalText(40),
 });
 
 /**

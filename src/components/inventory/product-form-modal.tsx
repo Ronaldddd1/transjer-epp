@@ -17,7 +17,7 @@ export function ProductFormModal({ categories, product }: { categories: Option[]
   return (
     <FormModal
       title={editing ? `Editar ${product.code}` : "Nuevo EPP"}
-      description={editing ? "El stock no se edita aquí: usa Registrar entrada, salida o ajuste." : "Los campos con * son obligatorios."}
+      description={editing ? "Todos los campos se pueden corregir, incluida la cantidad." : "Los campos con * son obligatorios."}
       submitLabel={editing ? "Guardar cambios" : "Registrar EPP"}
       size="lg"
       action={(fd) => (editing ? updateProduct(product.id, fd) : createProduct(fd))}
@@ -64,9 +64,22 @@ export function ProductFormModal({ categories, product }: { categories: Option[]
               {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
             </Select>
           </Field>
-          {!editing && (
+          {!editing ? (
             <Field label="Stock inicial" name="initialStock" required error={errors.initialStock} hint="Se registra como una entrada.">
               <Input name="initialStock" type="number" min={0} step={1} inputMode="numeric" defaultValue={0} invalid={!!errors.initialStock} />
+            </Field>
+          ) : (
+            /* La cantidad se corrige desde aquí, pero entra como un ajuste de inventario:
+               así el stock sigue cuadrando con los movimientos y la corrección queda con
+               fecha y responsable. */
+            <Field
+              label="Cantidad"
+              name="stock"
+              required
+              error={errors.stock}
+              hint="Si la corriges, se registra como un ajuste de inventario."
+            >
+              <Input name="stock" type="number" min={0} step={1} inputMode="numeric" defaultValue={product?.stock ?? 0} invalid={!!errors.stock} />
             </Field>
           )}
           <Field label="Stock mínimo" name="minimumStock" required error={errors.minimumStock} hint="Bajo este nivel se marca como Stock bajo.">

@@ -4,7 +4,10 @@
  * luego ejecuta `npm run db:generate` y `npm run db:migrate`.
  */
 import { relations, sql } from "drizzle-orm";
-import { OBLIGATION_TYPES, type InvoiceEmailStatusKey, type ObligationTypeKey } from "@/lib/utils";
+import {
+  OBLIGATION_TYPES,
+  type InvoiceEmailStatusKey, type InvoiceServiceTypeKey, type ObligationTypeKey,
+} from "@/lib/utils";
 import {
   boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   uniqueIndex, uuid, varchar,
@@ -256,6 +259,13 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   description: varchar("description", { length: 250 }),
   /** Guía de Remisión Transportista asociada al servicio. */
   grtNumber: varchar("grt_number", { length: 40 }),
+  /** Guía de remisión del remitente (la del cliente), cuando el XML la trae. */
+  dispatchNote: varchar("dispatch_note", { length: 40 }),
+  /**
+   * Qué clase de factura es, según quien la aprueba: transporte o servicio.
+   * Decide el plazo de pago y qué datos se piden. Null en las anteriores a este cambio.
+   */
+  serviceType: varchar("service_type", { length: 12 }).$type<InvoiceServiceTypeKey>(),
   // --- Datos del servicio de transporte, tal como se controlaban en el Excel ---
   /** Quién coordinó el servicio con el transportista. */
   contactName: varchar("contact_name", { length: 120 }),
@@ -322,6 +332,7 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   // Una detracción pagada siempre guarda su fecha de depósito, y una sin pagar nunca la tiene.
   check("invoices_detraction_paid_consistent", sql`(${t.detractionStatus} = 'PAGADA') = (${t.detractionPaidAt} is not null)`),
   check("invoices_total_positive", sql`${t.total} > 0`),
+  check("invoices_service_type_valid", sql`${t.serviceType} is null or ${t.serviceType} in ('TRANSPORTE','SERVICIO')`),
   check("invoices_currency_valid", sql`${t.currency} in ('PEN','USD')`),
   // Una factura pagada siempre guarda su fecha de pago, y viceversa.
   check("invoices_paid_consistent", sql`(${t.status} = 'PAGADA') = (${t.paidAt} is not null)`),

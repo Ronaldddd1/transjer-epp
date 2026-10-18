@@ -73,6 +73,25 @@ export const INVOICE_STATUS_LABEL = {
 } as const;
 export type InvoiceStatusKey = keyof typeof INVOICE_STATUS_LABEL;
 
+/**
+ * Qué clase de factura es, decidida por quien la aprueba.
+ *
+ * Separa las dos cosas que la empresa compra, y que no se pagan igual: un flete se paga
+ * a 15 días desde que llega la factura, y un servicio corriente al contado.
+ */
+export const INVOICE_SERVICE_TYPE_LABEL = {
+  TRANSPORTE: "Factura de transporte",
+  SERVICIO: "Factura de servicio",
+} as const;
+export type InvoiceServiceTypeKey = keyof typeof INVOICE_SERVICE_TYPE_LABEL;
+export const INVOICE_SERVICE_TYPES = Object.keys(INVOICE_SERVICE_TYPE_LABEL) as InvoiceServiceTypeKey[];
+
+/** Días de plazo según lo que se compró. El transporte se paga a 15 días del correo. */
+export const TERM_DAYS_BY_SERVICE_TYPE: Record<InvoiceServiceTypeKey, number> = {
+  TRANSPORTE: 15,
+  SERVICIO: 1,
+};
+
 export const INVOICE_DOC_TYPE_LABEL = {
   FACTURA: "Factura",
   BOLETA: "Boleta",
@@ -330,6 +349,21 @@ export function formatMoney(amount: string | number | null | undefined, currency
   if (!Number.isFinite(n)) return "—";
   const symbol = CURRENCY_SYMBOL[currency as keyof typeof CURRENCY_SYMBOL] ?? currency;
   return `${symbol} ${new Intl.NumberFormat("es-PE", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)}`;
+}
+
+/**
+ * Lo que se le transfiere al proveedor: el total menos la detracción.
+ *
+ * La detracción no se le paga a él, va al Banco de la Nación, así que el importe del
+ * comprobante nunca es el que sale de caja hacia el proveedor. Tenerlo calculado evita
+ * la resta a mano en cada pago, que es donde se escapaban los errores.
+ */
+export function netoAPagar(total: string | number | null | undefined, detraccion: string | number | null | undefined): string {
+  const t = Number(total ?? 0);
+  const d = Number(detraccion ?? 0);
+  if (!Number.isFinite(t)) return "0.00";
+  const neto = t - (Number.isFinite(d) ? d : 0);
+  return (neto > 0 ? neto : 0).toFixed(2);
 }
 
 /** Número completo del comprobante: F001-2589 */

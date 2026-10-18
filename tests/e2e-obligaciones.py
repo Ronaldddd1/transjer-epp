@@ -371,9 +371,28 @@ def main():
         page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
         cuerpo = page.content()
 
-        check("hay un total a pagar del mes", "Total a pagar este mes" in cuerpo)
+        check("dice cuánto falta pagar este mes", "Falta pagar este mes" in cuerpo)
+        check("y cuánto cuesta el mes completo", "Total del mes, pagado o no" in cuerpo)
         check("explica lo que viene arrastrado", "meses anteriores" in cuerpo)
-        check("cada tipo dice su total del mes", "este mes" in cuerpo)
+        check("cada tipo dice su total del mes", "total del mes" in cuerpo)
+
+        # El total del mes no se encoge a medida que se paga: eso es lo que antes no se
+        # podía ver, porque el único número que había era el saldo.
+        ejecutar("update obligation_installments set status = 'PAGADA', paid_at = current_date, "
+                 "paid_amount = total where obligation_id in "
+                 f"(select id from obligations where name like '%{SELLO}%') and total is not null")
+        page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
+        pagado = page.content()
+        check("pagado todo, el total del mes sigue a la vista",
+              "Total del mes, pagado o no" in pagado and "ya pagado" in pagado)
+        # Se deshace el pago: lo que sigue mira los saldos pendientes de estas mismas
+        # obligaciones, y dejarlas pagadas haría fallar comprobaciones que no tienen
+        # nada que ver con esto.
+        ejecutar("update obligation_installments set status = 'PENDIENTE', paid_at = null, "
+                 "paid_amount = null where obligation_id in "
+                 f"(select id from obligations where name like '%{SELLO}%')")
+        page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
+        cuerpo = page.content()
 
         # Cada tipo nuevo tiene su propia tabla, con su plural bien escrito.
         for plural in ["Cocheras", "Seguros", "Líneas móviles"]:

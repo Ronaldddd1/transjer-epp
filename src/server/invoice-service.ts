@@ -8,7 +8,10 @@ import {
 import { BusinessError } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_RATE, invoiceNumber, normalizeSupplierName } from "@/lib/utils";
+import {
+  computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_RATE, invoiceNumber,
+  normalizeSupplierName, type InvoiceServiceTypeKey,
+} from "@/lib/utils";
 import { putFile, removeFile, safeName } from "./storage";
 import { detectAttachmentKind, parseSunatXml, XmlParseError, type ParsedInvoice } from "./sunat-xml";
 
@@ -31,6 +34,10 @@ export type InvoiceInput = {
   total: string;
   description?: string | null;
   grtNumber?: string | null;
+  /** Guía del remitente, cuando el concepto del XML la trae. */
+  dispatchNote?: string | null;
+  /** Transporte o servicio: lo decide quien aprueba el comprobante. */
+  serviceType?: InvoiceServiceTypeKey | null;
   notes?: string | null;
   source?: "MANUAL" | "CORREO";
   receivedAt?: Date | null;
@@ -150,6 +157,8 @@ export async function insertInvoice(
     total: input.total,
     description: input.description ?? null,
     grtNumber: input.grtNumber ?? null,
+    dispatchNote: input.dispatchNote ?? null,
+    serviceType: input.serviceType ?? null,
     notes: input.notes ?? null,
     source: input.source ?? "MANUAL",
     receivedAt: input.receivedAt ?? null,
