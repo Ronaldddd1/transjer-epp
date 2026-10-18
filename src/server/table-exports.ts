@@ -583,6 +583,9 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "talla", header: "Talla", width: 8 },
           { key: "color", header: "Color", width: 12 },
           { key: "unidad", header: "Unidad", width: 11 },
+          { key: "ingresado", header: "Ingresado", width: 11, align: "right" },
+          { key: "entregado", header: "Entregado", width: 11, align: "right" },
+          { key: "otros", header: "Otros movimientos", width: 16, align: "right" },
           { key: "stock", header: "Stock", width: 9, align: "right" },
           { key: "minimo", header: "Stock mínimo", width: 12, align: "right" },
           { key: "estado", header: "Estado", width: 12 },
@@ -590,11 +593,17 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         rows: rows.map((p) => ({
           codigo: p.code, producto: p.name, categoria: p.categoryName, marca: texto(p.brand),
           talla: texto(p.size), color: texto(p.color), unidad: p.unit,
+          ingresado: p.ingresado, entregado: p.entregado,
+          // Mermas, traslados y ajustes: lo que explica que ingresado − entregado no dé
+          // exactamente el stock. En la columna, para que la resta cuadre en el Excel.
+          otros: p.stock - (p.ingresado - p.entregado),
           stock: p.stock, minimo: p.minimumStock,
           estado: STOCK_STATUS_LABEL[stockStatus(p.stock, p.minimumStock)],
         })),
         summary: [
           { label: "Productos", value: rows.length },
+          { label: "Unidades ingresadas", value: rows.reduce((s, p) => s + p.ingresado, 0) },
+          { label: "Unidades entregadas", value: rows.reduce((s, p) => s + p.entregado, 0) },
           { label: "Unidades en stock", value: rows.reduce((s, p) => s + p.stock, 0) },
         ],
       }];

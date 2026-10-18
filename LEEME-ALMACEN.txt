@@ -1,0 +1,129 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Entrega por cantidades, inventario que explica el stock, y almacén en cero
+==========================================================================
+
+Tres cambios y un comando para vaciar el almacén.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate
+
+No hay migración nueva en esta entrega, pero el comando no hace daño y confirma que la
+base está al día.
+
+
+1. ENTREGAR VARIOS EPP DE UNA VEZ
+---------------------------------
+
+Al abrir "Registrar entrega", ahora aparece el trabajador arriba y DEBAJO LA LISTA
+COMPLETA DE EPP, todos en blanco. Se escribe la cantidad solo en lo que se entrega y se
+guarda una sola vez.
+
+  · Lo que queda vacío o en cero no se registra ni toca el stock.
+  · Las casillas muestran el 0 en gris, pero vacías: así escribes directo el número sin
+    tener que borrar el cero antes. Para el sistema es exactamente lo mismo.
+  · Si un EPP está agotado, su casilla sale bloqueada.
+  · Si escribes más de lo que hay, el campo se pone en rojo y el sistema no deja guardar.
+  · Abajo se va armando el resumen: "Se entregarán 4 EPP · 9 unidad(es): 1 Casco,
+    2 Guantes…". Con la lista larga es fácil perder de vista lo que se escribió arriba.
+  · Hay un buscador para filtrar la lista. Lo que escribiste antes de filtrar NO se
+    pierde: sigue contando y se registra igual.
+
+La fecha, el motivo y las observaciones son los mismos para toda la entrega.
+
+Por dentro se sigue guardando una entrega por EPP —igual que antes—, así que el historial
+del trabajador, el "EPP a su cargo", las devoluciones y las anulaciones funcionan igual.
+Lo que cambió es cuántas veces hay que llenar el formulario.
+
+Importante: todo se registra en una sola operación. Si uno de los EPP falla (por stock),
+no se registra ninguno. Quedar a medias —con la mitad del stock descontado— sería peor
+que no registrar nada, porque nadie sabría en qué punto se cortó.
+
+
+2. EL INVENTARIO AHORA EXPLICA EL STOCK
+---------------------------------------
+
+Dos columnas nuevas, antes del stock:
+
+    INGRESADO   todo lo que entró de ese EPP (compras, devoluciones al stock, anulaciones)
+    ENTREGADO   todo lo que salió hacia trabajadores
+    STOCK       lo que queda
+
+La resta cuadra: ingresado − entregado = stock.
+
+Cuando NO cuadra, es porque hubo mermas, traslados a otra sede o ajustes por conteo. En
+ese caso la fila lo dice con un "−3 otros" debajo del stock, en vez de dejarte un número
+que parece equivocado. Pasando el cursor por encima se explica de qué se trata.
+
+Las tres columnas salen también en el Excel del inventario, con una columna más de "otros
+movimientos" para que la resta cuadre también ahí.
+
+
+3. TODOS LOS CAMPOS SE PUEDEN EDITAR
+------------------------------------
+
+El código del EPP ya se puede corregir. Era el único campo que quedaba bloqueado después
+de crear el producto, y un código mal escrito obligaba a crear el EPP de nuevo y perder su
+historial.
+
+Al cambiarlo, el historial sigue colgando del mismo producto: cambia la etiqueta, no la
+cosa. Si el código nuevo ya lo usa otro EPP, el sistema lo dice con nombre y apellido
+("El código EPP-010 ya lo usa Casco de seguridad") en vez de soltar un error raro.
+
+El cambio queda en auditoría: "modificó el producto EPP-010, que pasó a llamarse EPP-015".
+
+
+4. VACIAR EL ALMACÉN PARA EMPEZAR DE CERO
+-----------------------------------------
+
+    npm run db:limpiar-almacen                 ← mira y respalda, NO borra
+    npm run db:limpiar-almacen -- --confirmar  ← borra de verdad
+
+BORRA: entregas, devoluciones, movimientos, productos y categorías.
+NO TOCA: trabajadores ni sus documentos, facturas, detracciones, obligaciones, usuarios.
+
+Córrelo primero SIN `--confirmar`. Eso hace dos cosas:
+
+  · Te muestra cuántas filas hay de cada cosa, para que veas qué se va a perder.
+  · Guarda un respaldo en CSV de TODO lo que borraría, en una carpeta `respaldos/` con la
+    fecha y la hora. Si mañana hace falta un dato de lo que había, está ahí y se abre con
+    Excel.
+
+Recién cuando estés conforme, lo corres con `--confirmar`. Se borra todo dentro de una
+sola transacción: o queda vacío entero o no se toca nada.
+
+Esto NO se puede deshacer. El respaldo es tu única vuelta atrás, así que guárdalo fuera
+de la carpeta del proyecto (la carpeta `respaldos/` no se sube a GitHub, a propósito).
+
+DESPUÉS DE VACIARLO, el orden para cargar:
+
+  1. Categorías (Administración → Categorías).
+  2. Los EPP, con su stock inicial y su stock mínimo.
+  3. A partir de ahí, las entradas por compra y las entregas normales.
+
+Probé el sistema con el almacén vacío: el dashboard, el inventario, los movimientos, las
+entregas, el resumen, las devoluciones y los reportes abren sin errores, y el formulario
+de entrega dice "No hay EPP registrados todavía" en vez de quedarse en blanco.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  422 comprobaciones de lógica     — todas pasan
+  10 recorridos en el navegador    — todos pasan
+
+De lo nuevo, lo que más importa:
+
+  · Entregar cuatro EPP juntos deja la base exactamente igual que entregarlos uno por
+    uno: mismo stock, una entrega por EPP, mismo movimiento de salida a nombre del
+    trabajador.
+  · Lo que va en cero no se registra ni toca el stock.
+  · Si una cantidad supera el stock, la entrega entera se cae y ningún otro EPP queda
+    descontado.
+  · Ingresado − entregado da exactamente el stock, y una merma aparece como diferencia
+    ("otros") en vez de descuadrar el número sin explicación.
+  · El código se corrige y el historial del EPP lo sigue: los movimientos no se pierden.
+  · La limpieza se probó sobre una copia de la base: dejó el almacén en cero y los 6
+    trabajadores, sus 56 documentos, las 168 facturas y las 20 obligaciones intactos, con
+    el respaldo en CSV completo (11 productos, 79 movimientos, 63 entregas).

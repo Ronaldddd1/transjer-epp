@@ -7,7 +7,7 @@ import { products } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { productBaseSchema, productCreateSchema } from "@/lib/validations";
+import { productCreateSchema, productEditSchema } from "@/lib/validations";
 import { applyMovement } from "@/server/inventory";
 
 export async function createProduct(formData: FormData): Promise<ActionResult> {
@@ -42,15 +42,28 @@ export async function createProduct(formData: FormData): Promise<ActionResult> {
 export async function updateProduct(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("products.manage");
-    const data = productBaseSchema.parse(formToObject(formData));
+    const data = productEditSchema.parse(formToObject(formData));
 
     await db.transaction(async (tx) => {
       const [before] = await tx.select().from(products).where(eq(products.id, id));
       if (!before || !before.active) throw new BusinessError("El producto no existe o fue eliminado.");
+
+      // El código es único: si ya lo tiene otro EPP hay que decirlo con nombre y
+      // apellido, no dejar que reviente la base con un error que nadie entiende.
+      if (data.code !== before.code) {
+        const [repetido] = await tx.select({ id: products.id, name: products.name })
+          .from(products).where(eq(products.code, data.code)).limit(1);
+        if (repetido && repetido.id !== id) {
+          throw new BusinessError(`El código ${data.code} ya lo usa "${repetido.name}".`);
+        }
+      }
+
       const [after] = await tx.update(products).set(data).where(eq(products.id, id)).returning();
       await logAudit({
         user, action: "EDITAR", module: "PRODUCTOS", recordId: id,
-        description: `${user.name} modificó el producto ${before.code}.`,
+        description: data.code !== before.code
+          ? `${user.name} modificó el producto ${before.code}, que pasó a llamarse ${after.code}.`
+          : `${user.name} modificó el producto ${before.code}.`,
         oldData: before, newData: after,
       }, tx);
     });

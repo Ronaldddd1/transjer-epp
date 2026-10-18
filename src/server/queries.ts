@@ -96,10 +96,25 @@ export async function listProducts(opts: { q?: string; categoryId?: string; stat
   const sortCol = SORTS[(opts.sort as ProductSort) ?? "code"] ?? products.code;
   const order = opts.dir === "desc" ? desc(sortCol) : asc(sortCol);
 
+  /**
+   * Lo que entró y lo que se entregó, por producto.
+   *
+   * Se calculan desde los movimientos, no desde una columna guardada: así la resta
+   * siempre cuadra con el stock, incluso cuando hubo mermas, traslados o ajustes. Lo que
+   * no es ninguna de las dos cosas sale como "otros" en la pantalla, para que el número
+   * nunca parezca estar mal sin explicación.
+   */
+  const elProducto = sql.raw('"products"."id"');
+  const ingresado = sql<number>`(select coalesce(sum(m.quantity), 0)::int from ${inventoryMovements} m
+    where m.product_id = ${elProducto} and m.type = 'ENTRADA')`;
+  const entregado = sql<number>`(select coalesce(sum(m.quantity), 0)::int from ${inventoryMovements} m
+    where m.product_id = ${elProducto} and m.type = 'SALIDA' and m.employee_id is not null)`;
+
   const query = db.select({
     id: products.id, code: products.code, name: products.name, categoryId: products.categoryId, categoryName: categories.name,
     description: products.description, brand: products.brand, size: products.size, color: products.color, unit: products.unit,
     stock: products.stock, minimumStock: products.minimumStock, notes: products.notes, updatedAt: products.updatedAt, isDemo: products.isDemo,
+    ingresado, entregado,
   }).from(products).innerJoin(categories, eq(products.categoryId, categories.id)).where(where).orderBy(order, asc(products.code)).$dynamic();
 
   const [rows, [{ total }]] = await Promise.all([

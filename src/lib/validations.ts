@@ -48,9 +48,32 @@ export const productBaseSchema = z.object({
   notes: optionalText(1000),
 });
 
-export const productCreateSchema = productBaseSchema.extend({
+/**
+ * El código también se edita.
+ *
+ * Antes quedaba fijo al crear el producto, y un código mal escrito se arrastraba para
+ * siempre o forzaba a crear el producto de nuevo y perder su historial. Al cambiarlo, el
+ * historial sigue colgando del mismo producto: lo que cambia es la etiqueta, no la cosa.
+ */
+export const productEditSchema = productBaseSchema.extend({
   code: requiredText("El código", 30).transform((v) => v.toUpperCase()),
+});
+
+export const productCreateSchema = productEditSchema.extend({
   initialStock: intField("El stock inicial"),
+});
+
+/**
+ * Entrega de varios EPP a un mismo trabajador, de una sola vez.
+ *
+ * Las cantidades llegan como un campo por producto (`cantidad_<id>`), así que se validan
+ * en la acción: aquí van los datos que son comunes a toda la entrega.
+ */
+export const bulkDeliverySchema = z.object({
+  employeeId: z.string().uuid("Selecciona un trabajador"),
+  deliveryDate: ymd,
+  reason: requiredText("El motivo", 120),
+  notes: optionalText(1000),
 });
 
 export const categorySchema = z.object({

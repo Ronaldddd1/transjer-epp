@@ -31,8 +31,14 @@ export function ProductFormModal({ categories, product }: { categories: Option[]
     >
       {({ errors }) => (
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Código" name="code" required error={errors.code} hint={editing ? "El código no se puede cambiar." : "Ejemplo: EPP-010"}>
-            <Input name="code" defaultValue={product?.code} disabled={editing} invalid={!!errors.code} className="uppercase" maxLength={30} />
+          <Field
+            label="Código"
+            name="code"
+            required
+            error={errors.code}
+            hint={editing ? "Se puede corregir. El historial del EPP no se pierde." : "Ejemplo: EPP-010"}
+          >
+            <Input name="code" defaultValue={product?.code} invalid={!!errors.code} className="uppercase" maxLength={30} />
           </Field>
           <Field label="Nombre del producto" name="name" required error={errors.name}>
             <Input name="name" defaultValue={product?.name} invalid={!!errors.name} maxLength={150} />

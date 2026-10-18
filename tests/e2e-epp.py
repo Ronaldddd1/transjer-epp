@@ -94,17 +94,67 @@ with sync_playwright() as p:
     assert psql("select stock from products where code='REG-001'") == "12"
     ok("El stock nunca queda negativo")
 
-    # 5. Entrega descuenta stock y aparece en el historial del trabajador
+    # 5. Entrega: la lista sale entera en cero y solo se escribe lo que se entrega
     emp = psql("select id from employees where is_demo order by last_name limit 1")
     page.goto(BASE + f"/trabajadores/{emp}")
     page.get_by_role("button", name="Registrar entrega").click()
-    m.locator("#productId").select_option(prod)
-    m.locator("#quantity").fill("2")
+    page.wait_for_timeout(800)
+    cantidades = m.locator("input[name^='cantidad_']")
+    assert cantidades.count() > 1, cantidades.count()
+    assert all(cantidades.nth(i).input_value() == "" for i in range(min(5, cantidades.count())))
+    ok("Entrega: todos los EPP aparecen en cero")
+
+    # Se escribe solo el que se entrega; los demás quedan como estaban.
+    otro = psql("select id from products where code <> 'REG-001' and active order by code limit 1")
+    stock_otro = psql("select stock from products where id = '%s'" % otro)
+    m.locator(f"input[name='cantidad_{prod}']").fill("2")
+    assert "2 Guante de prueba de regresión" in m.inner_text(), m.inner_text()[:300]
     m.get_by_role("button", name="Registrar entrega").click()
     toast(page, "Entrega registrada")
     assert psql("select stock from products where code='REG-001'") == "10"
+    assert psql("select stock from products where id = '%s'" % otro) == stock_otro
     expect(page.get_by_role("row").filter(has_text="Guante de prueba de regresión")).to_be_visible()
-    ok("Entrega: descuenta stock y queda en el historial del trabajador")
+    ok("Entrega: descuenta solo lo escrito y queda en el historial del trabajador")
+
+    # 5b. El inventario explica el stock: ingresado − entregado
+    page.goto(BASE + "/inventario?q=REG-001")
+    page.wait_for_timeout(1200)
+    fila_inv = page.get_by_role("row").filter(has_text="REG-001")
+    texto_inv = fila_inv.inner_text()
+    # Entraron 12, salieron 2 por entrega y 0 por merma: 12 − 2 = 10.
+    assert "12" in texto_inv and "10" in texto_inv, texto_inv
+    assert "otros" not in texto_inv.lower(), texto_inv
+    ok("Inventario: muestra lo ingresado, lo entregado y el stock")
+
+    # Una merma hace que la resta deje de cuadrar, y eso se dice en la fila en vez de
+    # dejar un número que parece equivocado.
+    page.get_by_role("button", name="Registrar salida").first.click()
+    m.locator("#productId").select_option(prod)
+    m.locator("#quantity").fill("1")
+    m.locator("#reason").select_option("Merma / deterioro")
+    m.get_by_role("button", name="Registrar salida").click()
+    toast(page, "stock")
+    page.goto(BASE + "/inventario?q=REG-001")
+    page.wait_for_timeout(1200)
+    assert "otros" in page.get_by_role("row").filter(has_text="REG-001").inner_text().lower()
+    ok("Inventario: la merma se explica como diferencia, no como error")
+
+    # 5c. El código se puede corregir sin perder el historial
+    movs_antes = psql("select count(*) from inventory_movements mv join products pr on pr.id=mv.product_id where pr.code='REG-001'")
+    page.get_by_role("button", name="Editar").first.click()
+    m.locator("#code").fill("REG-999")
+    m.get_by_role("button", name="Guardar cambios").click()
+    toast(page, "actualizado")
+    assert psql("select count(*) from products where code='REG-999'") == "1"
+    assert psql("select count(*) from inventory_movements mv join products pr on pr.id=mv.product_id where pr.code='REG-999'") == movs_antes
+    # Y se vuelve a dejar como estaba, para no romper lo que sigue.
+    page.goto(BASE + "/inventario?q=REG-999")
+    page.wait_for_timeout(1000)
+    page.get_by_role("button", name="Editar").first.click()
+    m.locator("#code").fill("REG-001")
+    m.get_by_role("button", name="Guardar cambios").click()
+    toast(page, "actualizado")
+    ok("El código del EPP se puede corregir y el historial lo sigue")
 
     # 6. Anulación de entrega devuelve el stock
     page.goto(BASE + "/entregas")
@@ -113,7 +163,8 @@ with sync_playwright() as p:
     m.locator("#voidReason").fill("Prueba de regresión de anulación")
     m.get_by_role("button", name="Anular entrega").click()
     toast(page, "anulada")
-    assert psql("select stock from products where code='REG-001'") == "12"
+    # Entraron 12, se entregaron 2 (ahora anuladas, vuelven) y se dio de baja 1 por merma.
+    assert psql("select stock from products where code='REG-001'") == "11"
     ok("Anular una entrega devuelve el stock")
 
     # 7. Categorías y trabajadores siguen operativos
