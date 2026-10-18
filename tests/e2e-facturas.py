@@ -301,7 +301,7 @@ with sync_playwright() as p:
 
     # --- 15. Bandeja de correos y su estado
     page.goto(BASE + "/facturas/correos")
-    expect(page.get_by_role("heading", name="Correos de facturas")).to_be_visible()
+    expect(page.get_by_role("heading", name="Comprobantes recibidos")).to_be_visible()
     expect(page.get_by_text("Sin configurar")).to_be_visible()
     # Sin nada configurado se proponen las variables de IMAP, que es el camino que sirve
     # con cualquier correo y no necesita que un administrador registre nada.

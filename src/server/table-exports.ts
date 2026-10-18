@@ -3,8 +3,9 @@ import {
   ATTACHMENT_KIND_LABEL, DETRACTION_STATUS_LABEL, formatDate, formatDateTime, INSTALLMENT_STATUS_LABEL,
   INVOICE_DOC_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
   EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
-  PAYMENT_TERM_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL, STOCK_STATUS_LABEL, stockStatus,
-  type SearchParamsRecord,
+  PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
+  STOCK_STATUS_LABEL, stockStatus,
+  type RejectReasonKey, type SearchParamsRecord,
 } from "@/lib/utils";
 import type { Permission } from "@/lib/permissions";
 import {
@@ -668,25 +669,44 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         title: "Correos de facturas",
         columns: [
           { key: "recibido", header: "Recibido", width: 18 },
-          { key: "de", header: "De", width: 30 },
-          { key: "asunto", header: "Asunto", width: 44 },
+          { key: "comprobante", header: "Comprobante", width: 14 },
+          { key: "proveedor", header: "Proveedor", width: 32 },
+          { key: "importe", header: "Importe", width: 12, align: "right" },
+          { key: "de", header: "De", width: 28 },
           { key: "estado", header: "Estado", width: 13 },
-          { key: "adjuntos", header: "Adjuntos", width: 10, align: "right" },
+          { key: "decidio", header: "Decidió", width: 20 },
+          { key: "motivo", header: "Motivo del rechazo", width: 34 },
+          { key: "avisado", header: "Aviso al proveedor", width: 22 },
           { key: "factura", header: "Factura registrada", width: 16 },
-          { key: "detalle", header: "Qué pasó", width: 50 },
+          { key: "detalle", header: "Qué pasó", width: 46 },
         ],
-        rows: rows.map((e) => ({
-          recibido: formatDateTime(e.receivedAt),
-          de: texto(e.fromAddress),
-          asunto: texto(e.subject),
-          estado: EMAIL_STATUS_LABEL[e.status],
-          adjuntos: e.attachmentCount,
-          factura: e.invoiceSeries && e.invoiceNumber ? invoiceNumber(e.invoiceSeries, e.invoiceNumber) : "",
-          detalle: texto(e.detail),
-        })),
+        rows: rows.map((e) => {
+          const c = e.parsed as { series?: string; number?: string; supplierName?: string; total?: string; currency?: string } | null;
+          return {
+            recibido: formatDateTime(e.receivedAt),
+            comprobante: c?.series && c?.number ? invoiceNumber(c.series, c.number) : "",
+            proveedor: texto(c?.supplierName ?? e.supplierName),
+            importe: c?.total ? `${c.currency === "USD" ? "US$" : "S/"} ${c.total}` : "",
+            de: texto(e.fromAddress),
+            estado: EMAIL_STATUS_LABEL[e.status],
+            decidio: texto(e.decidedByName),
+            motivo: e.rejectReason
+              ? `${REJECT_REASON_LABEL[e.rejectReason as RejectReasonKey] ?? e.rejectReason}${e.rejectComment ? ` — ${e.rejectComment}` : ""}`
+              : "",
+            // Un rechazo cuyo aviso no salió es lo que hay que perseguir: el proveedor no
+            // sabe que su factura fue devuelta.
+            avisado: e.status !== "RECHAZADO" ? ""
+              : e.replySentAt ? `Sí, ${formatDateTime(e.replySentAt)}`
+              : e.replyError ? `No salió: ${e.replyError}` : "No se envió",
+            factura: e.invoiceSeries && e.invoiceNumber ? invoiceNumber(e.invoiceSeries, e.invoiceNumber) : "",
+            detalle: texto(e.detail),
+          };
+        }),
         summary: [
           { label: "Correos", value: rows.length },
-          { label: "Por revisar", value: rows.filter((e) => e.status === "REVISAR").length },
+          { label: "Por aprobar", value: rows.filter((e) => e.status === "POR_APROBAR").length },
+          { label: "Rechazados", value: rows.filter((e) => e.status === "RECHAZADO").length },
+          { label: "Por revisar", value: rows.filter((e) => e.status === "REVISAR" || e.status === "ERROR").length },
         ],
       }];
     },

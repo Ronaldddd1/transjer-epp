@@ -89,12 +89,82 @@ export const ATTACHMENT_KIND_LABEL = {
   OTRO: "Otro documento",
 } as const;
 
+/**
+ * En qué punto está un correo del buzón.
+ *
+ *   POR_APROBAR  se leyó el comprobante y espera que una persona lo acepte o lo rechace
+ *   PROCESADO    aceptado: la factura quedó registrada
+ *   RECHAZADO    devuelto al proveedor, con el motivo y el correo que se le envió
+ *   REVISAR      no se pudo leer el comprobante (sin XML, dañado); se resuelve a mano
+ *   DESCARTADO   no era una factura por pagar, o ya estaba registrada
+ *   ERROR        falló la lectura del correo; se puede reintentar
+ */
 export const EMAIL_STATUS_LABEL = {
-  PROCESADO: "Procesado",
+  POR_APROBAR: "Por aprobar",
+  PROCESADO: "Aceptado",
+  RECHAZADO: "Rechazado",
   REVISAR: "Por revisar",
   DESCARTADO: "Descartado",
   ERROR: "Con error",
 } as const;
+
+export const INVOICE_EMAIL_STATUSES = Object.keys(EMAIL_STATUS_LABEL) as InvoiceEmailStatusKey[];
+export type InvoiceEmailStatusKey = keyof typeof EMAIL_STATUS_LABEL;
+
+/** Motivos por los que se devuelve un comprobante al proveedor. */
+export const REJECT_REASON_LABEL = {
+  DATOS_ERRADOS: "Datos equivocados en el comprobante",
+  NO_CORRESPONDE: "El servicio no corresponde o no se recibió",
+  IMPORTE: "El importe no coincide con lo acordado",
+  FALTA_GRT: "Falta la guía de remisión",
+  OTRA_EMPRESA: "Está emitida a otra empresa",
+  DUPLICADO: "Ya nos habían enviado este comprobante",
+  OTRO: "Otro motivo",
+} as const;
+
+export type RejectReasonKey = keyof typeof REJECT_REASON_LABEL;
+export const REJECT_REASONS = Object.keys(REJECT_REASON_LABEL) as RejectReasonKey[];
+
+/**
+ * El correo que se le manda al proveedor cuando se le devuelve un comprobante.
+ *
+ * Se arma aquí, y no en el servidor, para que la persona vea exactamente el texto que va
+ * a salir y pueda corregirlo antes de enviarlo. Un rechazo mal redactado llega igual de
+ * lejos que uno bien redactado, así que conviene leerlo antes.
+ */
+export function rejectionEmailBody(datos: {
+  comprobante: string | null;
+  proveedor: string | null;
+  motivo: RejectReasonKey | string;
+  comentario: string;
+  empresa?: string;
+  firma?: string;
+}): string {
+  const motivo = REJECT_REASON_LABEL[datos.motivo as RejectReasonKey] ?? "Otro motivo";
+  const empresa = datos.empresa?.trim() || "Transjer Operador Logístico S.A.C.";
+  const saludo = datos.proveedor ? `Estimados señores de ${datos.proveedor}:` : "Estimados señores:";
+  const cual = datos.comprobante ? `el comprobante ${datos.comprobante}` : "el comprobante que nos enviaron";
+  const comentario = datos.comentario.trim();
+
+  // Las líneas en blanco son parte del texto, así que lo que se descarta son las partes
+  // que no aplican (el comentario vacío), no los espacios entre párrafos.
+  const lineas: (string | null)[] = [
+    saludo,
+    "",
+    `Les escribimos para informarles que no podemos aceptar ${cual}.`,
+    "",
+    `Motivo: ${motivo}.`,
+    comentario ? "" : null,
+    comentario || null,
+    "",
+    "Les agradeceremos corregirlo y volver a enviarlo a este mismo correo. Mientras tanto, el comprobante no queda registrado para pago.",
+    "",
+    "Quedamos atentos.",
+    "",
+    datos.firma?.trim() || empresa,
+  ];
+  return lineas.filter((l) => l !== null).join("\n");
+}
 
 /**
  * Reduce el nombre de un proveedor a lo esencial para poder compararlo.

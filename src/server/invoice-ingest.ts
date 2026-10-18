@@ -1,26 +1,32 @@
 import "server-only";
 import { eq } from "drizzle-orm";
 import { db } from "@/db";
-import { invoiceEmails } from "@/db/schema";
+import { invoiceEmails, suppliers } from "@/db/schema";
 import { logAudit } from "@/lib/audit";
 import type { CurrentUser } from "@/lib/auth";
-import { computePayDueDate, invoiceNumber } from "@/lib/utils";
+import { invoiceNumber } from "@/lib/utils";
 import {
   getAttachments, getMessage, listMessagesSince, type GraphAttachment, type GraphMessage,
 } from "./graph";
 import { imapReader } from "./imap";
 import type { MailboxConfig } from "./mailbox-config";
 import {
-  customerWarning, findDuplicate, findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment,
+  customerWarning, findDuplicate, parseFirstXml, saveAttachment,
 } from "./invoice-service";
 import { getSyncState, setSyncState } from "./mailbox-state";
 
 /**
- * Convierte un correo recibido en una factura registrada.
+ * Deja listo para decidir lo que llega al buzón.
  *
- * Si el correo trae el XML del comprobante, la factura se crea sola y queda pendiente de pago.
- * Si no se puede leer (falta el XML, viene dañado o ya estaba registrado), el correo queda en la
- * bandeja "Por revisar" con sus archivos, para que la encargada decida. Nunca se pierde nada.
+ * Lo que entra por correo es lo que el proveedor dice que se le debe, que no es lo mismo
+ * que lo que la empresa reconoce. Por eso ningún correo crea una factura por su cuenta: si
+ * el XML se puede leer, el comprobante queda "Por aprobar" con todos sus datos a la vista
+ * y alguien de Finanzas lo acepta —ahí recién se registra la factura— o lo rechaza, y en
+ * ese caso el sistema le responde al proveedor.
+ *
+ * Si el XML no se puede leer (no viene, está dañado), el correo cae en "Por revisar" con
+ * sus archivos, para registrarlo a mano. Si el comprobante ya estaba registrado, se
+ * descarta solo: eso no hay nada que decidirlo. Nunca se pierde nada.
  */
 
 /**
@@ -68,7 +74,7 @@ export function readerFor(config: MailboxConfig): MailReader {
 }
 
 export type IngestOutcome =
-  | { result: "creada"; invoiceId: string; label: string }
+  | { result: "por_aprobar"; emailId: string; label: string; aviso: string | null }
   | { result: "revisar"; reason: string }
   | { result: "duplicado"; reason: string }
   | { result: "ya_registrado" }
@@ -135,79 +141,57 @@ export async function ingestMessage(config: MailboxConfig, messageId: string, le
         fromAddress: from.address,
         fromName: from.name,
         receivedAt: new Date(message.receivedDateTime),
-        status: "REVISAR",
+        status: "POR_APROBAR",
         attachmentCount: files.length,
         parsed: parsed.parsed,
       }).onConflictDoNothing({ target: invoiceEmails.messageId }).returning();
       if (!email) return { result: "ya_registrado" as const };
 
-      const { supplier } = await findOrCreateSupplier(
-        tx, { ruc: parsed.parsed.supplierRuc, businessName: parsed.parsed.supplierName }, SYSTEM_USER,
-      );
+      for (const file of files) await saveAttachment(tx, { emailId: email.id, ...file });
 
-      const docRef = {
-        supplierId: supplier.id, docType: parsed.parsed.docType,
-        series: parsed.parsed.series, number: parsed.parsed.number,
-      };
-      const duplicate = await findDuplicate(tx, docRef);
-      if (duplicate) {
-        const reason = `El comprobante ${invoiceNumber(docRef.series, docRef.number)} de ${supplier.businessName} ya estaba registrado.`;
-        for (const file of files) await saveAttachment(tx, { emailId: email.id, ...file });
-        await tx.update(invoiceEmails)
-          .set({ status: "DESCARTADO", detail: reason, invoiceId: duplicate.id, processedAt: new Date() })
-          .where(eq(invoiceEmails.id, email.id));
-        return { result: "duplicado" as const, reason };
-      }
+      const label = invoiceNumber(parsed.parsed.series, parsed.parsed.number);
 
-      // La condición de pago sale de lo pactado con ese proveedor. Si es a crédito, la
-      // factura entra sin fecha límite: el plazo arranca cuando alguien anote la entrega
-      // física de la guía, que es lo que el sistema no puede saber por correo.
-      const recepcion = new Date(message.receivedDateTime);
-      const recepcionYmd = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Lima" }).format(recepcion);
-      const invoice = await insertInvoice(tx, {
-        ...docRef,
-        issueDate: parsed.parsed.issueDate,
-        dueDate: parsed.parsed.dueDate,
-        currency: parsed.parsed.currency,
-        subtotal: parsed.parsed.subtotal,
-        igv: parsed.parsed.igv,
-        total: parsed.parsed.total,
-        description: parsed.parsed.description,
-        grtNumber: parsed.parsed.grtNumber,
-        source: "CORREO",
-        receivedAt: recepcion,
-        paymentTerm: supplier.defaultPaymentTerm,
-        termDays: supplier.defaultTermDays,
-        payDueDate: computePayDueDate({
-          paymentTerm: supplier.defaultPaymentTerm,
-          termDays: supplier.defaultTermDays,
-          receptionYmd: recepcionYmd,
-        }),
-      }, SYSTEM_USER);
+      /**
+       * El proveedor se busca, pero no se crea todavía.
+       *
+       * Antes se creaba al leer el correo, y así un comprobante que terminaba rechazado
+       * dejaba igual un proveedor nuevo en la lista. Ahora el alta ocurre al aceptar, que
+       * es cuando la empresa reconoce de verdad a ese proveedor.
+       */
+      const [proveedor] = await tx.select().from(suppliers)
+        .where(eq(suppliers.ruc, parsed.parsed.supplierRuc)).limit(1);
 
-      for (const file of files) {
-        await saveAttachment(tx, { invoiceId: invoice.id, ...file });
+      if (proveedor) {
+        const duplicate = await findDuplicate(tx, {
+          supplierId: proveedor.id, docType: parsed.parsed.docType,
+          series: parsed.parsed.series, number: parsed.parsed.number,
+        });
+        if (duplicate) {
+          // Un comprobante ya registrado no es algo que haya que decidir: se descarta solo
+          // y queda el enlace a la factura que ya existe, por si alguien lo busca.
+          const reason = `El comprobante ${label} de ${proveedor.businessName} ya estaba registrado.`;
+          await tx.update(invoiceEmails)
+            .set({ status: "DESCARTADO", detail: reason, invoiceId: duplicate.id, processedAt: new Date() })
+            .where(eq(invoiceEmails.id, email.id));
+          return { result: "duplicado" as const, reason };
+        }
       }
 
       const aviso = customerWarning(parsed.parsed);
-      await tx.update(invoiceEmails).set({
-        status: "PROCESADO",
-        invoiceId: invoice.id,
-        detail: aviso,
-        processedAt: new Date(),
-      }).where(eq(invoiceEmails.id, email.id));
+      if (aviso) {
+        await tx.update(invoiceEmails).set({ detail: aviso }).where(eq(invoiceEmails.id, email.id));
+      }
 
-      const label = invoiceNumber(invoice.series, invoice.number);
       await logAudit({
         user: SYSTEM_USER,
         action: "IMPORTAR",
         module: "CORREO",
-        recordId: invoice.id,
-        description: `Se registró automáticamente la factura ${label} de ${supplier.businessName} recibida de ${from.address ?? "un remitente desconocido"}.${aviso ? ` Aviso: ${aviso}` : ""}`,
-        newData: { factura: invoice, correo: { asunto: message.subject, de: from.address } },
+        recordId: email.id,
+        description: `Llegó el comprobante ${label} de ${parsed.parsed.supplierName} desde ${from.address ?? "un remitente desconocido"}. Queda pendiente de aprobación.${aviso ? ` Aviso: ${aviso}` : ""}`,
+        newData: { comprobante: parsed.parsed, correo: { asunto: message.subject, de: from.address } },
       }, tx);
 
-      return { result: "creada" as const, invoiceId: invoice.id, label };
+      return { result: "por_aprobar" as const, emailId: email.id, label, aviso };
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "No se pudo registrar la factura.";
@@ -248,7 +232,7 @@ async function recordEmail(
   }
 }
 
-export type SyncSummary = { revisados: number; creadas: number; revisar: number; duplicados: number; errores: number };
+export type SyncSummary = { revisados: number; porAprobar: number; revisar: number; duplicados: number; errores: number };
 
 /**
  * Repasa el buzón desde la última revisión. Sirve como respaldo del aviso instantáneo:
@@ -261,7 +245,7 @@ export async function syncMailbox(config: MailboxConfig, options: { sinceDays?: 
     ? new Date(Date.parse(state.lastMessageAt) - 5 * 60_000) // 5 minutos de margen
     : new Date(Date.now() - fallbackDays * 24 * 60 * 60 * 1000);
 
-  const summary: SyncSummary = { revisados: 0, creadas: 0, revisar: 0, duplicados: 0, errores: 0 };
+  const summary: SyncSummary = { revisados: 0, porAprobar: 0, revisar: 0, duplicados: 0, errores: 0 };
   let lastMessageAt = state?.lastMessageAt ?? null;
 
   try {
@@ -270,7 +254,7 @@ export async function syncMailbox(config: MailboxConfig, options: { sinceDays?: 
     for (const message of messages) {
       summary.revisados++;
       const outcome = await ingestMessage(config, message.id, reader);
-      if (outcome.result === "creada") summary.creadas++;
+      if (outcome.result === "por_aprobar") summary.porAprobar++;
       else if (outcome.result === "revisar") summary.revisar++;
       else if (outcome.result === "duplicado") summary.duplicados++;
       else if (outcome.result === "error") summary.errores++;

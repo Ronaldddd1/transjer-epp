@@ -113,7 +113,9 @@ export function DetractionBadge({ status }: { status: string }) {
 }
 
 const EMAIL_TONE: Record<string, BadgeTone> = {
+  POR_APROBAR: "blue",
   PROCESADO: "green",
+  RECHAZADO: "red",
   REVISAR: "yellow",
   DESCARTADO: "neutral",
   ERROR: "red",

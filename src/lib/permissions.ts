@@ -13,6 +13,10 @@ export const PERMISSIONS = [
   "invoices.view", "invoices.manage", "invoices.pay",
   "suppliers.manage",
   "invoices.mailbox",
+  // Aceptar o rechazar un comprobante que llegó por correo. Va aparte de invoices.manage
+  // porque decide si la empresa reconoce la deuda y, al rechazar, sale un correo firmado
+  // por la empresa: no es lo mismo que registrar una factura ya aceptada.
+  "invoices.approve",
   "obligations.view", "obligations.manage", "obligations.pay",
   "detractions.view", "detractions.manage",
   "documents.view", "documents.manage",
@@ -40,7 +44,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   ],
   // Administración y Finanzas: gestiona las facturas de proveedores, no el almacén.
   FINANZAS: [
-    "invoices.view", "invoices.manage", "invoices.pay",
+    "invoices.view", "invoices.manage", "invoices.pay", "invoices.approve",
     "suppliers.manage",
     "obligations.view", "obligations.manage", "obligations.pay",
     "detractions.view", "detractions.manage",

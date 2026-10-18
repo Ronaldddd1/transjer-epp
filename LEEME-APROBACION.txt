@@ -1,0 +1,146 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Aprobar o rechazar los comprobantes que llegan por correo
+=========================================================
+
+Lo que cambia de fondo: UN CORREO YA NO REGISTRA NADA POR SU CUENTA.
+
+Antes, un correo con el XML legible creaba la factura solo y quedaba pendiente de pago.
+Ahora el comprobante espera en el buzón a que alguien lo acepte o lo rechace. Lo que manda
+el proveedor es lo que él dice que se le debe; que eso sea deuda de Transjer lo decide una
+persona.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate
+
+El `npm install` esta vez sí hace falta: se agregó la librería que envía los correos. La
+migración agrega las columnas de la decisión (quién, cuándo, motivo, si el aviso salió).
+
+
+1. LA PANTALLA
+--------------
+
+Proveedores → Buzón de correo, que ahora se llama COMPROBANTES RECIBIDOS.
+
+Cinco pestañas con su número:
+
+    Por aprobar · Por revisar · Aceptados · Rechazados · Todos
+
+Se entra directo por POR APROBAR, que es a lo que se entra. Arriba sale el aviso de
+cuántos esperan decisión.
+
+Cada fila muestra lo que hace falta para decidir sin abrir nada: número del comprobante,
+proveedor con su RUC, importe y cuándo llegó. La tabla ahora entra en el ancho de la
+pantalla y los botones quedan fijos a la derecha: ya no hay que bajar hasta la barra de
+abajo y correrla a mano.
+
+El ojito (VER) abre el comprobante completo: emisión, vencimiento, subtotal, IGV, guía de
+remisión, a qué RUC fue emitido, el concepto, de qué correo salió y los archivos adjuntos
+para abrirlos. Todo sin salir de la pantalla.
+
+
+2. ACEPTAR
+----------
+
+Al aceptar, recién ahí:
+
+  · nace la factura por pagar, con exactamente los datos del XML;
+  · se da de alta el proveedor, si no estaba;
+  · los archivos del correo pasan a colgar de la factura.
+
+Lo único que se elige al aceptar es la CONDICIÓN DE PAGO —contado o crédito, y los días—,
+porque eso no viene en el comprobante: lo pacta la empresa, no el proveedor. Si ese
+proveedor ya está registrado, se propone lo que tienen acordado.
+
+Los datos del comprobante no se editan: son los del XML firmado y electrónicamente valen
+eso. Si algo está mal, no se acepta: se rechaza.
+
+Si entre que llegó el correo y que alguien lo aprueba la misma factura se registró a mano,
+el sistema lo detecta y no crea una segunda.
+
+
+3. RECHAZAR, CON EL CORREO AL PROVEEDOR
+---------------------------------------
+
+Al rechazar se elige un motivo, se escribe un comentario, y el sistema arma el correo de
+devolución. Se ve el texto completo antes de enviarlo y se puede corregir: sale a nombre
+de la empresa, así que conviene leerlo.
+
+Motivos: datos equivocados · el servicio no corresponde o no se recibió · el importe no
+coincide · falta la guía de remisión · está emitida a otra empresa · ya nos la habían
+enviado · otro motivo.
+
+El correo sale del mismo buzón `facturas@transjer.com`, como respuesta en el mismo hilo en
+que escribió el proveedor. No hay que abrir Outlook.
+
+Se puede desmarcar "Enviarle este correo al proveedor" si en ese momento no corresponde
+avisar: el rechazo queda igual, pero marcado como SIN AVISAR.
+
+Rechazar no registra ninguna factura. Queda guardado el motivo, el comentario, quién
+decidió, cuándo, y el correo tal como se envió.
+
+QUÉ PASA SI EL CORREO NO SALE. El rechazo se guarda igual —la decisión ya se tomó— pero
+la lista marca la fila en rojo con "sin avisar" y explica por qué falló. Esto importa: un
+proveedor que no recibió la devolución va a seguir esperando que le paguen, y sin este
+aviso se vería igual que uno al que sí se le respondió.
+
+
+4. QUIÉN PUEDE DECIDIR
+----------------------
+
+Administrador y Finanzas. Los demás roles ven la bandeja pero no tienen los botones de
+aceptar y rechazar.
+
+Es un permiso aparte del de registrar facturas, a propósito: aceptar decide si la empresa
+reconoce una deuda, y rechazar manda un correo firmado por Transjer. No es lo mismo que
+registrar una factura que ya se aceptó.
+
+
+5. QUÉ TIENES QUE CONFIGURAR
+----------------------------
+
+Las mismas variables de las que hablamos para leer el correo:
+
+    IMAP_HOST        mail.transjer.com
+    IMAP_PORT        993
+    IMAP_USER        facturas@transjer.com
+    IMAP_PASSWORD    (la contraseña del buzón)
+    INVOICE_MAILBOX  facturas@transjer.com
+    CRON_SECRET      (una cadena larga al azar)
+
+Para ENVIAR no hace falta configurar nada más: el sistema usa ese mismo buzón y el mismo
+servidor, por el puerto 465. Si tu hosting usara otro, se cambia con SMTP_PORT (prueba
+587) o, si el correo de salida fuera otra cuenta, con SMTP_HOST, SMTP_USER y
+SMTP_PASSWORD.
+
+CÓMO COMPROBARLO: en Comprobantes recibidos, el botón PROBAR CONEXIÓN ahora prueba las dos
+cosas —leer y enviar— sin mandarle nada a nadie. Si dice "la lectura funciona pero el
+envío no", es el puerto o la contraseña, y el mensaje te dice cuál de los dos.
+
+Lo único que NO pude probar de verdad desde aquí es el envío contra tu servidor: hace
+falta la contraseña del buzón. Todo lo demás está probado; el envío en sí lo confirmas con
+ese botón en un minuto.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  402 comprobaciones de lógica    — todas pasan
+  351 en el navegador, 10 recorridos — todos pasan (uno nuevo, de aprobación)
+
+Lo que más importa de lo nuevo:
+
+  · Leer un correo NO crea factura ni da de alta al proveedor. Se comprueba contando las
+    facturas después de leer el buzón entero: cero.
+  · Aceptar registra exactamente lo del XML: importe, fechas, guía, moneda.
+  · Los archivos no se duplican al aceptar: el mismo PDF no queda dos veces en el almacén.
+  · Un comprobante ya registrado no se puede aceptar de nuevo, ni aunque el proveedor lo
+    reenvíe.
+  · El correo de rechazo se arma bien con y sin comentario, nombra al proveedor, dice el
+    motivo en palabras y no deja huecos ni párrafos pegados.
+  · Un motivo desconocido no rompe el correo.
+  · El envío hereda el servidor y la contraseña del buzón; en el puerto 587 el cifrado
+    arranca después, y sin contraseña no se intenta enviar nada.
+  · En pantalla: se entra por lo que espera decisión, la tabla entra en el ancho sin barra
+    horizontal, aceptar deja la factura pendiente de pago y rechazar no registra nada.

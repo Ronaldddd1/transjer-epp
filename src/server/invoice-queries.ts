@@ -6,7 +6,7 @@ import {
   invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
   type DetractionStatus, type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
 } from "@/db/schema";
-import { first, isYmd, type SearchParamsRecord } from "@/lib/utils";
+import { first, INVOICE_EMAIL_STATUSES, isYmd, type SearchParamsRecord } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 
@@ -297,7 +297,7 @@ export async function getSupplierOptions() {
 // ---------- Bandeja de correos ----------
 
 export type EmailFilters = { q?: string; status?: InvoiceEmailStatus; from?: string; to?: string };
-const EMAIL_STATUSES: InvoiceEmailStatus[] = ["PROCESADO", "REVISAR", "DESCARTADO", "ERROR"];
+const EMAIL_STATUSES: InvoiceEmailStatus[] = INVOICE_EMAIL_STATUSES;
 
 export function readEmailFilters(sp: SearchParamsRecord): EmailFilters {
   const status = first(sp.estado) as InvoiceEmailStatus | undefined;
@@ -312,8 +312,12 @@ export function readEmailFilters(sp: SearchParamsRecord): EmailFilters {
 }
 
 export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0) {
+  // "Por revisar" junta REVISAR y ERROR: para quien mira son lo mismo —correos que el
+  // sistema no pudo leer y alguien tiene que resolver— y separarlos haría que la pestaña
+  // dijera un número y la lista mostrara otro.
   const where = and(
-    f.status ? eq(invoiceEmails.status, f.status) : undefined,
+    f.status === "REVISAR" ? inArray(invoiceEmails.status, ["REVISAR", "ERROR"])
+      : f.status ? eq(invoiceEmails.status, f.status) : undefined,
     f.from ? gte(invoiceEmails.receivedAt, new Date(`${f.from}T00:00:00-05:00`)) : undefined,
     f.to ? lte(invoiceEmails.receivedAt, new Date(`${f.to}T23:59:59.999-05:00`)) : undefined,
     f.q ? or(ilike(invoiceEmails.subject, like(f.q)), ilike(invoiceEmails.fromAddress, like(f.q)), ilike(invoiceEmails.fromName, like(f.q))) : undefined,
@@ -332,10 +336,22 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
       invoiceSeries: supplierInvoices.series,
       invoiceNumber: supplierInvoices.number,
       supplierName: suppliers.businessName,
+      // Los datos leídos del XML. Son los que se miran para aceptar o rechazar, así que
+      // viajan con la fila: sin ellos habría que abrir cada correo para saber qué trae.
+      parsed: invoiceEmails.parsed,
+      rejectReason: invoiceEmails.rejectReason,
+      rejectComment: invoiceEmails.rejectComment,
+      replyTo: invoiceEmails.replyTo,
+      replySentAt: invoiceEmails.replySentAt,
+      replyError: invoiceEmails.replyError,
+      decidedAt: invoiceEmails.decidedAt,
+      decidedByName: users.name,
+      internetMessageId: invoiceEmails.internetMessageId,
     })
       .from(invoiceEmails)
       .leftJoin(supplierInvoices, eq(invoiceEmails.invoiceId, supplierInvoices.id))
       .leftJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
+      .leftJoin(users, eq(invoiceEmails.decidedBy, users.id))
       .where(where)
       .orderBy(desc(invoiceEmails.receivedAt))
       .limit(limit).offset(offset),
@@ -344,9 +360,31 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
   return { rows, total: totals?.total ?? 0 };
 }
 
+/**
+ * Cuántos correos hay en cada estado, para las pestañas.
+ *
+ * Lo que importa de verdad es el primer número: los comprobantes que están esperando que
+ * alguien decida. Mientras ese número no sea cero, hay proveedores esperando respuesta.
+ */
+export async function emailCounts() {
+  const [row] = await db.select({
+    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR')::int`,
+    revisar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,
+    aceptados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'PROCESADO')::int`,
+    rechazados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'RECHAZADO')::int`,
+    descartados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'DESCARTADO')::int`,
+    total: sql<number>`count(*)::int`,
+  }).from(invoiceEmails);
+  return row ?? { porAprobar: 0, revisar: 0, aceptados: 0, rechazados: 0, descartados: 0, total: 0 };
+}
+
+/**
+ * Correos que esperan a una persona: los que hay que aprobar y los que no se pudieron
+ * leer. Es el número que sale en el menú, y mientras no sea cero hay trabajo pendiente.
+ */
 export async function countEmailsToReview() {
   const [row] = await db.select({ total: count() }).from(invoiceEmails)
-    .where(or(eq(invoiceEmails.status, "REVISAR"), eq(invoiceEmails.status, "ERROR")));
+    .where(inArray(invoiceEmails.status, ["POR_APROBAR", "REVISAR", "ERROR"]));
   return row?.total ?? 0;
 }
 

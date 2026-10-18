@@ -7,8 +7,8 @@ import { invoiceAttachments, invoiceEmails } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { invoiceNumber } from "@/lib/utils";
-import { invoiceSchema, observeInvoiceSchema } from "@/lib/validations";
+import { invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey } from "@/lib/utils";
+import { approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema } from "@/lib/validations";
 import {
   createSubscription, deleteSubscription, getSubscription, notificationUrl,
   renewSubscription, resetTokenCache, testConnection,
@@ -16,7 +16,9 @@ import {
 import { testImapConnection } from "@/server/imap";
 import { readMailboxConfig } from "@/server/mailbox-config";
 import { ingestMessage, syncMailbox } from "@/server/invoice-ingest";
+import { parsedOf, registerApprovedEmail } from "@/server/invoice-approval";
 import { insertInvoice } from "@/server/invoice-service";
+import { sendMail, verifySmtp } from "@/server/mailer";
 import { clearSubscriptionState, getSubscriptionState, setSubscriptionState } from "@/server/mailbox-state";
 
 function requireConfig() {
@@ -49,7 +51,17 @@ export async function testMailbox(): Promise<ActionResult> {
     const config = requireConfig();
     if (config.kind === "imap") {
       const info = await testImapConnection(config);
-      return { ok: true, message: `Conexión correcta con el buzón ${info.address} (${info.displayName}).` };
+      // Se prueba también el correo de SALIDA, sin mandarle nada a nadie. Leer y enviar
+      // son dos conexiones distintas, y la de salida solo se usa al rechazar: sin esto,
+      // la primera vez que falla sería en medio de un rechazo.
+      const salida = await verifySmtp();
+      return {
+        ok: true,
+        message: `Conexión correcta con el buzón ${info.address} (${info.displayName}).`
+          + (salida.ok
+            ? " El envío de respuestas al proveedor también funciona."
+            : ` Ojo: se puede leer, pero no enviar. ${salida.error}`),
+      };
     }
     resetTokenCache();
     const info = await testConnection(config);
@@ -143,18 +155,125 @@ export async function syncMailboxNow(): Promise<ActionResult> {
     const r = await syncMailbox(config);
     await logAudit({
       user, action: "IMPORTAR", module: "CORREO",
-      description: `${user.name} revisó el buzón: ${r.revisados} correo(s), ${r.creadas} factura(s) registrada(s).`,
+      description: `${user.name} revisó el buzón: ${r.revisados} correo(s), ${r.porAprobar} comprobante(s) por aprobar.`,
       newData: r,
     });
     revalidatePath("/", "layout");
     const partes = [
       `${r.revisados} correo(s) revisado(s)`,
-      r.creadas ? `${r.creadas} factura(s) registrada(s)` : null,
+      r.porAprobar ? `${r.porAprobar} comprobante(s) por aprobar` : null,
       r.revisar ? `${r.revisar} por revisar` : null,
       r.duplicados ? `${r.duplicados} ya registrada(s)` : null,
       r.errores ? `${r.errores} con error` : null,
     ].filter(Boolean);
     return { ok: true, message: `${partes.join(", ")}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Acepta el comprobante: recién aquí nace la factura por pagar.
+ *
+ * Hasta este momento el correo era solo lo que mandó el proveedor. Al aceptarlo, la
+ * empresa reconoce la deuda, se da de alta al proveedor si no estaba y los archivos del
+ * correo pasan a colgar de la factura.
+ */
+export async function approveEmail(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.approve");
+    const data = approveEmailSchema.parse(formToObject(formData));
+    const [email] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, id)).limit(1);
+    if (!email) throw new BusinessError("El correo no existe.");
+    if (email.status === "PROCESADO") throw new BusinessError("Este comprobante ya fue aceptado.");
+    if (email.status !== "POR_APROBAR") {
+      throw new BusinessError("Solo se pueden aceptar los comprobantes que están por aprobar.");
+    }
+
+    const resultado = await db.transaction((tx) => registerApprovedEmail(tx, email, user, {
+      paymentTerm: data.paymentTerm,
+      termDays: data.termDays,
+      description: data.description,
+    }));
+
+    revalidatePath("/", "layout");
+    if (!resultado.ok) return { ok: false, message: resultado.error };
+    return { ok: true, message: `Comprobante aceptado. Quedó registrado como factura ${resultado.label}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Rechaza el comprobante y le responde al proveedor.
+ *
+ * El rechazo se guarda aunque el correo no salga: la decisión ya se tomó y no puede
+ * depender de que el servidor de correo esté de buenas. Lo que sí se guarda es que el
+ * aviso falló, y la pantalla lo muestra, porque un proveedor que no recibió la devolución
+ * va a seguir esperando que le paguen.
+ */
+export async function rejectEmail(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.approve");
+    const data = rejectEmailSchema.parse(formToObject(formData));
+    const [email] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, id)).limit(1);
+    if (!email) throw new BusinessError("El correo no existe.");
+    if (email.status === "PROCESADO") {
+      throw new BusinessError("Este comprobante ya fue aceptado. Si hay que darlo de baja, anula la factura.");
+    }
+    if (email.status === "RECHAZADO") throw new BusinessError("Este comprobante ya fue rechazado.");
+
+    const destino = (data.replyTo || email.fromAddress || "").trim();
+    const parsed = parsedOf(email);
+    const label = parsed ? invoiceNumber(parsed.series, parsed.number) : null;
+
+    let envio: { ok: boolean; error?: string } = { ok: false, error: "No se envió ningún correo al proveedor." };
+    if (data.send) {
+      if (!destino) {
+        throw new BusinessError("No hay a quién responderle: el correo no trae remitente. Escribe una dirección.");
+      }
+      envio = await sendMail({
+        to: destino,
+        subject: label
+          ? `Comprobante ${label} observado — Transjer Operador Logístico`
+          : `Comprobante observado — Transjer Operador Logístico`,
+        text: data.body,
+        inReplyTo: email.internetMessageId,
+      });
+    }
+
+    await db.update(invoiceEmails).set({
+      status: "RECHAZADO",
+      rejectReason: data.reason,
+      rejectComment: data.comment,
+      detail: `${REJECT_REASON_LABEL[data.reason as RejectReasonKey] ?? data.reason}`
+        + (data.comment ? ` — ${data.comment}` : ""),
+      replyTo: data.send ? destino : null,
+      replyBody: data.send ? data.body : null,
+      replySentAt: envio.ok ? new Date() : null,
+      replyError: data.send && !envio.ok ? (envio.error ?? "No se pudo enviar el correo.") : null,
+      decidedBy: user.id,
+      decidedAt: new Date(),
+      processedAt: new Date(),
+    }).where(eq(invoiceEmails.id, id));
+
+    await logAudit({
+      user, action: "EDITAR", module: "CORREO", recordId: id,
+      description: `${user.name} rechazó ${label ? `el comprobante ${label}` : `el correo "${email.subject ?? "(sin asunto)"}"`}.`
+        + ` Motivo: ${REJECT_REASON_LABEL[data.reason as RejectReasonKey] ?? data.reason}.`
+        + (data.send ? (envio.ok ? ` Se le avisó a ${destino}.` : ` No se pudo avisar a ${destino}: ${envio.error}`) : " No se envió aviso al proveedor."),
+      oldData: { estado: email.status },
+      newData: { estado: "RECHAZADO", motivo: data.reason, comentario: data.comment, avisado: envio.ok },
+    });
+
+    revalidatePath("/", "layout");
+    if (data.send && !envio.ok) {
+      return { ok: false, message: `El comprobante quedó rechazado, pero el correo no salió: ${envio.error}` };
+    }
+    return {
+      ok: true,
+      message: data.send ? `Comprobante rechazado. Se le avisó a ${destino}.` : "Comprobante rechazado, sin avisar al proveedor.",
+    };
   } catch (e) {
     return toActionError(e);
   }
@@ -178,7 +297,7 @@ export async function retryEmail(id: string): Promise<ActionResult> {
       newData: outcome,
     });
     revalidatePath("/", "layout");
-    if (outcome.result === "creada") return { ok: true, message: `Factura ${outcome.label} registrada.` };
+    if (outcome.result === "por_aprobar") return { ok: true, message: `Comprobante ${outcome.label} leído. Queda por aprobar.` };
     if (outcome.result === "duplicado") return { ok: true, message: outcome.reason };
     if (outcome.result === "revisar") return { ok: false, message: `Sigue sin poder registrarse: ${outcome.reason}` };
     if (outcome.result === "error") return { ok: false, message: outcome.reason };

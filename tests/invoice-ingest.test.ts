@@ -1,7 +1,10 @@
 /**
- * Prueba del registro automático de facturas recibidas por correo.
+ * Prueba de lo que hace el buzón con las facturas que llegan por correo.
+ *
  * Usa correos de ejemplo en vez de Microsoft Graph, pero recorre todo lo demás de verdad:
- * lectura del XML, alta del proveedor, alta de la factura, adjuntos y bandeja de revisión.
+ * lectura del XML, adjuntos, bandeja de revisión y la aceptación, que es donde nace la
+ * factura. Lo que más se cuida aquí es que leer un correo NO registre nada: eso ahora lo
+ * decide una persona.
  *
  *   npx tsx --conditions=react-server tests/invoice-ingest.test.ts
  */
@@ -9,10 +12,11 @@ import "dotenv/config";
 import { zipSync, strToU8 } from "fflate";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
-import { appSettings, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "../src/db/schema";
+import { appSettings, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users } from "../src/db/schema";
 import type { GraphAttachment, GraphMessage } from "../src/server/graph";
 import type { MailboxConfig } from "../src/server/mailbox-config";
 import { ingestMessage, syncMailbox, type MailReader } from "../src/server/invoice-ingest";
+import { registerApprovedEmail } from "../src/server/invoice-approval";
 
 let fails = 0;
 function check(name: string, cond: boolean, extra?: unknown) {
@@ -106,29 +110,50 @@ async function main() {
     { name: "20777777771-01-F009-9001.xml", type: "text/xml", data: XML },
   ]);
   const r1 = await ingestMessage(CONFIG, "m1", reader);
-  check("correo con XML crea la factura", r1.result === "creada", r1);
+  check("correo con XML queda por aprobar", r1.result === "por_aprobar", r1);
+
+  // Lo central del cambio: leer el correo no crea deuda. La factura nace cuando una
+  // persona acepta el comprobante, no cuando el proveedor lo manda.
+  const [{ n: facturasTrasLeer }] = await db.select({ n: sql<number>`count(*)::int` }).from(supplierInvoices)
+    .where(sql`${supplierInvoices.series} = 'F009'`);
+  check("leer el correo no registra ninguna factura", facturasTrasLeer === 0, facturasTrasLeer);
+  const [sinProveedor] = await db.select().from(suppliers).where(eq(suppliers.ruc, "20777777771"));
+  check("y tampoco da de alta al proveedor todavía", !sinProveedor, sinProveedor?.businessName);
+
+  const [correo1] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.messageId, "m1"));
+  check("el correo queda esperando decisión", correo1?.status === "POR_APROBAR", correo1?.status);
+  check("se guarda el remitente", correo1?.fromAddress === "facturacion@sur.pe", correo1?.fromAddress);
+
+  // Los datos leídos del XML se guardan con el correo: son los que se miran para decidir,
+  // y si hubiera que volver a abrir el adjunto para saber de qué se trata, revisar veinte
+  // correos sería tan lento como antes.
+  const leido = correo1?.parsed as Record<string, string> | null;
+  check("guarda el comprobante leído", leido?.series === "F009" && leido?.number === "9001", leido);
+  check("con su importe", leido?.total === "1180.00", leido?.total);
+  check("su vencimiento", leido?.dueDate === "2026-10-20", leido?.dueDate);
+  check("su guía de remisión", leido?.grtNumber === "T001-555", leido?.grtNumber);
+  check("y el nombre del proveedor", leido?.supplierName === "TRANSPORTES DEL SUR S.A.C.", leido?.supplierName);
+
+  const adjuntos = await db.select().from(invoiceAttachments).where(eq(invoiceAttachments.emailId, correo1.id));
+  check("los 2 archivos quedan guardados con el correo", adjuntos.length === 2, adjuntos.length);
+  check("el PDF se guardó completo", adjuntos.some((a) => a.kind === "FACTURA_PDF" && a.sizeBytes === PDF.byteLength));
+  check("el XML se guardó completo", adjuntos.some((a) => a.kind === "FACTURA_XML" && a.sizeBytes === XML.byteLength));
+
+  // A partir de aquí se acepta, para poder comprobar lo que pasa con un reenvío.
+  const [quien] = await db.select({ id: users.id, name: users.name }).from(users).limit(1);
+  const aceptado = await db.transaction((tx) => registerApprovedEmail(tx, correo1, quien));
+  check("al aceptar nace la factura", aceptado.ok === true, aceptado);
 
   const [inv] = await db.select().from(supplierInvoices)
     .where(sql`${supplierInvoices.series} = 'F009' and ${supplierInvoices.number} = '9001'`);
   check("la factura queda pendiente de pago", inv?.status === "PENDIENTE", inv?.status);
   check("importe leído del XML", inv?.total === "1180.00", inv?.total);
   check("vencimiento leído del XML", inv?.dueDate === "2026-10-20", inv?.dueDate);
-  check("guía de remisión leída del XML", inv?.grtNumber === "T001-555", inv?.grtNumber);
   check("origen marcado como correo", inv?.source === "CORREO", inv?.source);
   check("fecha de recepción guardada", !!inv?.receivedAt);
 
   const [prov] = await db.select().from(suppliers).where(eq(suppliers.ruc, "20777777771"));
-  check("proveedor nuevo creado desde el XML", prov?.businessName === "TRANSPORTES DEL SUR S.A.C.", prov?.businessName);
-
-  const adjuntos = await db.select().from(invoiceAttachments).where(eq(invoiceAttachments.invoiceId, inv.id));
-  check("los 2 archivos quedan adjuntos a la factura", adjuntos.length === 2, adjuntos.length);
-  check("el PDF se guardó completo", adjuntos.some((a) => a.kind === "FACTURA_PDF" && a.sizeBytes === PDF.byteLength));
-  check("el XML se guardó completo", adjuntos.some((a) => a.kind === "FACTURA_XML" && a.sizeBytes === XML.byteLength));
-
-  const [correo1] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.messageId, "m1"));
-  check("el correo queda como procesado", correo1?.status === "PROCESADO", correo1?.status);
-  check("el correo apunta a la factura", correo1?.invoiceId === inv.id);
-  check("se guarda el remitente", correo1?.fromAddress === "facturacion@sur.pe", correo1?.fromAddress);
+  check("el proveedor se crea al aceptar", prov?.businessName === "TRANSPORTES DEL SUR S.A.C.", prov?.businessName);
 
   // 2. El mismo aviso otra vez no duplica nada
   const r2 = await ingestMessage(CONFIG, "m1", reader);
@@ -142,7 +167,7 @@ async function main() {
     { name: "20777777771-01-F009-9001.xml", type: "text/xml", data: XML },
   ]);
   const r3 = await ingestMessage(CONFIG, "m2", reader);
-  check("factura repetida se descarta", r3.result === "duplicado", r3);
+  check("factura repetida se descarta sin molestar a nadie", r3.result === "duplicado", r3);
   const [correo2] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.messageId, "m2"));
   check("el correo repetido queda como descartado", correo2?.status === "DESCARTADO", correo2?.status);
   check("el correo repetido apunta a la factura original", correo2?.invoiceId === inv.id);
@@ -185,13 +210,17 @@ async function main() {
   ], "2026-09-23T09:00:00Z");
   const resumen = await syncMailbox(CONFIG, { sinceDays: 3650, reader });
   check("la revisión recorre todo el buzón", resumen.revisados === 7, resumen);
-  check("solo registra la factura nueva", resumen.creadas === 1, resumen);
-  const [inv2] = await db.select().from(supplierInvoices).where(sql`${supplierInvoices.series} = 'F077'`);
-  check("factura en dólares registrada", inv2?.currency === "USD" && inv2?.total === "2360.00", inv2);
+  check("solo deja por aprobar el comprobante nuevo", resumen.porAprobar === 1, resumen);
+  const [correo7] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.messageId, "m7"));
+  const leido2 = correo7?.parsed as Record<string, string> | null;
+  check("comprobante en dólares leído", leido2?.currency === "USD" && leido2?.total === "2360.00", leido2);
+  const [{ n: f077 }] = await db.select({ n: sql<number>`count(*)::int` }).from(supplierInvoices)
+    .where(sql`${supplierInvoices.series} = 'F077'`);
+  check("y ninguna factura registrada sin que nadie lo apruebe", f077 === 0, f077);
 
-  // 9. Una segunda revisión no vuelve a crear nada
+  // 9. Una segunda revisión no vuelve a dejar nada pendiente
   const resumen2 = await syncMailbox(CONFIG, { sinceDays: 3650, reader });
-  check("la segunda revisión no duplica facturas", resumen2.creadas === 0, resumen2);
+  check("la segunda revisión no repite nada", resumen2.porAprobar === 0, resumen2);
 
   console.log(fails === 0 ? "\nCORREO: todas las verificaciones superadas" : `\n${fails} FALLAS`);
   process.exit(fails === 0 ? 0 : 1);

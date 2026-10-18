@@ -2,7 +2,7 @@
   "name": "transjer-epp",
   "version": "1.0.0",
   "private": true,
-  "description": "Transjer Gesti\u00f3n \u2014 almac\u00e9n de EPP y facturas de proveedores, Transjer Operador Log\u00edstico S.A.C.",
+  "description": "Transjer Gestión — almacén de EPP y facturas de proveedores, Transjer Operador Logístico S.A.C.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -16,9 +16,9 @@
     "db:clear-demo": "tsx scripts/clear-demo.ts",
     "db:studio": "drizzle-kit studio",
     "admin:create": "tsx scripts/create-admin.ts",
-    "test": "tsx tests/sunat-xml.test.ts && tsx tests/plazos.test.ts && tsx tests/fechas.test.ts && tsx tests/detracciones.test.ts && tsx tests/amortizacion.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts && tsx --conditions=react-server tests/imap.test.ts && tsx --conditions=react-server tests/obligaciones.test.ts && tsx --conditions=react-server tests/renegociacion.test.ts && tsx --conditions=react-server tests/documentos.test.ts && tsx --conditions=react-server tests/devoluciones.test.ts && tsx --conditions=react-server tests/hoja-facturas.test.ts && tsx --conditions=react-server tests/avisos.test.ts",
+    "test": "tsx tests/sunat-xml.test.ts && tsx tests/plazos.test.ts && tsx tests/fechas.test.ts && tsx tests/detracciones.test.ts && tsx tests/amortizacion.test.ts && tsx --conditions=react-server tests/invoice-ingest.test.ts && tsx --conditions=react-server tests/aprobacion.test.ts && tsx --conditions=react-server tests/imap.test.ts && tsx --conditions=react-server tests/obligaciones.test.ts && tsx --conditions=react-server tests/renegociacion.test.ts && tsx --conditions=react-server tests/documentos.test.ts && tsx --conditions=react-server tests/devoluciones.test.ts && tsx --conditions=react-server tests/hoja-facturas.test.ts && tsx --conditions=react-server tests/avisos.test.ts",
     "import:facturas": "tsx scripts/import-facturas.ts",
-    "test:e2e": "python3 tests/e2e-epp.py && python3 tests/e2e-facturas.py && python3 tests/e2e-obligaciones.py && python3 tests/e2e-detracciones.py && python3 tests/e2e-exportar.py && python3 tests/e2e-devoluciones.py && python3 tests/e2e-formularios.py && python3 tests/e2e-importar-excel.py && python3 tests/e2e-documentos.py",
+    "test:e2e": "python3 tests/e2e-epp.py && python3 tests/e2e-facturas.py && python3 tests/e2e-obligaciones.py && python3 tests/e2e-detracciones.py && python3 tests/e2e-exportar.py && python3 tests/e2e-devoluciones.py && python3 tests/e2e-formularios.py && python3 tests/e2e-importar-excel.py && python3 tests/e2e-documentos.py && python3 tests/e2e-aprobacion.py",
     "import:documentos": "tsx --conditions=react-server scripts/import-documentos.ts"
   },
   "dependencies": {
@@ -38,6 +38,7 @@
     "lucide-react": "^1.46.0",
     "mailparser": "^3.7.2",
     "next": "^15.5.25",
+    "nodemailer": "^10.1.2",
     "postgres": "^3.4.9",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -49,6 +50,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/mailparser": "^3.4.5",
     "@types/node": "^26.6.0",
+    "@types/nodemailer": "^8.0.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.6.1",

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { OBLIGATION_TYPES } from "@/lib/utils";
+import { OBLIGATION_TYPES, REJECT_REASONS } from "@/lib/utils";
 
 /** Concuerda el mensaje con el género del campo: "La serie es obligatoria", "El motivo es obligatorio". */
 function required(label: string) {
@@ -364,6 +364,34 @@ export const payInvoiceSchema = z.object({
 
 export const observeInvoiceSchema = z.object({
   statusReason: requiredText("El motivo", 250).refine((v) => v.length >= 5, "Explica el motivo (mínimo 5 caracteres)"),
+});
+
+/**
+ * Aceptar un comprobante del buzón. Los datos del comprobante vienen del XML y no se
+ * tocan; lo único que se decide aquí es la condición de pago, que no está en el XML:
+ * la pacta la empresa con el proveedor.
+ */
+export const approveEmailSchema = z.object({
+  paymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
+  termDays: z.coerce.number().int("Los días deben ser un número entero")
+    .min(0, "No puede ser negativo").max(365, "Son demasiados días").default(0),
+  description: optionalText(250),
+});
+
+/**
+ * Rechazar un comprobante. El cuerpo del correo llega ya armado desde la pantalla, donde
+ * quien rechaza pudo leerlo y corregirlo: se guarda y se envía tal cual lo aprobó.
+ */
+export const rejectEmailSchema = z.object({
+  reason: z.enum(REJECT_REASONS as [string, ...string[]]),
+  comment: optionalText(1000),
+  replyTo: z.string().trim().max(250)
+    .refine((v) => !v || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v), "Esa dirección de correo no es válida")
+    .optional().or(z.literal("")),
+  body: requiredText("El texto del correo", 4000)
+    .refine((v) => v.length >= 20, "El texto es demasiado corto"),
+  /** Sin esto se registra el rechazo, pero no se le avisa al proveedor. */
+  send: z.coerce.boolean().default(false),
 });
 
 

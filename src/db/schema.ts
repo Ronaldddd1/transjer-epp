@@ -4,7 +4,7 @@
  * luego ejecuta `npm run db:generate` y `npm run db:migrate`.
  */
 import { relations, sql } from "drizzle-orm";
-import { OBLIGATION_TYPES, type ObligationTypeKey } from "@/lib/utils";
+import { OBLIGATION_TYPES, type InvoiceEmailStatusKey, type ObligationTypeKey } from "@/lib/utils";
 import {
   boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   uniqueIndex, uuid, varchar,
@@ -19,7 +19,8 @@ export const movementTypeEnum = pgEnum("movement_type", ["ENTRADA", "SALIDA", "A
 export const invoiceDocTypeEnum = pgEnum("invoice_doc_type", ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"]);
 export const invoiceStatusEnum = pgEnum("invoice_status", ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"]);
 export const invoiceSourceEnum = pgEnum("invoice_source", ["MANUAL", "CORREO"]);
-export const invoiceEmailStatusEnum = pgEnum("invoice_email_status", ["PROCESADO", "REVISAR", "DESCARTADO", "ERROR"]);
+// El estado del correo es texto con CHECK, no un enum: agregarle un estado más (como
+// "por aprobar" y "rechazado") dentro de una migración exige que no sea enum.
 export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FACTURA_XML", "GRT", "OTRO"]);
 /**
  * Condición de pago pactada con el proveedor.
@@ -335,16 +336,32 @@ export const invoiceEmails = pgTable("invoice_emails", {
   fromAddress: varchar("from_address", { length: 250 }),
   fromName: varchar("from_name", { length: 250 }),
   receivedAt: timestamp("received_at", { withTimezone: true }).notNull(),
-  status: invoiceEmailStatusEnum("status").notNull().default("REVISAR"),
+  status: varchar("status", { length: 16 }).notNull().default("REVISAR").$type<InvoiceEmailStatusKey>(),
   invoiceId: uuid("invoice_id").references(() => supplierInvoices.id, { onDelete: "set null" }),
   attachmentCount: integer("attachment_count").notNull().default(0),
   detail: text("detail"),
   parsed: jsonb("parsed"),
   processedAt: timestamp("processed_at", { withTimezone: true }),
+  /** Quién aceptó o rechazó el comprobante, y cuándo. */
+  decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at", { withTimezone: true }),
+  rejectReason: varchar("reject_reason", { length: 30 }),
+  rejectComment: text("reject_comment"),
+  /**
+   * La respuesta que se le mandó al proveedor. Se guarda lo enviado y, si no salió, el
+   * motivo: un rechazo cuyo correo falló se ve igual que uno que llegó, y del otro lado
+   * nadie se entera de que su factura fue devuelta.
+   */
+  replyTo: varchar("reply_to", { length: 250 }),
+  replyBody: text("reply_body"),
+  replySentAt: timestamp("reply_sent_at", { withTimezone: true }),
+  replyError: text("reply_error"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
   index("invoice_emails_status_date_idx").on(t.status, t.receivedAt),
   index("invoice_emails_date_idx").on(t.receivedAt),
+  check("invoice_emails_status_valid",
+    sql`${t.status} in ('POR_APROBAR','PROCESADO','REVISAR','DESCARTADO','RECHAZADO','ERROR')`),
 ]);
 
 export const invoiceAttachments = pgTable("invoice_attachments", {
@@ -629,7 +646,7 @@ export type InvoiceAttachment = typeof invoiceAttachments.$inferSelect;
 export type InvoiceEmail = typeof invoiceEmails.$inferSelect;
 export type InvoiceDocType = (typeof invoiceDocTypeEnum.enumValues)[number];
 export type InvoiceStatus = (typeof invoiceStatusEnum.enumValues)[number];
-export type InvoiceEmailStatus = (typeof invoiceEmailStatusEnum.enumValues)[number];
+export type InvoiceEmailStatus = InvoiceEmailStatusKey;
 export type AttachmentKind = (typeof attachmentKindEnum.enumValues)[number];
 export type PaymentTerm = (typeof paymentTermEnum.enumValues)[number];
 export type DetractionStatus = (typeof detractionStatusEnum.enumValues)[number];
