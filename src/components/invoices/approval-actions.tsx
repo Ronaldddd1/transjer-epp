@@ -1,16 +1,18 @@
 "use client";
 
-import { AlertTriangle, Check, Eye, FileText, Mail, MailX, X } from "lucide-react";
-import { useMemo, useState } from "react";
-import { approveEmail, rejectEmail } from "@/actions/mailbox";
+import { AlertTriangle, Check, Eye, FileMinus2, FileText, Mail, MailX, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { applyCreditNoteEmail, approveEmail, rejectEmail } from "@/actions/mailbox";
 import { Button } from "@/components/ui/button";
+import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
 import { Modal } from "@/components/ui/modal";
 import {
   DEFAULT_TERM_DAYS, formatDate, formatDateTime, formatFileSize, formatMoney,
-  INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, invoiceNumber, REJECT_REASON_LABEL,
+  INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, invoiceNumber, PIDEN_NOTA_DE_CREDITO,
+  REJECT_REASON_LABEL,
   rejectionEmailBody, TERM_DAYS_BY_SERVICE_TYPE,
   type InvoiceServiceTypeKey, type PaymentTermKey, type RejectReasonKey,
 } from "@/lib/utils";
@@ -24,6 +26,8 @@ import {
  */
 export type ComprobanteLeido = {
   docType: string;
+  /** La factura que esta nota de crédito anula, según su propio XML. */
+  referencedDoc?: string | null;
   series: string;
   number: string;
   issueDate: string;
@@ -365,6 +369,33 @@ export function AceptarModal({ correo, condicion }: {
  * puede corregir antes de enviarlo: un correo que sale a nombre de la empresa conviene
  * leerlo entero, y hay proveedores a los que hay que decirles las cosas de otra manera.
  */
+/**
+ * Aplica a su factura una nota de crédito recibida.
+ *
+ * Aparece en lugar del botón de aceptar: una nota de crédito no es una factura por pagar,
+ * y aceptarla como tal metería en la cola de pagos un comprobante que resta.
+ */
+export function AplicarNotaCreditoModal({ correo }: { correo: CorreoParaDecidir }) {
+  const c = correo.comprobante;
+  const factura = c?.referencedDoc;
+  return (
+    <ConfirmButton
+      action={() => applyCreditNoteEmail(correo.id)}
+      title="Aplicar la nota de crédito"
+      message={factura
+        ? `La factura ${factura} quedará anulada con la nota de crédito ${c ? `${c.series}-${c.number}` : ""},`
+          + " fuera de lo que hay que pagar y fuera de las detracciones. El XML y el PDF quedan guardados en esa factura."
+        : "Esta nota de crédito no dice a qué factura afecta, así que habrá que registrarla a mano desde la factura."}
+      confirmLabel="Aplicar y anular la factura"
+      confirmVariant="primary"
+      triggerVariant="outline"
+      triggerLabel={<><FileMinus2 className="h-4 w-4" /><span className="sr-only 2xl:not-sr-only">Aplicar NC</span></>}
+      triggerTitle="Aplicar la nota de crédito a su factura"
+      disabled={!factura}
+    />
+  );
+}
+
 export function RechazarModal({ correo, empresa }: { correo: CorreoParaDecidir; empresa?: string }) {
   const [motivo, setMotivo] = useState<RejectReasonKey>("DATOS_ERRADOS");
   const [comentario, setComentario] = useState("");
@@ -385,10 +416,24 @@ export function RechazarModal({ correo, empresa }: { correo: CorreoParaDecidir; 
 
   const cuerpo = texto ?? propuesto;
 
+  /**
+   * Por defecto se registra solo cuando el proveedor tendrá que emitir la nota de crédito.
+   * Un comprobante emitido a otra empresa, o que ya nos habían mandado, no genera ninguna
+   * factura nuestra: registrarlo ensuciaría el histórico con algo que nunca fue nuestro.
+   */
+  const registrarPorDefecto = PIDEN_NOTA_DE_CREDITO.has(motivo) && !!correo.comprobante;
+  const [registrar, setRegistrar] = useState(registrarPorDefecto);
+  const [tocado, setTocado] = useState(false);
+  // Al cambiar el motivo se reajusta la casilla, salvo que la persona ya la haya tocado:
+  // su decisión manda sobre la propuesta.
+  useEffect(() => {
+    if (!tocado) setRegistrar(registrarPorDefecto);
+  }, [registrarPorDefecto, tocado]);
+
   return (
     <FormModal
       title="Rechazar el comprobante"
-      description="No se registra nada, y al proveedor le llega la devolución con el motivo."
+      description="Al proveedor le llega la devolución con el motivo, y el motivo queda guardado."
       submitLabel={enviar ? "Rechazar y enviar el correo" : "Rechazar sin avisar"}
       submitVariant="danger"
       size="lg"
@@ -465,6 +510,28 @@ export function RechazarModal({ correo, empresa }: { correo: CorreoParaDecidir; 
               Volver al texto automático
             </button>
           )}
+
+          <label className="flex items-start gap-2 rounded-md border border-steel-200 px-3 py-2.5 text-sm">
+            <input
+              type="checkbox"
+              name="registrar"
+              value="true"
+              checked={registrar}
+              onChange={(e) => { setRegistrar(e.target.checked); setTocado(true); }}
+              className="mt-0.5 h-4 w-4"
+              disabled={!correo.comprobante}
+            />
+            <span>
+              Dejar la factura registrada como anulada, esperando la nota de crédito
+              <span className="block text-xs text-steel-500">
+                {correo.comprobante
+                  ? "Esa factura existe ante SUNAT hasta que el proveedor emita la nota de crédito."
+                    + " Queda anulada, fuera de lo que hay que pagar y fuera de las detracciones, y en la"
+                    + " lista de las que esperan NC para poder reclamársela."
+                  : "Este correo no trae los datos del comprobante leídos, así que no hay factura que registrar."}
+              </span>
+            </span>
+          </label>
 
           <label className="flex items-start gap-2 rounded-md border border-steel-200 px-3 py-2.5 text-sm">
             <input

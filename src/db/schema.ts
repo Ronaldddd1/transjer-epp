@@ -311,6 +311,27 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   paidBy: uuid("paid_by").references(() => users.id),
   /** Motivo cuando la factura se devuelve al proveedor o se anula. */
   statusReason: varchar("status_reason", { length: 250 }),
+  /**
+   * La nota de crédito que anula la factura.
+   *
+   * Una factura mal emitida no se borra: existe ante SUNAT y el proveedor la corrige
+   * emitiendo una nota de crédito por el mismo importe. Por eso la factura se conserva
+   * anulada y con la NC al lado, en vez de desaparecer: así el histórico cuadra con lo que
+   * el proveedor declaró, y se puede responder "esa factura se anuló con la NC-01".
+   */
+  creditNoteNumber: varchar("credit_note_number", { length: 40 }),
+  creditNoteDate: date("credit_note_date"),
+  creditNoteAmount: numeric("credit_note_amount", { precision: 12, scale: 2 }),
+  creditNoteRegisteredBy: uuid("credit_note_registered_by").references(() => users.id),
+  creditNoteRegisteredAt: timestamp("credit_note_registered_at", { withTimezone: true }),
+  /**
+   * La factura se anuló y se espera que el proveedor mande la nota de crédito.
+   *
+   * Es el estado en que queda un comprobante rechazado desde el buzón. Sirve para
+   * perseguirlo: sin esta marca, una factura anulada sin NC se ve igual que una ya
+   * resuelta, y nadie vuelve a reclamarle al proveedor.
+   */
+  awaitingCreditNote: boolean("awaiting_credit_note").notNull().default(false),
   source: invoiceSourceEnum("source").notNull().default("MANUAL"),
   receivedAt: timestamp("received_at", { withTimezone: true }),
   notes: text("notes"),
@@ -328,6 +349,16 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   index("invoices_detraction_idx").on(t.detractionStatus, t.detractionPaidAt),
   index("invoices_client_idx").on(t.clientName),
   check("invoices_detraction_rate_range", sql`${t.detractionRate} between 0 and 100`),
+  check("invoices_credit_note_amount_positive",
+    sql`${t.creditNoteAmount} is null or ${t.creditNoteAmount} > 0`),
+  // Con la nota de crédito ya cargada no se sigue esperando: las dos cosas a la vez
+  // dejarían la factura reclamándole al proveedor algo que ya mandó.
+  check("invoices_credit_note_not_awaiting",
+    sql`not (${t.awaitingCreditNote} and ${t.creditNoteNumber} is not null)`),
+  // Una factura con nota de crédito está anulada, por definición.
+  check("invoices_credit_note_annulled",
+    sql`${t.creditNoteNumber} is null or ${t.status} = 'ANULADA'`),
+  index("invoices_awaiting_credit_note_idx").on(t.awaitingCreditNote),
   check("invoices_detraction_amount_positive", sql`${t.detractionAmount} is null or ${t.detractionAmount} >= 0`),
   // Una detracción pagada siempre guarda su fecha de depósito, y una sin pagar nunca la tiene.
   check("invoices_detraction_paid_consistent", sql`(${t.detractionStatus} = 'PAGADA') = (${t.detractionPaidAt} is not null)`),

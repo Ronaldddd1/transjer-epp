@@ -17,10 +17,12 @@ type Props = {
   triggerLabel: ReactNode;
   triggerTitle?: string;
   size?: "sm" | "md" | "icon";
+  /** Apagado cuando falta algo para poder ejecutarlo; el title explica qué. */
+  disabled?: boolean;
 };
 
 /** Botón que pide confirmación antes de ejecutar una acción crítica. */
-export function ConfirmButton({ action, title, message, confirmLabel, confirmVariant = "danger", triggerVariant = "ghost", triggerLabel, triggerTitle, size = "sm" }: Props) {
+export function ConfirmButton({ action, title, message, confirmLabel, confirmVariant = "danger", triggerVariant = "ghost", triggerLabel, triggerTitle, size = "sm", disabled = false }: Props) {
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const { notify } = useToast();
@@ -38,7 +40,7 @@ export function ConfirmButton({ action, title, message, confirmLabel, confirmVar
 
   return (
     <>
-      <Button variant={triggerVariant} size={size} onClick={() => setOpen(true)} title={triggerTitle} aria-label={triggerTitle}>
+      <Button variant={triggerVariant} size={size} onClick={() => setOpen(true)} title={triggerTitle} aria-label={triggerTitle} disabled={disabled}>
         {triggerLabel}
       </Button>
       <Modal

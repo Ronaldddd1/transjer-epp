@@ -17,6 +17,9 @@ DB = os.environ.get("E2E_DB", "epp")
 def psql(q):
     return subprocess.check_output(["su", "postgres", "-c", f'psql -d {DB} -tAc "{q}"']).decode().strip()
 
+def ejecutar(q):
+    subprocess.run(["su", "postgres", "-c", f'psql -q -d {DB} -c "{q}"'], check=True, stdout=subprocess.DEVNULL)
+
 def filas(page):
     """
     Cuántas facturas se ven en la tabla.
@@ -235,6 +238,46 @@ with sync_playwright() as p:
     assert psql(f"select count(*) from supplier_invoices where id='{inv_id}'") == "1"
     assert psql(f"select status from supplier_invoices where id='{inv_id}'") == "ANULADA"
     ok("Anular conserva el registro y su historial")
+
+    # --- 11a. La nota de crédito con la que el proveedor anula la factura
+    # Una factura mal emitida existe ante SUNAT hasta que llega la NC: el sistema tiene que
+    # poder decir con cuál se anuló, y no dejar que una por otro importe la dé por cerrada.
+    page.goto(f"{BASE}/facturas/{inv_id}")
+    page.wait_for_timeout(900)
+    total = psql(f"select total::text from supplier_invoices where id='{inv_id}'")
+    page.get_by_role("button", name="Nota de crédito").click()
+    page.wait_for_timeout(500)
+    m.locator("input[name=creditNoteNumber]").fill("NC-01")
+    # Primero por un importe que no cubre la factura: no debe anular nada.
+    m.locator("input[name=creditNoteAmount]").fill("1.00")
+    m.get_by_role("button", name="Registrar y anular").click()
+    page.wait_for_timeout(1600)
+    assert psql(f"select coalesce(credit_note_number,'-') from supplier_invoices where id='{inv_id}'") == "-", \
+        "una nota por menos del total no debería anular la factura"
+    ok("Una nota de crédito que no cubre el total se rechaza")
+
+    m.locator("input[name=creditNoteAmount]").fill(total)
+    m.get_by_role("button", name="Registrar y anular").click()
+    toast(page, "anulada con la nota de crédito")
+    guardada = psql("select credit_note_number || '|' || status || '|' || detraction_status || '|' || "
+                    f"awaiting_credit_note::text from supplier_invoices where id='{inv_id}'")
+    assert guardada == "NC-01|ANULADA|NO_APLICA|false", guardada
+    page.goto(f"{BASE}/facturas/{inv_id}")
+    page.wait_for_timeout(900)
+    # Sobre el texto visible y no sobre el HTML: React separa los trozos de texto con
+    # comentarios, así que buscar la frase entera en el código fuente falla sin motivo.
+    assert "Anulada con la nota de crédito NC-01" in page.locator("body").inner_text()
+    ok("La nota de crédito anula la factura y queda a la vista en su ficha")
+
+    # La tabla distingue una anulada con NC de una que todavía la espera.
+    ejecutar(f"update supplier_invoices set credit_note_number=null, credit_note_amount=null, "
+             f"credit_note_date=null, awaiting_credit_note=true where id='{inv_id}'")
+    page.goto(BASE + "/facturas?estado=SIN_NC")
+    page.wait_for_timeout(1200)
+    cuerpo = page.locator("body").inner_text()
+    assert "Falta la NC" in cuerpo, "la anulada sin nota de crédito debería avisar que falta"
+    ok("Las anuladas que esperan nota de crédito se pueden listar aparte")
+    ejecutar(f"update supplier_invoices set awaiting_credit_note=false where id='{inv_id}'")
 
     # --- 11b. Fecha límite de pago: contado y crédito
     page.goto(BASE + "/facturas?estado=PENDIENTE")

@@ -2,7 +2,7 @@ import { ArrowLeft, MailX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  AceptarModal, RechazarModal, VerComprobanteModal,
+  AceptarModal, AplicarNotaCreditoModal, RechazarModal, VerComprobanteModal,
   type ComprobanteLeido, type CorreoParaDecidir,
 } from "@/components/invoices/approval-actions";
 import { DiscardEmailModal, InvoiceFromEmailModal, RetryEmailButton } from "@/components/invoices/email-actions";
@@ -234,9 +234,16 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                     <VerComprobanteModal correo={correo} />
                     {porAprobar && canApprove && (
                       <>
-                        {/* Si ese proveedor ya está registrado, la condición de pago que
-                            se propone es la pactada con él, no la de por defecto. */}
-                        <AceptarModal correo={correo} condicion={condicionDe(c?.supplierRuc)} />
+                        {/* Una nota de crédito no se "acepta" como factura por pagar: se
+                            aplica a la factura que anula, que es lo único que cabe hacer
+                            con ella. */}
+                        {c?.docType === "NOTA_CREDITO" ? (
+                          <AplicarNotaCreditoModal correo={correo} />
+                        ) : (
+                          /* Si ese proveedor ya está registrado, la condición de pago que
+                             se propone es la pactada con él, no la de por defecto. */
+                          <AceptarModal correo={correo} condicion={condicionDe(c?.supplierRuc)} />
+                        )}
                         <RechazarModal correo={correo} />
                       </>
                     )}

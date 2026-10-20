@@ -24,33 +24,56 @@ check("S/ 400.01 ya se detrae", detractionFor(400.01).applies === true);
 check("S/ 413 se detrae, como en la hoja", detractionFor(413).applies === true && detractionFor(413).amount === 17, detractionFor(413));
 check("el umbral está en 400", DETRACTION_THRESHOLD === 400);
 
-// ---------- Redondeo al sol más próximo ----------
-// Primer valor: importe de la factura. Segundo: lo que corresponde depositar.
+// ---------- Redondeo al sol inmediato superior ----------
+// Cualquier céntimo sube al sol siguiente: el 4 % de 605 son 24.20 y se depositan 25. Lo
+// que sobra queda en la cuenta de detracciones del proveedor, que es suya igual; al revés,
+// el faltante se lo quedaría la empresa.
+//
+// Los tres casos marcados abajo son los que la hoja en Excel ya calculaba así a mano. El
+// sistema los "corregía" hacia abajo y por eso no cuadraban.
 const casos: [number, number][] = [
-  [4838, 194],   // 193.52 → sube
-  [3304, 132],   // 132.16 → baja
-  [590, 24],     // 23.60  → sube
-  [5428, 217],   // 217.12 → baja (la hoja decía 218)
-  [4956, 198],   // 198.24 → baja (la hoja tenía 198 en una fila y 199 en otra)
-  [2950, 118],   // exacto
-  [5900, 236],   // exacto
-  [3186, 127],   // 127.44 → baja (la hoja decía 128)
-  [424.8, 17],   // 16.99  → sube
-  [6254, 250],   // exacto
+  [605, 25],     // 24.20  → el ejemplo que puso la empresa
+  [4838, 194],   // 193.52
+  [3304, 133],   // 132.16
+  [590, 24],     // 23.60
+  [5428, 218],   // 217.12 → como en la hoja
+  [4956, 199],   // 198.24 → como en la hoja
+  [2950, 118],   // exacto: no sube
+  [5900, 236],   // exacto: no sube
+  [3186, 128],   // 127.44 → como en la hoja
+  [424.8, 17],   // 16.99
+  [6254, 251],   // 250.16
 ];
 for (const [total, esperado] of casos) {
   check(`S/ ${total} → detracción de S/ ${esperado}`, detractionFor(total).amount === esperado, detractionFor(total));
 }
 
-// La mitad justa sube, que es lo que dice la norma: "si la fracción es igual o superior a
-// cinco, el valor se ajusta a la unidad inmediata superior".
+// Sube cualquier fracción, por chica que sea: un céntimo ya obliga al sol siguiente.
 check("una fracción de 0.5 exacta sube", detractionFor(412.5).amount === 17, detractionFor(412.5));
-check("otra fracción de 0.5 exacta sube", detractionFor(512.5).amount === 21, detractionFor(512.5));
-check("una fracción justo por debajo baja", detractionFor(512.4).amount === 20, detractionFor(512.4));
+check("una fracción por debajo de la mitad también sube", detractionFor(512.4).amount === 21, detractionFor(512.4));
+check("un solo céntimo sube", detractionFor(425.25).amount === 18, detractionFor(425.25));
+
+/**
+ * Un importe cuyo 4 % es un entero NO sube.
+ *
+ * En coma flotante el 4 % de algunos importes da 118.00000000000001, y redondear eso hacia
+ * arriba depositaría un sol de más por un error de aritmética del lenguaje. Se comprueba
+ * sobre varios miles de importes, no sobre dos o tres elegidos a mano.
+ */
+let exactosQueSubieron = 0;
+for (let t = 425; t <= 100000; t += 25) {
+  const exacto = (t * 4) / 100;
+  if (Number.isInteger(exacto) && detractionFor(t).amount !== exacto) exactosQueSubieron++;
+}
+check("ningún 4 % exacto sube de más", exactosQueSubieron === 0, exactosQueSubieron);
 
 // ---------- Lo que queda para el proveedor ----------
 const d = detractionFor(4838);
 check("el neto descuenta la detracción", d.netPayable === 4644, d);
+// Lo que se le transfiere baja en la misma proporción en que sube la detracción.
+const redondeada = detractionFor(605);
+check("si la detracción sube a 25, al proveedor se le transfieren 580",
+  redondeada.amount === 25 && redondeada.netPayable === 580, redondeada);
 check("neto + detracción = total", Math.abs(d.netPayable + d.amount - 4838) < 0.005);
 
 // ---------- Moneda ----------

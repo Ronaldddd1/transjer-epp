@@ -192,7 +192,12 @@ export function ImportSheetModal() {
                         <Td className="whitespace-nowrap text-right tabular text-steel-600">
                           {n.detraccion > 0 ? formatMoney(n.detraccion.toFixed(2)) : "—"}
                         </Td>
-                        <Td className="text-sm text-steel-600">{INVOICE_STATUS_LABEL[n.estado] ?? n.estado}</Td>
+                        <Td className="text-sm text-steel-600">
+                          {INVOICE_STATUS_LABEL[n.estado] ?? n.estado}
+                          {n.notaCredito && (
+                            <span className="block text-xs text-steel-500">con nota de crédito {n.notaCredito}</span>
+                          )}
+                        </Td>
                       </Tr>
                     ))}
                   </tbody>

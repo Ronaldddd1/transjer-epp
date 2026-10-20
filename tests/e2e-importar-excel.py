@@ -100,9 +100,16 @@ def main():
                    "where series='E001' and number='356'")
         check("conserva la detracción que dice la hoja", det == "194.00|PAGADA", det)
 
+        # Esta fila es el caso real: la hoja la daba por anulada y, dentro de la celda de
+        # estado, anotaba la nota de crédito que la anuló ("NC E001-29").
         anulada = psql("select status || '|' || detraction_status from supplier_invoices "
                        "where series='E001' and number='370'")
-        check("una factura anulada deja su detracción observada", anulada == "ANULADA|OBSERVADA", anulada)
+        check("una factura anulada con nota de crédito no deja detracción que depositar",
+              anulada == "ANULADA|NO_APLICA", anulada)
+        nc = psql("select coalesce(credit_note_number,'') || '|' || coalesce(credit_note_amount::text,'') "
+                  "from supplier_invoices where series='E001' and number='370'")
+        check("y queda guardada la nota de crédito que la anuló, por el importe de la factura",
+              nc.startswith("E001-29|") and nc.split("|")[1] not in ("", "0.00"), nc)
         nota = psql("select detraction_notes from supplier_invoices where series='E001' and number='370'")
         check("y conserva lo que decía la hoja", "NC E001-29" in nota, nota)
 

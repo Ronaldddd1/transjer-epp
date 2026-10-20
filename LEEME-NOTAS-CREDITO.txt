@@ -1,0 +1,155 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Notas de crédito, motivo del rechazo y detracción redondeada hacia arriba
+=========================================================================
+
+Tres cambios. Uno pide migración, y esa migración TOCA DATOS: recalcula las detracciones
+que todavía no se han depositado.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio
+
+
+1. LA DETRACCIÓN SE REDONDEA AL SOL DE ARRIBA
+----------------------------------------------
+
+El 4 % de S/ 605 son 24.20, y ahora se depositan 25. Antes el sistema redondeaba al sol
+más cercano y depositaba 24.
+
+El cambio lo pediste así y además coincide con lo que tu hoja en Excel venía haciendo a
+mano: las filas donde el sistema y la hoja no cuadraban eran justamente estas tres, y en
+las tres la hoja tenía razón.
+
+    S/ 5,428 → la hoja decía 218, el sistema ponía 217
+    S/ 4,956 → la hoja decía 199, el sistema ponía 198
+    S/ 3,186 → la hoja decía 128, el sistema ponía 127
+
+Qué pasa con lo ya registrado:
+
+  · Las detracciones PENDIENTES se recalcularon al aplicar la migración. En la base de
+    pruebas eran 12 facturas, todas subieron un sol. Lo que sube la detracción baja lo
+    que se le transfiere al proveedor: el total de la factura no cambia.
+  · Las YA DEPOSITADAS no se tocaron. El dinero está en el Banco de la Nación y hay una
+    constancia con ese número; reescribir la cifra dejaría al sistema diciendo algo
+    distinto de lo que dice el papel.
+
+
+2. FACTURAS ANULADAS CON NOTA DE CRÉDITO
+-----------------------------------------
+
+Una factura mal emitida no desaparece: existe ante SUNAT y el proveedor la deja sin efecto
+emitiendo una nota de crédito por el mismo importe. Ahora el sistema guarda esa relación.
+
+En la factura hay un botón NOTA DE CRÉDITO. Al registrarla se pide el número (tal como
+viene: "NC-01", "E001-29"), la fecha y el importe. La factura queda ANULADA, con la nota al
+lado, fuera de lo que hay que pagar y fuera de las detracciones.
+
+La nota tiene que ser por el IMPORTE COMPLETO de la factura. Una por menos no anula nada —
+sería una rebaja, no una anulación— y el sistema la rechaza diciendo los dos montos.
+
+Si la detracción de esa factura YA estaba depositada, se deja como está y el mensaje lo
+avisa: eso hay que arreglarlo con el proveedor, no borrándolo del sistema.
+
+De dónde salen las notas de crédito:
+
+  a) DEL EXCEL. Tu hoja no tiene columna de NC: la anota dentro de la celda de estado,
+     como "NC E001-29" o "ANULADO NC-01". El importador ahora la lee de ahí, deja la
+     factura anulada con esa nota y sin detracción que depositar. Antes esas filas
+     quedaban "anuladas porque sí", con la detracción observada.
+
+  b) DEL BUZÓN. Cuando llega el XML de una nota de crédito, el sistema lee a qué factura
+     afecta (viene dentro del propio XML) y en vez del botón de aceptar aparece APLICAR NC:
+     con un clic anula esa factura y le cuelga el XML y el PDF. Si la nota no dice a qué
+     factura afecta, el botón queda apagado y se registra a mano desde la factura.
+
+  c) A MANO, con el botón de la factura.
+
+
+3. RECHAZAR UN COMPROBANTE PUEDE DEJAR LA FACTURA REGISTRADA
+-------------------------------------------------------------
+
+En la ventana de rechazo hay una casilla nueva:
+
+    [x] Dejar la factura registrada como anulada, esperando la nota de crédito
+
+Viene marcada sola cuando el motivo obliga al proveedor a emitir una NC —datos
+equivocados, importe que no coincide, falta la guía— y desmarcada cuando el comprobante
+nunca fue nuestro: emitido a otra empresa, o duplicado. Se puede cambiar siempre.
+
+Con la casilla marcada, la factura queda:
+
+  · ANULADA, con el motivo del rechazo escrito en su ficha.
+  · Sin fecha límite de pago, así que no aparece en el calendario ni en los avisos.
+  · Sin detracción.
+  · Marcada como QUE ESPERA LA NOTA DE CRÉDITO.
+
+Esa última marca es la que sirve para perseguir al proveedor: en Facturas hay una pestaña
+nueva, ESPERAN NOTA DE CRÉDITO, con todas las que están en esa situación. En la tabla se
+distinguen de un vistazo: la que ya tiene su nota muestra su número, la que no, un aviso
+amarillo "Falta la NC".
+
+Parece contradictorio registrar lo que se acaba de rechazar, y no lo es: esa factura está
+emitida y declarada por el proveedor hasta que mande la NC. Si no queda rastro, dentro de
+tres meses nadie sabe por qué falta ese número ni que hay algo que reclamar.
+
+
+4. POR QUÉ SE RECHAZÓ, DENTRO DE LA FACTURA
+--------------------------------------------
+
+En la ficha de la factura hay un apartado POR QUÉ SE RECHAZÓ con:
+
+    Motivo · Comentario · Quién lo rechazó y cuándo · Si se le avisó al proveedor
+
+Y, desplegable, el correo exacto que se le mandó. Si el aviso no salió, lo dice en rojo
+con el error: un proveedor que no recibió la devolución va a seguir esperando que le
+paguen.
+
+Estaba solo en el buzón de correo. La pregunta llega meses después y siempre por el número
+de factura —"¿y esta por qué está anulada?"—, así que tener que ir a buscar el correo para
+responder era justo lo que hacía que nadie lo buscara.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  583 comprobaciones de lógica   — todas pasan
+  10 recorridos en el navegador  — todos pasan (408 verificaciones)
+
+De lo nuevo, lo que más importa:
+
+  · El 4 % de 605 da 25, y el de 24.2 también. Un importe cuyo 4 % es exacto NO sube: se
+    comprobó sobre casi 4.000 importes, porque en coma flotante el 4 % de ciertos números
+    da 118.00000000000001 y redondear eso hacia arriba habría depositado un sol de más.
+  · Una nota de crédito por menos del total no anula la factura.
+  · Una factura con la detracción ya depositada se puede anular con su nota, y la
+    detracción se queda como está, con su constancia. La base impide dejarla en un estado
+    que no cuadre con el papel.
+  · El comprobante rechazado queda anulado, sin fecha límite, con su motivo guardado; y si
+    esa factura ya estaba registrada, se anula la que hay en vez de duplicarla, y pierde
+    su fecha límite.
+  · Las celdas del Excel se leen bien: "NC E001-29", "NC-01", "ANULADO NC 001-45",
+    "N/C E001-7". Y no se inventa ninguna nota donde dice "ANULADO", "CANCELADO" o
+    "BANCO DE LA NACION".
+  · El XML de una nota de crédito dice qué factura anula, y una factura normal no.
+  · Las dos clases de anulada —con nota y esperándola— se distinguen en el listado.
+
+Un detalle de presentación que se corrigió de paso: el recuadro de detracción decía
+siempre "la operación no supera los S/ 400" cuando ponía "no aplica". Ahora dice el motivo
+que corresponde: anulada con nota de crédito, factura de servicio, factura en dólares o
+por debajo del umbral.
+
+
+PARA SUBIRLO A PRODUCCIÓN
+-------------------------
+
+    npm install
+    npm run db:migrate          ← primero la base: aquí se recalculan las detracciones
+    git add -A
+    git commit -m "Notas de credito, motivo del rechazo y detraccion redondeada hacia arriba"
+    git push
+
+Comprueba antes que .env NO aparezca en `git status --short`.
+
+Después de migrar, vale la pena mirar en Facturas → Detracciones que los montos pendientes
+sean los que esperas: son los que subieron un sol.

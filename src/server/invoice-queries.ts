@@ -49,6 +49,8 @@ export type InvoiceFilters = {
   detraction?: DetractionStatus;
   /** Cliente de Transjer para el que se hizo el flete. */
   client?: string;
+  /** Solo las anuladas que todavía esperan la nota de crédito del proveedor. */
+  awaitingCreditNote?: boolean;
 };
 
 const STATUSES: InvoiceStatus[] = ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"];
@@ -56,7 +58,10 @@ const DOC_TYPES: InvoiceDocType[] = ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_
 const DETRACTION_STATUSES: DetractionStatus[] = ["NO_APLICA", "PENDIENTE", "EN_PROCESO", "PAGADA", "OBSERVADA"];
 
 export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
-  const status = first(sp.estado) as InvoiceStatus | undefined;
+  // La pestaña "SIN_NC" no es un estado de la factura: es un filtro aparte, el de las
+  // anuladas a las que todavía les falta la nota de crédito.
+  const pestana = first(sp.estado);
+  const status = pestana as InvoiceStatus | undefined;
   const docType = first(sp.tipo) as InvoiceDocType | undefined;
   const currency = first(sp.moneda);
   const source = first(sp.origen);
@@ -79,6 +84,9 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
     overdue: first(sp.vencidas) === "1" || undefined,
     dueSoon: first(sp.porvencer) === "1" || undefined,
     awaitingGuide: first(sp.singuia) === "1" || undefined,
+    // "SIN_NC" no es un estado de la factura sino una pestaña: las anuladas a las que
+    // todavía les falta la nota de crédito del proveedor.
+    awaitingCreditNote: first(sp.sinnc) === "1" || pestana === "SIN_NC" || undefined,
   };
 }
 
@@ -92,6 +100,7 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
     f.from ? gte(supplierInvoices.issueDate, f.from) : undefined,
     f.to ? lte(supplierInvoices.issueDate, f.to) : undefined,
     f.paymentTerm ? eq(supplierInvoices.paymentTerm, f.paymentTerm) : undefined,
+    f.awaitingCreditNote ? eq(supplierInvoices.awaitingCreditNote, true) : undefined,
     // Una factura anulada no genera depósito, así que no estorba en la lista de detracciones.
     f.detraction ? and(eq(supplierInvoices.detractionStatus, f.detraction), ne(supplierInvoices.status, "ANULADA")) : undefined,
     f.client ? eq(supplierInvoices.clientName, f.client) : undefined,
@@ -146,6 +155,12 @@ const invoiceColumns = {
   paymentReference: supplierInvoices.paymentReference,
   paymentNotes: supplierInvoices.paymentNotes,
   statusReason: supplierInvoices.statusReason,
+  // La nota de crédito que anula la factura, y la marca de que todavía se la espera.
+  creditNoteNumber: supplierInvoices.creditNoteNumber,
+  creditNoteDate: supplierInvoices.creditNoteDate,
+  creditNoteAmount: supplierInvoices.creditNoteAmount,
+  creditNoteRegisteredAt: supplierInvoices.creditNoteRegisteredAt,
+  awaitingCreditNote: supplierInvoices.awaitingCreditNote,
   source: supplierInvoices.source,
   receivedAt: supplierInvoices.receivedAt,
   serviceType: supplierInvoices.serviceType,
@@ -252,7 +267,19 @@ export async function getInvoiceEmail(invoiceId: string) {
     fromName: invoiceEmails.fromName,
     receivedAt: invoiceEmails.receivedAt,
     status: invoiceEmails.status,
-  }).from(invoiceEmails).where(eq(invoiceEmails.invoiceId, invoiceId)).limit(1);
+    // El rechazo, para poder explicarlo desde la factura sin ir a buscar el correo: por
+    // qué se devolvió, qué se le dijo al proveedor, y si el aviso llegó a salir.
+    rejectReason: invoiceEmails.rejectReason,
+    rejectComment: invoiceEmails.rejectComment,
+    decidedAt: invoiceEmails.decidedAt,
+    decidedByName: users.name,
+    replyTo: invoiceEmails.replyTo,
+    replyBody: invoiceEmails.replyBody,
+    replySentAt: invoiceEmails.replySentAt,
+    replyError: invoiceEmails.replyError,
+  }).from(invoiceEmails)
+    .leftJoin(users, eq(invoiceEmails.decidedBy, users.id))
+    .where(eq(invoiceEmails.invoiceId, invoiceId)).limit(1);
   return row ?? null;
 }
 
@@ -511,6 +538,18 @@ export async function listEmailAttachments(emailId: string) {
     contentType: invoiceAttachments.contentType,
     sizeBytes: invoiceAttachments.sizeBytes,
   }).from(invoiceAttachments).where(eq(invoiceAttachments.emailId, emailId)).orderBy(asc(invoiceAttachments.filename));
+}
+
+/** Cuántas facturas anuladas siguen esperando la nota de crédito del proveedor. */
+export async function countAwaitingCreditNote(f: InvoiceFilters = {}) {
+  const [row] = await db.select({ total: count() })
+    .from(supplierInvoices)
+    .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
+    .where(and(
+      invoiceConditions({ ...f, status: undefined, awaitingCreditNote: true }),
+      eq(supplierInvoices.awaitingCreditNote, true),
+    ));
+  return row?.total ?? 0;
 }
 
 // ---------- Resumen para el dashboard ----------

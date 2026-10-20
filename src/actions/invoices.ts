@@ -8,7 +8,7 @@ import { BusinessError, formToObject, toActionError, type ActionResult } from "@
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { computePayDueDate, detractionFor, DETRACTION_STATUS_LABEL, DETRACTION_THRESHOLD, formatDate, formatMoney, invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
-import { detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
+import { creditNoteSchema, detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
 import {
   assertNoDuplicate, customerWarning, deleteAttachment, detractionFields, findDuplicate,
   findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
@@ -292,6 +292,123 @@ export async function voidInvoice(id: string, formData: FormData): Promise<Actio
     });
     revalidatePath("/", "layout");
     return { ok: true, message: `Registro de la factura ${label(after)} anulado.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Registra la nota de crédito con la que el proveedor anula la factura.
+ *
+ * Una factura mal emitida no se borra ni se corrige: existe ante SUNAT y la única forma de
+ * dejarla sin efecto es que el proveedor emita una nota de crédito por el mismo importe.
+ * Por eso esto no es un campo más, sino la operación que anula: deja la factura anulada,
+ * con la NC al lado, fuera de lo que hay que pagar y fuera de las detracciones.
+ */
+export async function registerCreditNote(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.manage");
+    const data = creditNoteSchema.parse(formToObject(formData));
+    const before = await loadInvoice(id);
+
+    if (before.status === "PAGADA") {
+      throw new BusinessError(
+        "La factura ya está pagada: el dinero salió. Si el proveedor la anuló, reabre el pago"
+        + " primero y después registra la nota de crédito.",
+      );
+    }
+
+    // La NC tiene que cubrir la factura entera. Una por menos sería una rebaja, no una
+    // anulación, y dejaría la factura medio viva sin que nadie sepa cuánto se le debe.
+    const total = Number(before.total);
+    const monto = Number(data.creditNoteAmount);
+    if (Math.abs(monto - total) > 0.009) {
+      throw new BusinessError(
+        `La nota de crédito es por ${formatMoney(monto, before.currency)} y la factura `
+        + `${label(before)} es de ${formatMoney(total, before.currency)}. Para anularla, la nota `
+        + "tiene que ser por el importe completo.",
+      );
+    }
+
+    const after = await db.transaction(async (tx) => {
+      const [row] = await tx.update(supplierInvoices).set({
+        status: "ANULADA",
+        awaitingCreditNote: false,
+        creditNoteNumber: data.creditNoteNumber,
+        creditNoteDate: data.creditNoteDate,
+        creditNoteAmount: monto.toFixed(2),
+        creditNoteRegisteredBy: user.id,
+        creditNoteRegisteredAt: new Date(),
+        statusReason: data.notes ?? before.statusReason,
+        // Lo que no se llegó a depositar ya no se deposita: la operación quedó sin efecto.
+        // Si la detracción YA está depositada no se toca, porque el dinero está en el Banco
+        // de la Nación y la constancia dice otra cosa.
+        ...(before.detractionStatus === "PAGADA"
+          ? {}
+          : { detractionStatus: "NO_APLICA" as const }),
+      }).where(eq(supplierInvoices.id, id)).returning();
+
+      await logAudit({
+        user, action: "ANULAR", module: "FACTURAS", recordId: id,
+        description: `${user.name} anuló la factura ${label(row)} con la nota de crédito `
+          + `${data.creditNoteNumber}, por ${formatMoney(monto, row.currency)}.`
+          + (before.detractionStatus === "PAGADA"
+            ? " La detracción ya estaba depositada y se dejó como estaba."
+            : ""),
+        oldData: before, newData: row,
+      }, tx);
+      return row;
+    });
+
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      message: `Factura ${label(after)} anulada con la nota de crédito ${data.creditNoteNumber}.`
+        + (before.detractionStatus === "PAGADA"
+          ? " Su detracción ya estaba depositada: revísala con el proveedor."
+          : ""),
+    };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Marca una factura anulada como pendiente de que llegue la nota de crédito, o deja de
+ * esperarla.
+ *
+ * Sirve para perseguir al proveedor. Sin esta marca, una anulada sin NC se ve igual que
+ * una ya resuelta y nadie vuelve a reclamársela.
+ */
+export async function toggleAwaitingCreditNote(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.manage");
+    const before = await loadInvoice(id);
+    if (before.creditNoteNumber) {
+      throw new BusinessError("Esta factura ya tiene su nota de crédito registrada.");
+    }
+    if (before.status !== "ANULADA") {
+      throw new BusinessError("Solo una factura anulada puede estar esperando su nota de crédito.");
+    }
+
+    const esperando = !before.awaitingCreditNote;
+    await db.update(supplierInvoices).set({ awaitingCreditNote: esperando })
+      .where(eq(supplierInvoices.id, id));
+
+    await logAudit({
+      user, action: "EDITAR", module: "FACTURAS", recordId: id,
+      description: esperando
+        ? `${user.name} marcó la factura ${label(before)} como pendiente de nota de crédito.`
+        : `${user.name} dejó de esperar la nota de crédito de la factura ${label(before)}.`,
+    });
+
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      message: esperando
+        ? "Queda a la espera de la nota de crédito del proveedor."
+        : "Ya no figura esperando nota de crédito.",
+    };
   } catch (e) {
     return toActionError(e);
   }

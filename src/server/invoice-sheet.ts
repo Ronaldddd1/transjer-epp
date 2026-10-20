@@ -287,6 +287,35 @@ export function estadoDePago(v: string): "PENDIENTE" | "PAGADA" | "ANULADA" {
  * hay celdas con "NC E001-29", que no es un estado sino la nota de crédito que la reemplazó.
  * Eso no se puede traducir, así que la factura queda observada con la nota a la vista.
  */
+/**
+ * Busca la nota de crédito anotada en una celda de estado.
+ *
+ * En la hoja real, la NC no tiene columna propia: se escribe dentro del estado, como
+ * "NC E001-29" o "ANULADO NC-01". Es la forma que tenía la encargada de dejar constancia
+ * de que esa factura se anuló con una nota de crédito, y es un dato que vale la pena
+ * rescatar: sin él, la factura importada queda anulada "porque sí".
+ *
+ * Devuelve el número tal como conviene guardarlo, o null si la celda no menciona ninguna.
+ */
+export function notaDeCreditoEn(v: string | null | undefined): string | null {
+  const texto = String(v ?? "").trim();
+  if (!texto) return null;
+
+  // "NC", "N/C", "N.C.", "nota de crédito", seguidos opcionalmente de la referencia.
+  const m = texto.match(
+    /\b(?:nota\s+de\s+cr[eé]dito|n\s*[./]?\s*c\b\.?)\s*[-–:]?\s*([A-Za-z0-9][A-Za-z0-9-]*)?/i,
+  );
+  if (!m) return null;
+
+  const ref = (m[1] ?? "").trim();
+  // "NC" a secas: consta que la hubo, sin número. Es información igual.
+  if (!ref) return "NC";
+  // En "NC-01" el número de la nota es todo junto; en "NC E001-29" la referencia es la
+  // serie del comprobante y el "NC" sobra.
+  if (/^\d{1,3}$/.test(ref)) return `NC-${ref}`;
+  return ref.slice(0, 40);
+}
+
 export function estadoDeDetraccion(v: string): { estado: "PENDIENTE" | "PAGADA" | "NO_APLICA" | "OBSERVADA"; nota: string | null } {
   const k = llave(v);
   if (!k) return { estado: "PENDIENTE", nota: null };

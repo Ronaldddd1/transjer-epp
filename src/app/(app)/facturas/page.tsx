@@ -19,7 +19,7 @@ import {
   INVOICE_STATUS_LABEL, DETRACTION_STATUS_LABEL, invoiceNumber, pageParams, saldoAPagar,
   PAYMENT_TERM_LABEL, todayLima, type SearchParams,
 } from "@/lib/utils";
-import { countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
+import { countAwaitingCreditNote, countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Facturas de proveedores" };
@@ -44,12 +44,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, totalesPorEstado, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
+  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
     listInvoices(f, pageSize, offset),
     invoiceTotals(f),
-    // Los mismos filtros pero sin el estado: así cada pestaña muestra cuántas hay en ella
-    // y no cero por estar mirando otra.
-    invoiceTotals({ ...f, status: undefined }),
+    // Los mismos filtros pero sin el estado NI la espera de nota de crédito: así cada
+    // pestaña muestra cuántas hay en ella y no cero por estar mirando otra.
+    invoiceTotals({ ...f, status: undefined, awaitingCreditNote: undefined }),
+    countAwaitingCreditNote({ ...f, status: undefined }),
     getSupplierOptions(),
     getClientOptions(),
     countEmailsToReview(),
@@ -171,6 +172,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           { value: "PENDIENTE", label: "Pendientes de pago", count: cuentaPorEstado("PENDIENTE") },
           { value: "PAGADA", label: "Pagadas", count: cuentaPorEstado("PAGADA") },
           { value: "OBSERVADA", label: "Observadas", count: cuentaPorEstado("OBSERVADA") },
+          { value: "SIN_NC", label: "Esperan nota de crédito", count: esperanNC },
           { value: "", label: "Todas", count: todasLasFacturas },
         ]}
       />
@@ -278,7 +280,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                   )}
                 </Td>
                 <Td>
-                  <InvoiceStatusBadge status={i.status} dueDate={i.payDueDate} />
+                  <InvoiceStatusBadge
+                    status={i.status}
+                    dueDate={i.payDueDate}
+                    creditNote={i.creditNoteNumber}
+                    awaitingCreditNote={i.awaitingCreditNote}
+                  />
                   {i.statusReason && i.status !== "PAGADA" && (
                     <p className="mt-1 line-clamp-2 w-36 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
                   )}

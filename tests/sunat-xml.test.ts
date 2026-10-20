@@ -79,6 +79,23 @@ const nc = parseSunatXml(Buffer.from(NC), "nc.xml");
 check("nota de credito", nc.docType === "NOTA_CREDITO", nc.docType);
 check("moneda USD", nc.currency === "USD", nc.currency);
 check("serie FC01 / numero 45", nc.series === "FC01" && nc.number === "45", nc);
+check("una factura normal no referencia a ninguna otra", f.referencedDoc === null, f.referencedDoc);
+
+/**
+ * La nota de crédito dice a qué factura afecta.
+ *
+ * Es lo que permite aplicarla sola: sin esto, cada NC que llega por correo hay que
+ * emparejarla a mano con su factura, que es justo lo que nadie hace.
+ */
+const NC_CON_REF = NC.replace("<cac:DespatchDocumentReference>", `<cac:BillingReference>
+  <cac:InvoiceDocumentReference>
+    <cbc:ID>F001-2589</cbc:ID>
+    <cbc:DocumentTypeCode>01</cbc:DocumentTypeCode>
+  </cac:InvoiceDocumentReference>
+</cac:BillingReference><cac:DespatchDocumentReference>`);
+const ncRef = parseSunatXml(Buffer.from(NC_CON_REF), "nc-ref.xml");
+check("la nota de crédito dice qué factura anula", ncRef.referencedDoc === "F001-2589", ncRef.referencedDoc);
+check("y sigue leyéndose como nota de crédito", ncRef.docType === "NOTA_CREDITO");
 
 // 4. Errores claros
 const casos: [string, string][] = [

@@ -195,8 +195,9 @@ with sync_playwright() as p:
     texto_f = fila_f.inner_text()
     check("la tabla de facturas muestra el cliente y la ruta completa",
           "TIENDAS PERUANAS SA" in texto_f and "LIMA → LOCAL" in texto_f, texto_f)
+    # 1180 − 48 de detracción (el 4 % son 47.20 y sube al sol siguiente) = 1132.
     check("y el importe a pagar sale sin la detracción",
-          "1,133.00" in texto_f or "1,180.00" in texto_f, texto_f)
+          "1,132.00" in texto_f or "1,180.00" in texto_f, texto_f)
 
     # Un adelanto entregado se descuenta solo de lo que queda por transferir.
     ejecutar(f"update supplier_invoices set advances = 400 where series = '{SERIE}' and number = '{SELLO}3'")
@@ -204,13 +205,13 @@ with sync_playwright() as p:
     fila_ad = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
     texto_ad = fila_ad.inner_text()
     check("el adelanto aparece en su columna", "400.00" in texto_ad, texto_ad)
-    check("y el saldo baja lo adelantado", "733.00" in texto_ad, texto_ad)
+    check("y el saldo baja lo adelantado", "732.00" in texto_ad, texto_ad)
 
     fila_ad.get_by_role("button", name="Registrar pago").click()
     page.wait_for_timeout(1000)
     pago = page.get_by_role("dialog").inner_text()
     check("al pagar se muestra la cuenta hecha", "Adelantos" in pago and "A transferir" in pago, pago[:300])
-    check("y lo que se transfiere ya tiene descontado el adelanto", "733.00" in pago, pago[:300])
+    check("y lo que se transfiere ya tiene descontado el adelanto", "732.00" in pago, pago[:300])
     page.keyboard.press("Escape"); page.wait_for_timeout(600)
 
     # La detracción es del transporte: a una factura de servicio no se le calcula.
@@ -238,6 +239,11 @@ with sync_playwright() as p:
     check("el texto recoge el motivo elegido", "importe no coincide" in actualizado.lower(), actualizado[:200])
     check("y el comentario escrito", "lo acordado fue S/ 980" in actualizado)
 
+    # Con el motivo "importe", la casilla de registrar la factura anulada viene marcada
+    # sola: es un comprobante que el proveedor tendrá que anular con una nota de crédito.
+    check("con un motivo que exige nota de crédito, se propone registrar la factura",
+          page.is_checked("input[name=registrar]"))
+
     # Sin enviar correo: el servidor de salida no está configurado en las pruebas, y lo
     # que se comprueba aquí es que el rechazo se registre igual.
     page.uncheck("input[name=send]")
@@ -249,8 +255,15 @@ with sync_playwright() as p:
     check("el comprobante queda rechazado, con su motivo", estado == "RECHAZADO|IMPORTE", estado)
     check("se guarda el comentario para el proveedor",
           "980" in psql(f"select coalesce(reject_comment,'') from invoice_emails where id = '{rechazar_id}'"))
-    check("rechazar no registra ninguna factura",
-          psql(f"select count(*) from supplier_invoices where number = '{SELLO}2'") == "0")
+    # El comprobante rechazado queda registrado como factura anulada: existe ante SUNAT
+    # hasta que el proveedor mande la nota de crédito, y así se le puede reclamar.
+    anulada = psql("select status || '|' || awaiting_credit_note::text || '|' || "
+                   f"coalesce(pay_due_date::text,'-') from supplier_invoices where number = '{SELLO}2'")
+    check("el comprobante rechazado queda como factura anulada esperando la nota de crédito",
+          anulada == "ANULADA|true|-", anulada)
+    motivo_guardado = psql(f"select coalesce(status_reason,'') from supplier_invoices where number = '{SELLO}2'")
+    check("y la factura guarda por qué se rechazó",
+          "importe" in motivo_guardado.lower() and "980" in motivo_guardado, motivo_guardado)
 
     # --- Y se ve que al proveedor no se le avisó ---
     page.goto(f"{BASE}/facturas/correos?estado=RECHAZADO")

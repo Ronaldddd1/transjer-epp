@@ -24,6 +24,13 @@ export type ParsedInvoice = {
   customerRuc: string | null;
   description: string | null;
   grtNumber: string | null;
+  /**
+   * El comprobante que esta nota de crédito corrige, tal como lo declara el XML.
+   *
+   * Solo viene en notas de crédito y de débito, y es lo que permite enlazarla con la
+   * factura que anula sin que nadie tenga que buscarla a mano.
+   */
+  referencedDoc: string | null;
 };
 
 /** Códigos de tipo de comprobante de SUNAT (catálogo 01). */
@@ -180,6 +187,20 @@ export function parseSunatXml(raw: Buffer, filename = ""): ParsedInvoice {
       })
       .find(Boolean) ?? null;
 
+  /**
+   * El comprobante al que afecta una nota de crédito.
+   *
+   * UBL lo pone en BillingReference/InvoiceDocumentReference/ID, con el número completo
+   * ("F001-123"). Sin esto, la NC que llega por correo es un papel suelto que alguien
+   * tiene que emparejar a ojo con su factura.
+   */
+  const referencedDoc = asArray(root.BillingReference)
+    .map((b) => {
+      const ref = (b as Record<string, unknown>).InvoiceDocumentReference as Record<string, unknown> | undefined;
+      return text(ref?.ID);
+    })
+    .find(Boolean) ?? null;
+
   const firstLine = asArray(root.InvoiceLine ?? root.CreditNoteLine ?? root.DebitNoteLine)[0] as Record<string, unknown> | undefined;
   const description = text((firstLine?.Item as Record<string, unknown>)?.Description);
 
@@ -198,6 +219,7 @@ export function parseSunatXml(raw: Buffer, filename = ""): ParsedInvoice {
     customerRuc,
     description: description ? description.slice(0, 250) : null,
     grtNumber: grtNumber ? grtNumber.slice(0, 40) : null,
+    referencedDoc: referencedDoc ? referencedDoc.slice(0, 40) : null,
   };
 }
 

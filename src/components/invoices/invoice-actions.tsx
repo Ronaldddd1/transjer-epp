@@ -1,7 +1,10 @@
 "use client";
 
-import { Ban, CheckCircle2, FileCheck2, RotateCcw, Undo2 } from "lucide-react";
-import { observeInvoice, payInvoice, reopenInvoice, restoreInvoice, setGuideReceived, voidInvoice } from "@/actions/invoices";
+import { Ban, CheckCircle2, FileCheck2, FileMinus2, RotateCcw, Undo2 } from "lucide-react";
+import {
+  observeInvoice, payInvoice, registerCreditNote, reopenInvoice, restoreInvoice,
+  setGuideReceived, voidInvoice,
+} from "@/actions/invoices";
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
@@ -186,6 +189,75 @@ export function InvoiceReasonModal({ invoice, action, compact = false }: { invoi
             <Textarea name="statusReason" maxLength={250} rows={3} invalid={!!errors.statusReason} autoFocus />
           </Field>
         </>
+      )}
+    </FormModal>
+  );
+}
+
+/**
+ * Registra la nota de crédito con la que el proveedor anula la factura.
+ *
+ * El importe viene puesto con el total de la factura, que es lo que será en todos los
+ * casos: una nota de crédito que no cubre el total no anula nada, y el sistema la rechaza.
+ * Se deja editable igual, para que quien la registra vea el número que está confirmando en
+ * vez de aceptar a ciegas lo que el formulario rellenó solo.
+ */
+export function CreditNoteModal({ invoice, compact = false }: { invoice: InvoiceRef; compact?: boolean }) {
+  return (
+    <FormModal
+      title="Registrar la nota de crédito"
+      description="La factura queda anulada, con la nota de crédito al lado. No se borra: ante SUNAT existió."
+      submitLabel="Registrar y anular la factura"
+      size="sm"
+      action={(fd) => registerCreditNote(invoice.id, fd)}
+      trigger={(open) => (
+        <Button variant="outline" size={compact ? "sm" : "md"} onClick={open} title="Registrar la nota de crédito">
+          <FileMinus2 className="h-4 w-4" />
+          <span className={compact ? "sr-only 2xl:not-sr-only" : ""}>Nota de crédito</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <div className="grid gap-4">
+          <p className="text-sm text-steel-600">
+            Anula el comprobante <strong className="text-ink">{docLabel(invoice)}</strong> de{" "}
+            {invoice.supplierName}, por{" "}
+            <strong className="text-ink">{formatMoney(invoice.total, invoice.currency)}</strong>.
+          </p>
+          <Field
+            label="Número de la nota de crédito"
+            name="creditNoteNumber"
+            required
+            error={errors.creditNoteNumber}
+            hint="Tal como viene en el comprobante del proveedor."
+          >
+            <Input name="creditNoteNumber" maxLength={40} placeholder="NC-01" invalid={!!errors.creditNoteNumber} autoFocus />
+          </Field>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Fecha de la nota" name="creditNoteDate" error={errors.creditNoteDate}>
+              <DateInput name="creditNoteDate" defaultValue={todayLima()} invalid={!!errors.creditNoteDate} />
+            </Field>
+            <Field
+              label="Importe"
+              name="creditNoteAmount"
+              required
+              error={errors.creditNoteAmount}
+              hint="Tiene que ser el total de la factura."
+            >
+              <Input
+                name="creditNoteAmount"
+                type="number"
+                step="0.01"
+                min="0"
+                defaultValue={Number(invoice.total).toFixed(2)}
+                invalid={!!errors.creditNoteAmount}
+              />
+            </Field>
+          </div>
+          <Field label="Observación" name="notes" error={errors.notes} hint="Opcional: por qué se anuló.">
+            <Textarea name="notes" maxLength={250} rows={2} />
+          </Field>
+        </div>
       )}
     </FormModal>
   );

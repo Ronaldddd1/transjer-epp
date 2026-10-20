@@ -62,7 +62,14 @@ export async function findDuplicate(
   tx: Tx | typeof db,
   input: Pick<InvoiceInput, "supplierId" | "docType" | "series" | "number">,
 ) {
-  const [row] = await tx.select({ id: supplierInvoices.id, status: supplierInvoices.status })
+  const [row] = await tx.select({
+    id: supplierInvoices.id,
+    status: supplierInvoices.status,
+    // Hacen falta al rechazar un comprobante que ya estaba registrado: sin ellos no se
+    // sabe si todavía falta la nota de crédito ni si la detracción ya se depositó.
+    creditNoteNumber: supplierInvoices.creditNoteNumber,
+    detractionStatus: supplierInvoices.detractionStatus,
+  })
     .from(supplierInvoices)
     .where(and(
       eq(supplierInvoices.supplierId, input.supplierId),

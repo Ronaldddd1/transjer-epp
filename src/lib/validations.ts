@@ -433,6 +433,23 @@ export const payInvoiceSchema = z.object({
   paymentNotes: optionalText(1000),
 });
 
+/**
+ * La nota de crédito con la que el proveedor anula una factura.
+ *
+ * El número se escribe tal como viene en el comprobante ("NC-01", "E001-29"): es una
+ * referencia para buscarlo después, no un dato que el sistema vaya a interpretar.
+ */
+export const creditNoteSchema = z.object({
+  creditNoteNumber: requiredText("El número de la nota de crédito", 40),
+  creditNoteDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  creditNoteAmount: z.preprocess(
+    vacioEsNada,
+    z.coerce.number({ invalid_type_error: "El importe debe ser un número" })
+      .positive("El importe debe ser mayor que cero"),
+  ),
+  notes: optionalText(250),
+});
+
 export const observeInvoiceSchema = z.object({
   statusReason: requiredText("El motivo", 250).refine((v) => v.length >= 5, "Explica el motivo (mínimo 5 caracteres)"),
 });
@@ -474,6 +491,13 @@ export const rejectEmailSchema = z.object({
     .refine((v) => v.length >= 20, "El texto es demasiado corto"),
   /** Sin esto se registra el rechazo, pero no se le avisa al proveedor. */
   send: z.coerce.boolean().default(false),
+  /**
+   * Deja la factura registrada como anulada, esperando la nota de crédito del proveedor.
+   *
+   * Viene marcada por defecto en los motivos que obligan al proveedor a emitir una NC, y
+   * desmarcada cuando el comprobante no era nuestro (otra empresa, duplicado).
+   */
+  registrar: checkbox,
 });
 
 

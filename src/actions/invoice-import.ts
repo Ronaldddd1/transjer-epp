@@ -9,7 +9,7 @@ import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { computePayDueDate, detractionFor, normalizeSupplierName } from "@/lib/utils";
 import {
-  estadoDePago, estadoDeDetraccion, readInvoiceSheet, type SheetInvoice,
+  estadoDePago, estadoDeDetraccion, notaDeCreditoEn, readInvoiceSheet, type SheetInvoice,
 } from "@/server/invoice-sheet";
 
 /**
@@ -35,6 +35,8 @@ export type FilaAnalizada = {
   estado: "PENDIENTE" | "PAGADA" | "ANULADA";
   detraccion: number;
   proveedorNuevo: boolean;
+  /** La nota de crédito que la hoja anotaba dentro del estado, si la había. */
+  notaCredito?: string | null;
 };
 
 export type AnalisisHoja =
@@ -133,15 +135,20 @@ export async function analizarFacturasDeExcel(formData: FormData): Promise<Anali
       const d = montoDetraccion(f);
       if (d.difiere) diferenciasDetraccion.push({ comprobante: `${f.proveedor} ${comprobante}`, hoja: d.usar, regla: d.regla });
 
+      // La nota de crédito anotada en el estado manda sobre el estado mismo: una fila
+      // con "NC E001-29" entra anulada aunque la columna diga otra cosa.
+      const nc = notaDeCreditoEn(f.estadoPago) ?? notaDeCreditoEn(f.estadoDetraccion);
+
       nuevas.push({
         fila: f.fila,
         proveedor: f.proveedor,
         comprobante,
         fecha: f.fechaEmision,
         total: f.total,
-        estado: estadoDePago(f.estadoPago),
-        detraccion: d.usar,
+        estado: nc ? "ANULADA" : estadoDePago(f.estadoPago),
+        detraccion: nc ? 0 : d.usar,
         proveedorNuevo: !proveedorId,
+        notaCredito: nc,
       });
     }
 
@@ -201,14 +208,23 @@ export async function importarFacturasDeExcel(formData: FormData): Promise<Actio
         )).limit(1);
         if (repetida) { repetidas++; continue; }
 
-        const pago = estadoDePago(f.estadoPago);
         const det = estadoDeDetraccion(f.estadoDetraccion);
         const d = montoDetraccion(f);
 
+        /**
+         * La nota de crédito va escrita dentro del estado, no en una columna propia:
+         * "NC E001-29" en la de detracción, "ANULADO NC-01" en la de pago. Si está, la
+         * factura se anuló con ella, diga lo que diga la columna de estado.
+         */
+        const nc = notaDeCreditoEn(f.estadoPago) ?? notaDeCreditoEn(f.estadoDetraccion);
+        const pago = nc ? "ANULADA" as const : estadoDePago(f.estadoPago);
+
         let estadoDetraccion: DetractionStatus = !d.aplica ? "NO_APLICA" : det.estado;
-        // Una factura anulada no deja una detracción en marcha: queda observada para que
-        // alguien decida qué pasó con el depósito.
-        if (pago === "ANULADA" && estadoDetraccion !== "NO_APLICA") estadoDetraccion = "OBSERVADA";
+        // Con nota de crédito la operación quedó sin efecto: no hay depósito que hacer.
+        if (nc) estadoDetraccion = "NO_APLICA";
+        // Una factura anulada sin NC no deja una detracción en marcha: queda observada
+        // para que alguien decida qué pasó con el depósito.
+        else if (pago === "ANULADA" && estadoDetraccion !== "NO_APLICA") estadoDetraccion = "OBSERVADA";
 
         const plazo = {
           paymentTerm: proveedor.defaultPaymentTerm,
@@ -259,7 +275,14 @@ export async function importarFacturasDeExcel(formData: FormData): Promise<Actio
           paidAt: pago === "PAGADA" ? emision : null,
           paidBy: pago === "PAGADA" ? user.id : null,
           paymentNotes: pago === "PAGADA" ? sinFechaReal : null,
-          statusReason: pago === "ANULADA" ? "Anulada en el control en Excel." : null,
+          statusReason: nc
+            ? `Anulada con la nota de crédito ${nc}, según el control en Excel.`
+            : pago === "ANULADA" ? "Anulada en el control en Excel." : null,
+          creditNoteNumber: nc,
+          // La hoja no anota ni la fecha ni el importe de la NC. El importe es el de la
+          // factura, porque una nota de crédito que anula va por el total; la fecha se
+          // deja vacía en vez de inventar una.
+          creditNoteAmount: nc ? total.toFixed(2) : null,
           source: "MANUAL",
           createdBy: user.id,
           notes: "Importado del control en Excel.",

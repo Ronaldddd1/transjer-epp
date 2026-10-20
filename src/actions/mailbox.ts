@@ -1,13 +1,13 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { invoiceAttachments, invoiceEmails } from "@/db/schema";
+import { invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey } from "@/lib/utils";
+import { formatMoney, invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey } from "@/lib/utils";
 import { approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema } from "@/lib/validations";
 import {
   createSubscription, deleteSubscription, getSubscription, notificationUrl,
@@ -16,7 +16,7 @@ import {
 import { testImapConnection } from "@/server/imap";
 import { readMailboxConfig } from "@/server/mailbox-config";
 import { ingestMessage, syncMailbox } from "@/server/invoice-ingest";
-import { parsedOf, registerApprovedEmail } from "@/server/invoice-approval";
+import { parsedOf, registerApprovedEmail, registerRejectedEmail } from "@/server/invoice-approval";
 import { insertInvoice } from "@/server/invoice-service";
 import { sendMail, verifySmtp } from "@/server/mailer";
 import { clearSubscriptionState, getSubscriptionState, setSubscriptionState } from "@/server/mailbox-state";
@@ -258,6 +258,18 @@ export async function rejectEmail(id: string, formData: FormData): Promise<Actio
       });
     }
 
+    // La factura se registra ANTES de marcar el correo, y en una transacción: si falla el
+    // registro, el correo no queda rechazado "a medias" con una factura que no existe.
+    let registrada: { label: string } | null = null;
+    let avisoRegistro = "";
+    if (data.registrar) {
+      const r = await db.transaction((tx) => registerRejectedEmail(tx, email, user, {
+        reason: data.reason, comment: data.comment,
+      }));
+      if (r.ok) registrada = { label: r.label };
+      else avisoRegistro = ` No se pudo registrar la factura anulada: ${r.error}`;
+    }
+
     await db.update(invoiceEmails).set({
       status: "RECHAZADO",
       rejectReason: data.reason,
@@ -279,16 +291,148 @@ export async function rejectEmail(id: string, formData: FormData): Promise<Actio
         + ` Motivo: ${REJECT_REASON_LABEL[data.reason as RejectReasonKey] ?? data.reason}.`
         + (data.send ? (envio.ok ? ` Se le avisó a ${destino}.` : ` No se pudo avisar a ${destino}: ${envio.error}`) : " No se envió aviso al proveedor."),
       oldData: { estado: email.status },
-      newData: { estado: "RECHAZADO", motivo: data.reason, comentario: data.comment, avisado: envio.ok },
+      newData: {
+        estado: "RECHAZADO", motivo: data.reason, comentario: data.comment, avisado: envio.ok,
+        facturaAnulada: registrada?.label ?? null,
+      },
     });
 
     revalidatePath("/", "layout");
     if (data.send && !envio.ok) {
       return { ok: false, message: `El comprobante quedó rechazado, pero el correo no salió: ${envio.error}` };
     }
+    const base = data.send
+      ? `Comprobante rechazado. Se le avisó a ${destino}.`
+      : "Comprobante rechazado, sin avisar al proveedor.";
     return {
       ok: true,
-      message: data.send ? `Comprobante rechazado. Se le avisó a ${destino}.` : "Comprobante rechazado, sin avisar al proveedor.",
+      message: base
+        + (registrada
+          ? ` La factura ${registrada.label} quedó anulada, esperando la nota de crédito.`
+          : avisoRegistro),
+    };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Aplica a su factura una nota de crédito que llegó por correo.
+ *
+ * El XML de la nota dice a qué comprobante afecta, así que no hay que emparejarla a mano:
+ * se busca esa factura del mismo proveedor y se anula con ella. Es el otro extremo del
+ * rechazo: ahí la factura quedó esperando la NC, y aquí llega y se cierra sola.
+ */
+export async function applyCreditNoteEmail(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.approve");
+    const [email] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, id)).limit(1);
+    if (!email) throw new BusinessError("El correo no existe.");
+    if (email.status === "PROCESADO") throw new BusinessError("Este correo ya se procesó.");
+
+    const nota = parsedOf(email);
+    if (!nota) throw new BusinessError("Este correo no tiene los datos del comprobante leídos.");
+    if (nota.docType !== "NOTA_CREDITO") {
+      throw new BusinessError("Este comprobante no es una nota de crédito.");
+    }
+    if (!nota.referencedDoc) {
+      throw new BusinessError(
+        "La nota de crédito no dice a qué factura afecta. Regístrala a mano desde la factura.",
+      );
+    }
+
+    const etiquetaNota = invoiceNumber(nota.series, nota.number);
+    const resultado = await db.transaction(async (tx) => {
+      const [proveedor] = await tx.select().from(suppliers)
+        .where(eq(suppliers.ruc, nota.supplierRuc)).limit(1);
+      if (!proveedor) {
+        throw new BusinessError(
+          `No hay ninguna factura registrada de ${nota.supplierName}, así que esta nota de crédito no anula nada.`,
+        );
+      }
+
+      // "F001-123" viene en el XML como un solo texto: se parte para buscar la factura.
+      const [serie, numero] = nota.referencedDoc!.split("-");
+      if (!serie || !numero) {
+        throw new BusinessError(`No se entiende a qué factura afecta la nota (${nota.referencedDoc}).`);
+      }
+
+      const [factura] = await tx.select().from(supplierInvoices).where(and(
+        eq(supplierInvoices.supplierId, proveedor.id),
+        eq(supplierInvoices.series, serie),
+        eq(supplierInvoices.number, numero),
+      )).limit(1);
+      if (!factura) {
+        throw new BusinessError(
+          `La nota de crédito anula la factura ${nota.referencedDoc}, que no está registrada.`,
+        );
+      }
+      if (factura.creditNoteNumber) {
+        throw new BusinessError(
+          `La factura ${nota.referencedDoc} ya fue anulada con la nota ${factura.creditNoteNumber}.`,
+        );
+      }
+      if (factura.status === "PAGADA") {
+        throw new BusinessError(
+          `La factura ${nota.referencedDoc} está pagada: el dinero salió. Reabre el pago antes de anularla.`,
+        );
+      }
+
+      const totalFactura = Number(factura.total);
+      const totalNota = Number(nota.total);
+      if (Math.abs(totalNota - totalFactura) > 0.009) {
+        throw new BusinessError(
+          `La nota de crédito es por ${formatMoney(totalNota, nota.currency)} y la factura `
+          + `${nota.referencedDoc} es de ${formatMoney(totalFactura, factura.currency)}. `
+          + "Solo se aplica sola cuando anula el importe completo.",
+        );
+      }
+
+      const [anulada] = await tx.update(supplierInvoices).set({
+        status: "ANULADA",
+        awaitingCreditNote: false,
+        creditNoteNumber: etiquetaNota,
+        creditNoteDate: nota.issueDate,
+        creditNoteAmount: totalNota.toFixed(2),
+        creditNoteRegisteredBy: user.id,
+        creditNoteRegisteredAt: new Date(),
+        statusReason: `Anulada con la nota de crédito ${etiquetaNota}.`,
+        ...(factura.detractionStatus === "PAGADA" ? {} : { detractionStatus: "NO_APLICA" as const }),
+      }).where(eq(supplierInvoices.id, factura.id)).returning();
+
+      // El XML y el PDF de la nota pasan a colgar de la factura que anula: es donde se
+      // van a buscar cuando alguien pregunte por qué está anulada.
+      await tx.update(invoiceAttachments)
+        .set({ invoiceId: factura.id })
+        .where(and(eq(invoiceAttachments.emailId, email.id), isNull(invoiceAttachments.invoiceId)));
+
+      await tx.update(invoiceEmails).set({
+        status: "PROCESADO",
+        invoiceId: factura.id,
+        detail: `Nota de crédito ${etiquetaNota}: anula la factura ${nota.referencedDoc}.`,
+        decidedBy: user.id,
+        decidedAt: new Date(),
+        processedAt: new Date(),
+      }).where(eq(invoiceEmails.id, email.id));
+
+      await logAudit({
+        user, action: "ANULAR", module: "CORREO", recordId: factura.id,
+        description: `${user.name} aplicó la nota de crédito ${etiquetaNota} de ${proveedor.businessName}`
+          + `: la factura ${nota.referencedDoc} queda anulada.`
+          + (factura.detractionStatus === "PAGADA" ? " Su detracción ya estaba depositada y se dejó como estaba." : ""),
+        oldData: factura, newData: anulada,
+      }, tx);
+
+      return { factura: nota.referencedDoc!, detraccionDepositada: factura.detractionStatus === "PAGADA" };
+    });
+
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      message: `Factura ${resultado.factura} anulada con la nota de crédito ${etiquetaNota}.`
+        + (resultado.detraccionDepositada
+          ? " Su detracción ya estaba depositada: revísala con el proveedor."
+          : ""),
     };
   } catch (e) {
     return toActionError(e);

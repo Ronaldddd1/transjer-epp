@@ -16,7 +16,7 @@ import {
 } from "../src/db/schema";
 import { REJECT_REASON_LABEL, rejectionEmailBody } from "../src/lib/utils";
 import { leerConceptoTransporte } from "../src/server/concepto-transporte";
-import { parsedOf, registerApprovedEmail } from "../src/server/invoice-approval";
+import { parsedOf, registerApprovedEmail, registerRejectedEmail } from "../src/server/invoice-approval";
 import { readSmtpConfig } from "../src/server/mailer";
 
 let fails = 0;
@@ -56,7 +56,7 @@ async function limpiar() {
 }
 
 /** Un correo ya leído, esperando decisión, como lo deja el buzón. */
-async function correoPorAprobar(sufijo: string) {
+async function correoPorAprobar(sufijo: string, numero = SELLO) {
   const [email] = await db.insert(invoiceEmails).values({
     messageId: `aprob-${SELLO}-${sufijo}`,
     internetMessageId: `<${sufijo}@proveedor.pe>`,
@@ -66,7 +66,7 @@ async function correoPorAprobar(sufijo: string) {
     receivedAt: new Date("2026-10-03T14:00:00Z"),
     status: "POR_APROBAR",
     attachmentCount: 2,
-    parsed: COMPROBANTE,
+    parsed: { ...COMPROBANTE, number: numero },
   }).returning();
   // Los archivos llegan colgando del correo, no de ninguna factura: todavía no existe.
   for (const nombre of ["factura.pdf", "factura.xml"]) {
@@ -273,6 +273,71 @@ async function main() {
       if (antes[k] === undefined) delete process.env[k];
       else process.env[k] = antes[k];
     }
+  }
+
+  // ---------- Rechazar dejando la factura anulada ----------
+  /**
+   * Es el caso que parece contradictorio: se registra lo que se acaba de rechazar. La
+   * factura existe ante SUNAT hasta que llegue la nota de crédito, y si aquí no queda
+   * rastro, dentro de tres meses nadie sabe por qué falta ese número.
+   */
+  const rechazado = await correoPorAprobar("rech", `${SELLO}9`);
+  const reg = await db.transaction((tx) => registerRejectedEmail(tx, rechazado, quien, {
+    reason: "IMPORTE", comment: "Se pactaron S/ 980.",
+  }));
+  check("rechazar puede dejar la factura registrada", reg.ok === true, reg);
+
+  if (reg.ok) {
+    const [anulada] = await db.select().from(supplierInvoices)
+      .where(eq(supplierInvoices.id, reg.invoiceId));
+    check("la factura del rechazo queda anulada", anulada.status === "ANULADA", anulada.status);
+    check("y marcada como que espera la nota de crédito", anulada.awaitingCreditNote === true);
+    check("el motivo del rechazo queda escrito en la factura",
+      (anulada.statusReason ?? "").includes("importe") || (anulada.statusReason ?? "").includes("Se pactaron"),
+      anulada.statusReason);
+    check("no genera detracción, porque no se va a pagar", anulada.detractionStatus === "NO_APLICA");
+    check("y no entra en la cola de pagos: no tiene fecha límite", anulada.payDueDate === null, { payDueDate: anulada.payDueDate, term: anulada.paymentTerm, dias: anulada.termDays });
+
+    const [correoTrasRechazo] = await db.select().from(invoiceEmails)
+      .where(eq(invoiceEmails.id, rechazado.id));
+    check("el correo queda enlazado con esa factura", correoTrasRechazo.invoiceId === reg.invoiceId);
+
+    const adjuntos = await db.select().from(invoiceAttachments)
+      .where(eq(invoiceAttachments.invoiceId, reg.invoiceId));
+    check("los archivos del correo pasan a la factura, para poder enseñarlos",
+      adjuntos.length === 2, adjuntos.length);
+
+    /**
+     * Y si la factura YA estaba registrada cuando se rechaza, se anula la que hay en vez
+     * de duplicarla, y se le quita la fecha límite: una factura devuelta que conserva su
+     * vencimiento sigue saliendo en el calendario de pagos reclamando lo que ya no se paga.
+     */
+    const yaRegistrada = await correoPorAprobar("rech2");
+    const segundo = await db.transaction((tx) => registerRejectedEmail(tx, yaRegistrada, quien, {
+      reason: "DATOS_ERRADOS", comment: null,
+    }));
+    check("rechazar una factura ya registrada no la duplica",
+      segundo.ok === true && segundo.invoiceId === resultado.invoiceId, segundo);
+    if (segundo.ok) {
+      const [reanulada] = await db.select().from(supplierInvoices)
+        .where(eq(supplierInvoices.id, segundo.invoiceId));
+      check("la que ya estaba registrada queda anulada", reanulada.status === "ANULADA");
+      check("y pierde su fecha límite de pago", reanulada.payDueDate === null, reanulada.payDueDate);
+    }
+
+    // ---------- Y cuando llega la nota de crédito, se cierra ----------
+    await db.update(supplierInvoices).set({
+      creditNoteNumber: "NC-01",
+      creditNoteDate: "2026-10-20",
+      creditNoteAmount: anulada.total,
+      awaitingCreditNote: false,
+    }).where(eq(supplierInvoices.id, reg.invoiceId));
+
+    const [cerrada] = await db.select().from(supplierInvoices)
+      .where(eq(supplierInvoices.id, reg.invoiceId));
+    check("con la nota registrada deja de esperarla", cerrada.awaitingCreditNote === false);
+    check("y sigue anulada, ahora con su nota al lado",
+      cerrada.status === "ANULADA" && cerrada.creditNoteNumber === "NC-01");
   }
 
   await limpiar();

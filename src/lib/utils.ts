@@ -142,6 +142,18 @@ export const REJECT_REASON_LABEL = {
 } as const;
 
 export type RejectReasonKey = keyof typeof REJECT_REASON_LABEL;
+
+/**
+ * Los motivos tras los cuales el proveedor tendrá que emitir una nota de crédito.
+ *
+ * Son aquellos en que la factura SÍ era para nosotros y está mal: el comprobante existe
+ * ante SUNAT y la única forma de dejarlo sin efecto es la NC. Los otros dos —emitida a
+ * otra empresa, o duplicada— no generan ninguna factura nuestra, así que no hay nada que
+ * registrar ni nada que reclamar.
+ */
+export const PIDEN_NOTA_DE_CREDITO = new Set<string>([
+  "DATOS_ERRADOS", "IMPORTE", "FALTA_GRT",
+]);
 export const REJECT_REASONS = Object.keys(REJECT_REASON_LABEL) as RejectReasonKey[];
 
 /**
@@ -270,7 +282,19 @@ export function detractionFor(
   if (currency !== "PEN" || !Number.isFinite(n) || n <= DETRACTION_THRESHOLD) {
     return { applies: false, amount: 0, netPayable: Number.isFinite(n) ? n : 0 };
   }
-  const amount = Math.round((n * rate) / 100);
+  /**
+   * Se redondea SIEMPRE hacia arriba, nunca al más cercano.
+   *
+   * El 4 % de S/ 605 son 24.20, y eso se deposita como 25. Redondear al más cercano daría
+   * 24 y dejaría 20 céntimos sin detraer: la diferencia va a parar al pago directo en vez
+   * de a la cuenta de detracciones del proveedor, que es suya igual. Hacia arriba, el
+   * faltante nunca queda del lado de la empresa.
+   */
+  // Se corta en céntimos antes de subir. En coma flotante, el 4 % de ciertos importes da
+  // 118.00000000000001, y redondear eso hacia arriba daría 119: un sol de más depositado
+  // por un error de la aritmética del lenguaje, no de la norma.
+  const exacto = Number(((n * rate) / 100).toFixed(2));
+  const amount = Math.ceil(exacto);
   return { applies: true, amount, netPayable: Math.round((n - amount) * 100) / 100 };
 }
 

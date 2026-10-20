@@ -83,7 +83,14 @@ const INVOICE_TONE: Record<string, BadgeTone> = {
   ANULADA: "neutral",
 };
 
-export function InvoiceStatusBadge({ status, dueDate }: { status: string; dueDate?: string | null }) {
+export function InvoiceStatusBadge({ status, dueDate, creditNote, awaitingCreditNote }: {
+  status: string;
+  dueDate?: string | null;
+  /** Número de la nota de crédito que la anuló, si la tiene. */
+  creditNote?: string | null;
+  /** Anulada, pero el proveedor todavía no mandó la nota de crédito. */
+  awaitingCreditNote?: boolean;
+}) {
   const overdue = status === "PENDIENTE" && !!dueDate && dueDate < todayLima();
   return (
     <span className="inline-flex flex-wrap items-center gap-1">
@@ -91,6 +98,16 @@ export function InvoiceStatusBadge({ status, dueDate }: { status: string; dueDat
         {INVOICE_STATUS_LABEL[status as keyof typeof INVOICE_STATUS_LABEL] ?? status}
       </Badge>
       {overdue && <Badge tone="red">Vencida</Badge>}
+      {/* Dos anuladas distintas: la que ya está resuelta con su NC, y la que todavía hay
+          que reclamarle al proveedor. En la tabla se veían exactamente igual. */}
+      {/* El número puede venir ya con la sigla ("NC-01") o sin ella ("E001-29"): se
+          antepone solo cuando falta, para no leer "NC NC-01". */}
+      {creditNote && (
+        <Badge tone="neutral">
+          {/^n\.?\s*\/?\s*c/i.test(creditNote) ? creditNote : `NC ${creditNote}`}
+        </Badge>
+      )}
+      {!creditNote && awaitingCreditNote && <Badge tone="yellow">Falta la NC</Badge>}
     </span>
   );
 }
