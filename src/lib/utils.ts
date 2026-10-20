@@ -538,6 +538,33 @@ export const DOCUMENT_STATUS_LABEL: Record<DocumentStatus, string> = {
 /** Desde cuántos días antes se considera que un documento está por vencer. */
 export const DOCUMENT_WARNING_DAYS = 30;
 
+/**
+ * Años que una unidad circula sin necesitar revisión técnica.
+ *
+ * La inspección recién se exige pasados tres años del año del vehículo: a un camión del
+ * 2024 le toca desde el 2027. Reclamársela antes es una falsa alarma, y una falsa alarma
+ * repetida en la pantalla es lo que hace que se dejen de mirar las de verdad.
+ */
+export const REVISION_TECNICA_ANIOS_GRACIA = 3;
+
+/** Desde qué año se le exige la revisión técnica a una unidad. Null si no se sabe su año. */
+export function anioPrimeraRevision(year: number | null | undefined): number | null {
+  return year ? year + REVISION_TECNICA_ANIOS_GRACIA : null;
+}
+
+/**
+ * Si a esta unidad ya le toca tener revisión técnica.
+ *
+ * Sin el año del vehículo se da por exigible: no poder probar que está exonerada no es lo
+ * mismo que estarlo, y es preferible una alerta de más que una unidad parada en un control
+ * por un papel que sí hacía falta.
+ */
+export function exigeRevisionTecnica(year: number | null | undefined, hoy = todayLima()): boolean {
+  const desde = anioPrimeraRevision(year);
+  if (desde === null) return true;
+  return Number(hoy.slice(0, 4)) >= desde;
+}
+
 export function documentStatus(expiresAt: string | null | undefined, hoy = todayLima()): DocumentStatus {
   if (!expiresAt) return "SIN_FECHA";
   if (expiresAt < hoy) return "VENCIDO";

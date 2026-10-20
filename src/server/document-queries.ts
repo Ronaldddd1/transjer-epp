@@ -3,7 +3,8 @@ import { and, asc, desc, eq, ilike, isNotNull, or, sql, type SQL } from "drizzle
 import { db } from "@/db";
 import { documents, employees, users, vehicles } from "@/db/schema";
 import {
-  DOCUMENT_WARNING_DAYS, documentStatus, first, normalizePlate, type SearchParamsRecord,
+  DOCUMENT_WARNING_DAYS, documentStatus, exigeRevisionTecnica, first, normalizePlate,
+  type SearchParamsRecord,
 } from "@/lib/utils";
 
 /**
@@ -327,12 +328,22 @@ export type FleetRow = Awaited<ReturnType<typeof listFleet>>[number];
  */
 export function estadoFlota(v: {
   soat: PapelResumen; revisionTecnica: PapelResumen; mtc: PapelResumen; tarjetaPropiedad: PapelResumen;
-  licencia?: PapelResumen; driverId?: string | null;
+  licencia?: PapelResumen; driverId?: string | null; year?: number | null;
   vencidos: number; conductorVencidos: number; active: boolean;
 }): "BAJA" | "VENCIDO" | "FALTA" | "POR_VENCER" | "AL_DIA" {
   if (!v.active) return "BAJA";
 
-  const claves = [v.soat, v.revisionTecnica, v.mtc, v.tarjetaPropiedad];
+  /**
+   * A una unidad de menos de tres años no se le reclama la revisión técnica: todavía no
+   * le toca. Si la tiene cargada igual, sus fechas cuentan como las de cualquier otro
+   * papel; lo que no cuenta es su ausencia.
+   */
+  const claves = [
+    v.soat,
+    ...(exigeRevisionTecnica(v.year) || v.revisionTecnica ? [v.revisionTecnica] : []),
+    v.mtc,
+    v.tarjetaPropiedad,
+  ];
   if (v.vencidos > 0 || v.conductorVencidos > 0) return "VENCIDO";
   if (claves.some((p) => p === null)) return "FALTA";
   if (claves.some((p) => documentStatus(p?.expiresAt ?? null) === "POR_VENCER")) return "POR_VENCER";

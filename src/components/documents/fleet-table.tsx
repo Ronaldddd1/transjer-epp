@@ -2,7 +2,9 @@ import { Car, FileDown, IdCard, MapPin, Minus, UserRound } from "lucide-react";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
-import { cn, daysToExpiry, documentStatus, formatDate } from "@/lib/utils";
+import {
+  anioPrimeraRevision, cn, daysToExpiry, documentStatus, exigeRevisionTecnica, formatDate,
+} from "@/lib/utils";
 import { estadoFlota, type FleetRow, type PapelResumen } from "@/server/document-queries";
 
 /**
@@ -36,8 +38,26 @@ function EstadoFlotaBadge({ estado }: { estado: ReturnType<typeof estadoFlota> }
  * El botón solo aparece si el archivo está cargado. Un enlace que lleva a un error es peor
  * que no tener enlace: hace perder el viaje a quien lo pulsa creyendo que el papel está.
  */
-export function PapelCell({ papel, nombre }: { papel: PapelResumen; nombre: string }) {
+export function PapelCell({ papel, nombre, noLeTocaHasta }: {
+  papel: PapelResumen;
+  nombre: string;
+  /**
+   * Año desde el que recién se le exige este papel, si todavía no le toca.
+   *
+   * Es el caso de la revisión técnica en una unidad nueva: que falte no es un problema,
+   * y pintarlo de rojo junto a lo que sí lo es hace que se dejen de mirar los rojos.
+   */
+  noLeTocaHasta?: number | null;
+}) {
   if (!papel) {
+    if (noLeTocaHasta) {
+      return (
+        <Td className="whitespace-nowrap">
+          <span className="text-sm text-steel-500">No le toca</span>
+          <p className="text-xs text-steel-400">desde {noLeTocaHasta}</p>
+        </Td>
+      );
+    }
     return (
       <Td className="whitespace-nowrap">
         <span className="inline-flex items-center gap-1 text-sm font-semibold text-red-700">
@@ -135,7 +155,11 @@ export function FleetTable({ rows }: { rows: FleetRow[] }) {
                 </Link>
               </Td>
               <PapelCell papel={v.soat} nombre="SOAT" />
-              <PapelCell papel={v.revisionTecnica} nombre="certificado de revisión técnica" />
+              <PapelCell
+                papel={v.revisionTecnica}
+                nombre="certificado de revisión técnica"
+                noLeTocaHasta={exigeRevisionTecnica(v.year) ? null : anioPrimeraRevision(v.year)}
+              />
               <PapelCell papel={v.mtc} nombre="certificado de habilitación MTC" />
               <PapelCell papel={v.tarjetaPropiedad} nombre="tarjeta de propiedad" />
               <Td className="hidden lg:table-cell">

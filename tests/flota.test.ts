@@ -12,7 +12,7 @@ import "dotenv/config";
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../src/db";
 import { documents, employees, vehicles } from "../src/db/schema";
-import { addDays, todayLima } from "../src/lib/utils";
+import { addDays, anioPrimeraRevision, exigeRevisionTecnica, todayLima } from "../src/lib/utils";
 import { estadoFlota, listFleet } from "../src/server/document-queries";
 
 let fails = 0;
@@ -47,7 +47,35 @@ async function papeles(vehicleId: string, vence: string | null, conArchivo = tru
   }
 }
 
+/**
+ * Comprobaciones de la regla de la revisión técnica, sin tocar la base.
+ *
+ * Recién se exige pasados tres años del año del vehículo: a uno del 2024 le toca desde el
+ * 2027. Los bordes importan porque de ellos depende que una unidad nueva salga en rojo sin
+ * motivo, o que una vieja deje de reclamarse.
+ */
+function reglaRevisionTecnica() {
+  const casos: [number | null, string, boolean][] = [
+    [2026, "2026-10-20", false],  // del año: no le toca
+    [2025, "2026-10-20", false],  // un año
+    [2024, "2026-10-20", false],  // dos años
+    [2024, "2026-12-31", false],  // sigue sin tocarle hasta fin de año
+    [2024, "2027-01-01", true],   // el 1 de enero del tercer año ya le toca
+    [2023, "2026-10-20", true],   // tres años cumplidos
+    [2010, "2026-10-20", true],   // vieja
+    [null, "2026-10-20", true],   // sin año: se exige, no se adivina
+  ];
+  for (const [year, hoy, esperado] of casos) {
+    check(`un vehículo ${year ?? "sin año"} ${esperado ? "ya necesita" : "todavía no necesita"} revisión técnica en ${hoy}`,
+      exigeRevisionTecnica(year, hoy) === esperado, exigeRevisionTecnica(year, hoy));
+  }
+  check("y se dice desde qué año se le va a exigir", anioPrimeraRevision(2024) === 2027, anioPrimeraRevision(2024));
+  check("sin año del vehículo no se inventa esa fecha", anioPrimeraRevision(null) === null);
+}
+
 async function main() {
+  reglaRevisionTecnica();
+
   const creados: string[] = [];
   let choferId = "";
 
@@ -156,6 +184,51 @@ async function main() {
     const [conChoferVencido] = await listFleet({ id: completa.id });
     check("la licencia vencida del conductor se cuenta en la unidad",
       conChoferVencido.conductorVencidos > 0, conChoferVencido.conductorVencidos);
+
+    /**
+     * Una unidad nueva sin revisión técnica NO está incompleta.
+     *
+     * Es el error que esto evita: la unidad del año pasado aparecía en rojo reclamando un
+     * papel que la ley todavía no le pide, mezclada con las que sí tienen algo vencido.
+     */
+    const [nueva] = await db.insert(vehicles).values({
+      plate: `T5${SELLO.slice(-1)}-${SELLO.slice(0, 3)}`,
+      year: Number(HOY.slice(0, 4)),
+      brand: "Volvo",
+    }).returning();
+    creados.push(nueva.id);
+    for (const kind of ["SOAT", "MTC", "TARJETA_PROPIEDAD"]) {
+      await db.insert(documents).values({
+        vehicleId: nueva.id, kind, expiresAt: addDays(HOY, 300),
+        filename: `${kind}.pdf`, contentType: "application/pdf",
+        sizeBytes: 1, storageDriver: "db", content: Buffer.from("x"),
+      });
+    }
+
+    const [recienComprada] = await listFleet({ id: nueva.id });
+    check("una unidad del año no reclama la revisión técnica que todavía no le toca",
+      estadoFlota(recienComprada) === "AL_DIA", estadoFlota(recienComprada));
+    check("y su revisión técnica figura como no cargada, sin fecha",
+      recienComprada.revisionTecnica === null);
+
+    // La misma unidad, pero con cinco años: ahí sí se le reclama.
+    await db.update(vehicles).set({ year: Number(HOY.slice(0, 4)) - 5 })
+      .where(eq(vehicles.id, nueva.id));
+    const [vieja] = await listFleet({ id: nueva.id });
+    check("con cinco años, la misma unidad sí queda incompleta sin revisión técnica",
+      estadoFlota(vieja) === "FALTA", estadoFlota(vieja));
+
+    // Y si una unidad nueva TIENE su revisión técnica cargada, sus fechas cuentan igual.
+    await db.update(vehicles).set({ year: Number(HOY.slice(0, 4)) })
+      .where(eq(vehicles.id, nueva.id));
+    await db.insert(documents).values({
+      vehicleId: nueva.id, kind: "REVISION_TECNICA", expiresAt: addDays(HOY, -2),
+      filename: "rt.pdf", contentType: "application/pdf",
+      sizeBytes: 1, storageDriver: "db", content: Buffer.from("x"),
+    });
+    const [conRtVencida] = await listFleet({ id: nueva.id });
+    check("una unidad nueva que sí tiene revisión técnica, y vencida, se marca como vencida",
+      estadoFlota(conRtVencida) === "VENCIDO", estadoFlota(conRtVencida));
 
     // ---------- El filtro por estado ----------
     const soloVencidas = await listFleet({ q: SELLO.slice(0, 3), estado: "VENCIDO" });

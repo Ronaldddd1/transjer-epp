@@ -11,7 +11,9 @@ import { PageHeader, Panel } from "@/components/ui/page-header";
 import { TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { DOCUMENT_KIND_LABEL, documentStatus, formatDate } from "@/lib/utils";
+import {
+  anioPrimeraRevision, DOCUMENT_KIND_LABEL, documentStatus, exigeRevisionTecnica, formatDate,
+} from "@/lib/utils";
 import {
   employeeOptions, getVehicle, listDocumentsFor, listFleet,
 } from "@/server/document-queries";
@@ -59,6 +61,9 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   const chofer = vehiculo.driverId ? await getEmployee(vehiculo.driverId) : null;
   const papelesChofer = chofer ? await listDocumentsFor({ employeeId: chofer.id }) : [];
   const deConducir = papelesChofer.filter((d) => d.kind === "DNI" || d.kind === "LICENCIA");
+
+  // A una unidad de menos de tres años todavía no se le exige la revisión técnica.
+  const sinRevisionAun = !exigeRevisionTecnica(vehiculo.year) && !resumen?.revisionTecnica;
 
   const vencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
   const porVencer = documentos.filter((d) => documentStatus(d.expiresAt) === "POR_VENCER");
@@ -211,22 +216,24 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
             </thead>
             <tbody>
               {([
-                ["SOAT", resumen.soat],
-                ["Revisión técnica", resumen.revisionTecnica],
-                ["Habilitación MTC", resumen.mtc],
-                ["Tarjeta de propiedad", resumen.tarjetaPropiedad],
-              ] as const).map(([nombre, papel]) => {
+                ["SOAT", resumen.soat, null],
+                ["Revisión técnica", resumen.revisionTecnica, sinRevisionAun ? anioPrimeraRevision(vehiculo.year) : null],
+                ["Habilitación MTC", resumen.mtc, null],
+                ["Tarjeta de propiedad", resumen.tarjetaPropiedad, null],
+              ] as const).map(([nombre, papel, noLeTocaHasta]) => {
                 const estado = documentStatus(papel?.expiresAt ?? null);
                 return (
                   <Tr
                     key={nombre}
-                    tone={!papel || estado === "VENCIDO" ? "bg-red-50 hover:bg-red-100/70"
+                    tone={(!papel && !noLeTocaHasta) || estado === "VENCIDO" ? "bg-red-50 hover:bg-red-100/70"
                       : estado === "POR_VENCER" ? "bg-brand-soft hover:bg-[#FFEBA8]" : ""}
                   >
                     <Td className="font-medium">{nombre}</Td>
                     <Td className="tabular">
                       {!papel
-                        ? <span className="font-semibold text-red-700">Falta cargarlo</span>
+                        ? noLeTocaHasta
+                          ? <span className="text-steel-500">No le toca hasta {noLeTocaHasta}</span>
+                          : <span className="font-semibold text-red-700">Falta cargarlo</span>
                         : papel.expiresAt
                           ? <span className={estado === "VENCIDO" ? "font-semibold text-red-700" : estado === "POR_VENCER" ? "font-semibold text-[#7A5A00]" : ""}>{formatDate(papel.expiresAt)}</span>
                           : <span className="text-steel-500">Sin fecha</span>}

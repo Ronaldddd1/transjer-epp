@@ -120,6 +120,28 @@ El conductor NO está en el Excel, así que esa parte se asigna desde la web, un
 unidad. Es un rato de trabajo una sola vez.
 
 
+5. LA REVISIÓN TÉCNICA NO SE LE PIDE A UNA UNIDAD NUEVA
+--------------------------------------------------------
+
+Recién se exige pasados tres años del año del vehículo: a una del 2025 le toca desde el
+2028. Hasta entonces, su columna de revisión técnica dice "No le toca · desde 2028", en
+gris, y la unidad NO cuenta como incompleta.
+
+Antes esas unidades salían en rojo reclamando un papel que todavía no les corresponde,
+mezcladas con las que sí tienen algo vencido. Una alerta falsa repetida es lo que hace que
+se dejen de mirar las de verdad.
+
+Detalles de la regla:
+
+  · Los otros tres papeles se le siguen pidiendo igual: el SOAT no depende de la
+    antigüedad.
+  · Si la unidad SÍ tiene su revisión técnica cargada, sus fechas cuentan como las de
+    cualquier otro documento, aunque sea nueva.
+  · Si no se sabe el año del vehículo, se le pide. No poder probar que está exonerada no
+    es lo mismo que estarlo, y es preferible una alerta de más que una unidad parada en un
+    control. Para quitarla basta con completar el año en Editar la unidad.
+
+
 LO QUE SE PROBÓ
 ---------------
 
@@ -141,6 +163,9 @@ De lo nuevo, lo que más importa:
     crear otro y sin perder la fecha.
   · Un documento sin archivo no ofrece un enlace de descarga que lleve a un error.
   · Un enlace de descarga reenviado por correo sigue sin servirle a nadie sin sesión.
+  · Una unidad del año en curso no reclama revisión técnica; la misma con cinco años, sí.
+    Los bordes se probaron uno por uno: del 2024 todavía no le toca el 31/12/2026 y sí le
+    toca el 01/01/2027.
   · El Excel de prueba se leyó entero: 18 unidades, las vendidas dadas de baja, la fila
     de "TOTAL" ignorada y las capacidades en su columna aunque se mueva el orden.
 

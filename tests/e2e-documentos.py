@@ -20,6 +20,7 @@ SELLO = str(int(time.time()))[-6:]
 # normaliza a ese molde: con "XX-123" el formulario la reescribiría como "XX1-23".
 PLACA = f"XX{SELLO[0]}-{SELLO[1:4]}"
 PLACA2 = f"XX{SELLO[0]}-9{SELLO[1:3]}"
+PLACA3 = f"XX{SELLO[0]}-8{SELLO[1:3]}"
 
 fails = []
 def check(nombre, cond, extra=""):
@@ -121,6 +122,21 @@ with sync_playwright() as p:
     ejecutar(f"insert into vehicles (plate) values ('{PLACA2}')")
     page.reload()
     page.wait_for_timeout(1500)
+
+    # Una unidad del año no debe reclamar la revisión técnica: todavía no le toca, y
+    # pintarla en rojo junto a lo que sí urge es lo que hace que se dejen de mirar los rojos.
+    ejecutar(f"insert into vehicles (plate, year, brand) values ('{PLACA3}', "
+             "extract(year from current_date)::int, 'Volvo')")
+    page.goto(f"{BASE}/documentos?estado=")
+    page.wait_for_timeout(1600)
+    fila_nueva = page.get_by_role("row").filter(has_text=PLACA3)
+    texto_nueva = fila_nueva.inner_text()
+    anio_rt = int(psql("select extract(year from current_date)::int + 3"))
+    check("una unidad del año no reclama la revisión técnica",
+          "No le toca" in texto_nueva, texto_nueva)
+    check("y dice desde qué año se la van a pedir", str(anio_rt) in texto_nueva, texto_nueva)
+    check("pero sí reclama el SOAT, que no tiene nada que ver con la antigüedad",
+          "Falta" in texto_nueva, texto_nueva)
 
     # La pestaña de "toda la flota" tiene que poder ganarle al filtro de entrada. Si al
     # pulsarla la pantalla volviera a aplicar su filtro por defecto, el botón parecería
