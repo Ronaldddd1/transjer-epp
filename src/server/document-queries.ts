@@ -143,6 +143,36 @@ export async function listDocumentsFor(owner: { employeeId?: string; vehicleId?:
     .orderBy(sql`${documents.expiresAt} asc nulls last`, desc(documents.createdAt));
 }
 
+/**
+ * Todos los documentos con archivo de la flota, o de una sola unidad, para bajarlos juntos.
+ *
+ * Trae el contenido, así que se usa solo para armar el ZIP y nunca para pintar una
+ * pantalla: son megas de PDF que no tienen por qué pasar por el navegador.
+ */
+export async function documentosParaDescargar(vehicleId?: string) {
+  return db.select({
+    id: documents.id,
+    kind: documents.kind,
+    title: documents.title,
+    expiresAt: documents.expiresAt,
+    filename: documents.filename,
+    contentType: documents.contentType,
+    storageDriver: documents.storageDriver,
+    storageKey: documents.storageKey,
+    content: documents.content,
+    plate: vehicles.plate,
+    employeeName: sql<string | null>`nullif(concat_ws(' ', ${employees.firstName}, ${employees.lastName}), '')`,
+  })
+    .from(documents)
+    .leftJoin(vehicles, eq(documents.vehicleId, vehicles.id))
+    .leftJoin(employees, eq(documents.employeeId, employees.id))
+    .where(and(
+      isNotNull(documents.filename),
+      vehicleId ? eq(documents.vehicleId, vehicleId) : isNotNull(documents.vehicleId),
+    ))
+    .orderBy(asc(vehicles.plate), asc(documents.kind));
+}
+
 /** El documento con su archivo, para descargarlo. */
 export async function getDocumentFile(id: string) {
   const [fila] = await db.select({

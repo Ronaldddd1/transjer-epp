@@ -120,6 +120,13 @@
       "when": 1792505121345,
       "tag": "0016_steady_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1792609235902,
+      "tag": "0017_overrated_guardsmen",
+      "breakpoints": true
     }
   ]
 }

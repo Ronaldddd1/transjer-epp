@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { DocumentFormModal, VehicleFormModal } from "@/components/documents/document-actions";
 import { FleetTable, LeyendaFlota } from "@/components/documents/fleet-table";
+import { ExportTable } from "@/components/ui/export-table";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { TabLinks } from "@/components/ui/tab-links";
@@ -59,6 +60,15 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
         description="La flota unidad por unidad, con sus papeles y su conductor."
         actions={
           <>
+            <ExportTable
+              tabla="flota"
+              label="Descargar"
+              enlaces={[{
+                href: "/api/documentos/zip",
+                label: "Documentos en ZIP",
+                detalle: "todos los PDF, en carpetas por placa",
+              }]}
+            />
             <Link
               href="/documentos/todos"
               className="inline-flex items-center gap-2 rounded-md border border-steel-200 bg-white px-3.5 py-2 text-sm font-medium text-steel-600 hover:border-steel-400 hover:text-ink"

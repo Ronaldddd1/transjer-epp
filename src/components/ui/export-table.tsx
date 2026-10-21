@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, FileDown, FileSpreadsheet, FileText } from "lucide-react";
+import { ChevronDown, FileArchive, FileDown, FileSpreadsheet, FileText } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -12,13 +12,20 @@ import { cn } from "@/lib/utils";
  * que hay delante y no la tabla entera. Excel es lo primero porque es lo que la gente usa
  * para seguir trabajando con los datos; CSV y PDF quedan a un clic más.
  */
-export function ExportTable({ tabla, extra, label = "Exportar", className }: {
+export function ExportTable({ tabla, extra, label = "Exportar", className, enlaces = [] }: {
   /** Clave de la tabla en el registro del servidor. */
   tabla: string;
   /** Parámetros propios de la pantalla, como el id de una obligación. */
   extra?: Record<string, string>;
   label?: string;
   className?: string;
+  /**
+   * Otras descargas de la misma pantalla, dentro del mismo menú.
+   *
+   * Van aquí y no como botones sueltos: una barra con cinco botones de descarga obliga a
+   * leerlos todos para encontrar el que se busca.
+   */
+  enlaces?: { href: string; label: string; detalle?: string }[];
 }) {
   const sp = useSearchParams();
   const [abierto, setAbierto] = useState(false);
@@ -87,6 +94,16 @@ export function ExportTable({ tabla, extra, label = "Exportar", className }: {
               <span className="block text-xs text-steel-500">para imprimir o enviar</span>
             </span>
           </a>
+
+          {enlaces.length > 0 && <div className="my-1 border-t border-steel-200" aria-hidden />}
+          {enlaces.map((e) => (
+            <a key={e.href} href={e.href} className={item} role="menuitem" onClick={() => setAbierto(false)} download>
+              <FileArchive className="h-4 w-4 text-brand-dark" aria-hidden />
+              <span className="flex-1">{e.label}
+                {e.detalle && <span className="block text-xs text-steel-500">{e.detalle}</span>}
+              </span>
+            </a>
+          ))}
         </div>
       )}
     </div>

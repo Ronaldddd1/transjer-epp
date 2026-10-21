@@ -401,6 +401,60 @@ const decimalOpcional = (label: string, max: number) =>
       .optional(),
   ).transform((v) => (v === undefined ? null : String(v)));
 
+/** Un mantenimiento que ya se hizo. */
+export const maintenanceSchema = z.object({
+  kind: z.enum(["ACEITE", "FILTROS", "FRENOS", "LLANTAS", "LAVADO", "ENGRASE", "OTRO"]),
+  servicedAt: ymd,
+  /** El kilometraje del día del servicio. Es lo que hace avanzar el contador. */
+  odometerKm: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ invalid_type_error: "El kilometraje debe ser un número" })
+      .int("El kilometraje debe ser un número entero")
+      .min(0, "El kilometraje no puede ser negativo")
+      .max(3000000, "Ese kilometraje es imposible: revisa el número")
+      .optional(),
+  ).transform((v) => (v === undefined ? null : v)),
+  cost: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number({ invalid_type_error: "El costo debe ser un número" })
+      .min(0, "El costo no puede ser negativo").optional(),
+  ).transform((v) => (v === undefined ? null : v.toFixed(2))),
+  workshop: optionalText(120),
+  notes: optionalText(1000),
+});
+
+/** La periodicidad de un mantenimiento para una unidad concreta. */
+export const maintenancePlanSchema = z.object({
+  kind: z.enum(["ACEITE", "FILTROS", "FRENOS", "LLANTAS", "LAVADO", "ENGRASE", "OTRO"]),
+  everyKm: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number().int("Los kilómetros deben ser un número entero")
+      .positive("Los kilómetros deben ser mayores que cero").optional(),
+  ).transform((v) => (v === undefined ? null : v)),
+  everyDays: z.preprocess(
+    (v) => (typeof v === "string" && v.trim() === "" ? undefined : v),
+    z.coerce.number().int("Los días deben ser un número entero")
+      .positive("Los días deben ser mayores que cero").optional(),
+  ).transform((v) => (v === undefined ? null : v)),
+  active: checkbox,
+  notes: optionalText(1000),
+}).refine((d) => d.everyKm !== null || d.everyDays !== null || !d.active, {
+  message: "Indica cada cuántos kilómetros o cada cuántos días toca",
+  path: ["everyKm"],
+});
+
+/** La lectura del odómetro de una unidad. */
+export const odometerSchema = z.object({
+  odometerKm: z.preprocess(
+    vacioEsNada,
+    z.coerce.number({ invalid_type_error: "El kilometraje debe ser un número" })
+      .int("El kilometraje debe ser un número entero")
+      .min(0, "El kilometraje no puede ser negativo")
+      .max(3000000, "Ese kilometraje es imposible: revisa el número"),
+  ),
+  odometerAt: ymd,
+});
+
 export const vehicleSchema = z.object({
   plate: requiredText("La placa", 10),
   description: optionalText(160),
@@ -507,7 +561,10 @@ export const userBaseSchema = z.object({
   name: requiredText("El nombre", 120),
   username: z.string().trim().toLowerCase().regex(/^[a-z0-9._-]{3,50}$/, "Usa 3 a 50 caracteres: letras, números, punto, guion"),
   email: z.string().trim().toLowerCase().email("Correo inválido"),
-  role: z.enum(["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES"]),
+  role: z.enum([
+    "ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES",
+    "MANTENIMIENTO", "DOCUMENTACION", "OPERACION",
+  ]),
 });
 export const userCreateSchema = userBaseSchema.extend({ password });
 export const passwordSchema = z.object({ password });

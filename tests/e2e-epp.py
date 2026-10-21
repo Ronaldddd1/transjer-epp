@@ -235,9 +235,16 @@ with sync_playwright() as p:
     jp = jctx.new_page()
     login(jp, "jalmacen", "Almacen789!")
     jnav = jp.get_by_role("navigation")
+    # El menú pliega las secciones que no se están usando, así que para comprobar qué
+    # entradas tiene este rol hay que abrirlas todas primero. Lo que no tenga permiso no
+    # aparece ni abriéndolas: esa es la diferencia entre plegado y prohibido.
+    for titulo in jnav.get_by_role("button").all():
+        if titulo.get_attribute("aria-expanded") == "false":
+            titulo.click()
+            jp.wait_for_timeout(120)
     for visible in ["/inventario", "/movimientos", "/entregas", "/trabajadores", "/reportes", "/categorias"]:
         assert jnav.locator(f"a[href='{visible}']").count() > 0, f"falta {visible} en el menú"
-    for oculto in ["/facturas", "/proveedores", "/usuarios", "/auditoria", "/detracciones"]:
+    for oculto in ["/facturas", "/proveedores", "/usuarios", "/auditoria", "/detracciones", "/mantenimiento"]:
         assert jnav.locator(f"a[href='{oculto}']").count() == 0, f"{oculto} no debería verse"
     # Puede lo que el rol Usuario no puede
     jp.goto(BASE + "/inventario")

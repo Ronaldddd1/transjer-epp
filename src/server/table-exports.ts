@@ -4,6 +4,8 @@ import {
   INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
   EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
   PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
+  DOCUMENT_STATUS_LABEL, documentStatus, exigeRevisionTecnica, FLEET_STATUS_LABEL,
+  MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL,
   STOCK_STATUS_LABEL, stockStatus,
   type RejectReasonKey, type SearchParamsRecord,
 } from "@/lib/utils";
@@ -15,6 +17,8 @@ import {
 import {
   getInvoice, listInvoiceEmails, listInvoices, listSuppliers, readEmailFilters, readInvoiceFilters,
 } from "./invoice-queries";
+import { estadoFlota, listFleet } from "./document-queries";
+import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
 import { listInstallments, listObligations, listPaymentCalendar, readObligationFilters } from "./obligation-queries";
 import type { Report } from "./reports";
 
@@ -787,6 +791,138 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
   // ---------- Devolución de EPP ----------
   // Dos hojas, porque son dos preguntas distintas: qué falta devolver (lo que hay que
   // reclamar) y qué ya se devolvió (el descargo de cada trabajador).
+  /**
+   * La ficha de cada móvil, con sus papeles.
+   *
+   * Es lo que se manda cuando un cliente pide "la relación de unidades": en una sola hoja
+   * van los datos del camión, su conductor y la fecha de vencimiento de cada documento,
+   * con una columna que dice si ese papel está vigente, vencido o sin cargar.
+   */
+  flota: {
+    title: "Detalle de los móviles",
+    permission: "documents.view",
+    async build(sp) {
+      const filas = await listFleet({
+        q: typeof sp.q === "string" ? sp.q.trim() || undefined : undefined,
+        estado: typeof sp.estado === "string" ? sp.estado || undefined : undefined,
+      });
+
+      /** La fecha de un papel y, al lado, en qué situación está. */
+      const papel = (p: { expiresAt: string | null; tieneArchivo: boolean } | null, exigible = true) => {
+        if (!p) return { fecha: "", estado: exigible ? "Falta cargarlo" : "No le toca todavía" };
+        const estado = DOCUMENT_STATUS_LABEL[documentStatus(p.expiresAt)];
+        return {
+          fecha: p.expiresAt ? formatDate(p.expiresAt) : "",
+          estado: p.tieneArchivo ? estado : `${estado}, sin el PDF`,
+        };
+      };
+
+      return [{
+        title: "Detalle de los móviles",
+        columns: [
+          { key: "placa", header: "Placa", width: 11 },
+          { key: "estado", header: "Situación", width: 16 },
+          { key: "marca", header: "Marca", width: 14 },
+          { key: "modelo", header: "Modelo", width: 16 },
+          { key: "anio", header: "Año", width: 7, align: "right" as const },
+          { key: "tn", header: "Capacidad (TN)", width: 13, align: "right" as const },
+          { key: "m3", header: "Volumen (m³)", width: 12, align: "right" as const },
+          { key: "mtc", header: "Código MTC", width: 15 },
+          { key: "gps", header: "GPS", width: 7 },
+          { key: "conductor", header: "Conductor", width: 26 },
+          { key: "dniConductor", header: "DNI del conductor", width: 13 },
+          { key: "licencia", header: "Vence la licencia", width: 14 },
+          { key: "soat", header: "Vence el SOAT", width: 13 },
+          { key: "soatEstado", header: "Situación del SOAT", width: 19 },
+          { key: "rt", header: "Vence la revisión técnica", width: 20 },
+          { key: "rtEstado", header: "Situación de la revisión", width: 22 },
+          { key: "hab", header: "Vence la habilitación MTC", width: 21 },
+          { key: "habEstado", header: "Situación del MTC", width: 19 },
+          { key: "tarjeta", header: "Vence la tarjeta de propiedad", width: 24 },
+          { key: "tarjetaEstado", header: "Situación de la tarjeta", width: 21 },
+          { key: "documentos", header: "Documentos cargados", width: 18, align: "right" as const },
+          { key: "activo", header: "En la flota", width: 11 },
+        ],
+        rows: filas.map((v) => {
+          const soat = papel(v.soat);
+          const rt = papel(v.revisionTecnica, exigeRevisionTecnica(v.year));
+          const hab = papel(v.mtc);
+          const tarjeta = papel(v.tarjetaPropiedad);
+          return {
+            placa: v.plate,
+            estado: FLEET_STATUS_LABEL[estadoFlota(v)],
+            marca: texto(v.brand),
+            modelo: texto(v.model),
+            anio: v.year ?? "",
+            tn: v.capacityTn === null ? "" : Number(v.capacityTn),
+            m3: v.capacityM3 === null ? "" : Number(v.capacityM3),
+            mtc: texto(v.mtcCode),
+            gps: v.hasGps ? "Sí" : "No",
+            conductor: texto(v.driverName),
+            dniConductor: texto(v.driverDni),
+            licencia: v.licencia?.expiresAt ? formatDate(v.licencia.expiresAt) : "",
+            soat: soat.fecha, soatEstado: soat.estado,
+            rt: rt.fecha, rtEstado: rt.estado,
+            hab: hab.fecha, habEstado: hab.estado,
+            tarjeta: tarjeta.fecha, tarjetaEstado: tarjeta.estado,
+            documentos: v.documentos,
+            activo: v.active ? "Sí" : "Dada de baja",
+          };
+        }),
+        summary: [
+          { label: "Unidades", value: filas.length },
+          { label: "Pueden salir", value: filas.filter((v) => estadoFlota(v) === "AL_DIA").length },
+          { label: "Con algo vencido", value: filas.filter((v) => estadoFlota(v) === "VENCIDO").length },
+          { label: "Les falta un papel", value: filas.filter((v) => estadoFlota(v) === "FALTA").length },
+        ],
+      }];
+    },
+  },
+
+  /** Lo que le toca a cada unidad, para imprimirlo y llevarlo al taller. */
+  mantenimiento: {
+    title: "Mantenimiento de la flota",
+    permission: "maintenance.view",
+    async build(sp) {
+      const filas = await listMaintenance(readMaintenanceFilters(sp));
+      return [{
+        title: "Mantenimiento de la flota",
+        columns: [
+          { key: "placa", header: "Placa", width: 11 },
+          { key: "unidad", header: "Marca y modelo", width: 22 },
+          { key: "km", header: "Kilometraje", width: 12, align: "right" as const },
+          { key: "mantenimiento", header: "Mantenimiento", width: 20 },
+          { key: "ultima", header: "Última vez", width: 12 },
+          { key: "ultimoKm", header: "Km de la última", width: 14, align: "right" as const },
+          { key: "cada", header: "Cada", width: 20 },
+          { key: "proxima", header: "Próxima fecha", width: 13 },
+          { key: "proximoKm", header: "Próximo km", width: 12, align: "right" as const },
+          { key: "estado", header: "Situación", width: 16 },
+          { key: "conductor", header: "Conductor", width: 24 },
+        ],
+        rows: filas.map((r) => ({
+          placa: r.plate,
+          unidad: [r.brand, r.model].filter(Boolean).join(" "),
+          km: r.odometerKm ?? "",
+          mantenimiento: MAINTENANCE_KIND_LABEL[r.kind],
+          ultima: r.ultimaFecha ? formatDate(r.ultimaFecha) : "",
+          ultimoKm: r.ultimoKm ?? "",
+          cada: [r.everyKm && `${r.everyKm.toLocaleString("es-PE")} km`, r.everyDays && `${r.everyDays} días`]
+            .filter(Boolean).join(" o "),
+          proxima: r.proximaFecha ? formatDate(r.proximaFecha) : "",
+          proximoKm: r.proximoKm ?? "",
+          estado: MAINTENANCE_STATUS_LABEL[r.estado],
+          conductor: texto(r.driverName),
+        })),
+        summary: [
+          { label: "Mantenimientos", value: filas.length },
+          { label: "Vencidos", value: filas.filter((r) => r.estado === "VENCIDO").length },
+          { label: "Tocan pronto", value: filas.filter((r) => r.estado === "POR_VENCER").length },
+        ],
+      }];
+    },
+  },
+
   devoluciones: {
     title: "Devolución de EPP",
     permission: "deliveries.view",

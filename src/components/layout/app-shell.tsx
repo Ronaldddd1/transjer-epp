@@ -3,7 +3,7 @@
 import {
   ArrowLeftRight, BarChart3, Building2, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
   FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
-  Tags, Undo2, Users, Wallet, X,
+  Tags, Undo2, Users, Wallet, Wrench, X,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
@@ -37,7 +37,16 @@ const SECTIONS: NavSection[] = [
       { href: "/entregas/resumen", label: "Resumen de EPP", icon: ClipboardCheck, permission: "deliveries.view" },
       { href: "/devoluciones", label: "Devolución de EPP", icon: Undo2, permission: "deliveries.view" },
       { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+    ],
+  },
+  {
+    // La flota es su propio trabajo, no una carpeta del almacén: tiene a quien le cuida
+    // los papeles y a quien le cuida el camión, y son personas distintas.
+    id: "flota",
+    label: "Flota",
+    items: [
       { href: "/documentos", label: "Documentos", icon: FolderOpen, permission: "documents.view" },
+      { href: "/mantenimiento", label: "Mantenimiento", icon: Wrench, permission: "maintenance.view" },
     ],
   },
   {
@@ -113,8 +122,34 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
   const enSeccion = (s: NavSection) =>
     s.items.some((i) => pathname === i.href || pathname.startsWith(`${i.href}/`));
 
-  const [cerradas, setCerradas] = useState<Record<string, boolean>>({});
-  const alternar = (id: string) => setCerradas((c) => ({ ...c, [id]: !c[id] }));
+  /**
+   * Qué secciones están abiertas.
+   *
+   * Arranca abierta solo la que contiene la pantalla actual, y las demás plegadas: con
+   * seis secciones y dieciséis entradas, el menú entero obliga a leerlo todo para
+   * encontrar una cosa. Lo que el usuario abra o cierre a mano manda sobre esto mientras
+   * navega.
+   */
+  const [tocadas, setTocadas] = useState<Record<string, boolean>>({});
+
+  /**
+   * Cuáles se abren solas.
+   *
+   * Solo se pliega cuando hay menú de sobra: por encima de diez entradas, leerlas todas
+   * para encontrar una cuesta más que abrir una sección. Un menú corto —el de finanzas, el
+   * de documentación— se deja entero, porque ahí plegar solo añade un clic.
+   *
+   * Cuando se pliega, queda abierta la sección de la pantalla en la que se está; y si
+   * ninguna la contiene —el dashboard no pertenece a ninguna—, la primera que el rol vea:
+   * un menú con todo plegado es un menú vacío, que es peor que uno largo.
+   */
+  const entradas = secciones.reduce((n, s) => n + s.items.length, 0);
+  const convienePlegar = entradas > 10;
+  const ningunaActiva = !secciones.some(enSeccion);
+  const abiertaDeEntrada = (s: NavSection) =>
+    !convienePlegar || enSeccion(s) || (ningunaActiva && s.id === secciones[0]?.id);
+  const alternar = (id: string, abiertaAhora: boolean) =>
+    setTocadas((c) => ({ ...c, [id]: !abiertaAhora }));
 
   const link = (item: NavItem) => {
     // "/entregas/resumen" cuelga de "/entregas", así que el padre no debe marcarse activo
@@ -164,14 +199,14 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
       <nav className="flex-1 overflow-y-auto px-3 py-4" aria-label="Principal">
         <div className="grid gap-0.5">{link(INICIO)}</div>
         {secciones.map((s) => {
-          // Las secciones empiezan abiertas: al entrar no se esconde nada y quien quiera un
-          // menú más corto las va cerrando. Lo que cierre se mantiene mientras navega.
-          const abierta = !cerradas[s.id];
+          // Abierta la de la pantalla en la que se está; el resto, plegadas. Si el
+          // usuario la alterna a mano, manda lo suyo.
+          const abierta = tocadas[s.id] !== undefined ? tocadas[s.id] : abiertaDeEntrada(s);
           return (
             <div key={s.id} className="mt-5">
               <button
                 type="button"
-                onClick={() => alternar(s.id)}
+                onClick={() => alternar(s.id, abierta)}
                 aria-expanded={abierta}
                 className="flex w-full items-center gap-1.5 rounded px-3 py-1 text-[13px] font-semibold uppercase tracking-wide text-steel-500 hover:text-steel-300"
               >

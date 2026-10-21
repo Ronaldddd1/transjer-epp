@@ -94,6 +94,10 @@ with sync_playwright() as p:
     page.wait_for_url(re.compile(r"/(dashboard|facturas)"), timeout=15000)
 
     # --- La flota, que es la pantalla principal ---
+    # El menú pliega las secciones largas, así que la de Flota se abre al entrar en una de
+    # sus pantallas.
+    page.goto(f"{BASE}/documentos")
+    page.wait_for_timeout(1200)
     check("el menú muestra Documentos", page.locator("a[href='/documentos']").first.is_visible())
 
     page.goto(f"{BASE}/documentos")

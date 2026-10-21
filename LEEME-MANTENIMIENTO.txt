@@ -1,0 +1,172 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Mantenimiento de la flota, tres roles nuevos, descargas y un menú más corto
+===========================================================================
+
+Cuatro cambios. Uno pide migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, crea el módulo de mantenimiento y los roles
+
+
+1. MANTENIMIENTO: QUÉ LE TOCA A CADA UNIDAD
+--------------------------------------------
+
+Pantalla nueva, en el menú: FLOTA → MANTENIMIENTO.
+
+Una fila por unidad y por tipo de mantenimiento, ordenada por lo que ya se pasó. Los tipos
+son: cambio de aceite, cambio de filtros, revisión de frenos, llantas, lavado, engrase y
+"otro mantenimiento".
+
+LOS DOS RELOJES. Cada mantenimiento se controla por kilómetros Y por tiempo, y manda el
+que llegue antes. No es un detalle: un camión parado tres meses necesita su cambio de
+aceite aunque no haya rodado los 10.000 km, y uno que hace Lima–Arequipa todas las semanas
+los hace mucho antes de los seis meses. Mirar solo uno deja fuera media flota.
+
+Las periodicidades de arranque, que no hay que configurar:
+
+    Cambio de aceite    cada 10.000 km o 180 días
+    Cambio de filtros   cada 20.000 km o 365 días
+    Revisión de frenos  cada 20.000 km o 180 días
+    Llantas             cada 40.000 km
+    Lavado              cada 15 días
+    Engrase             cada 10.000 km o 90 días
+    Otro                cada 365 días
+
+Si una unidad trabaja distinto —la que anda en obra y cambia aceite cada 5.000— se le pone
+su propia periodicidad con el botón del engranaje, y solo cambia para ella. Ahí mismo se
+le puede quitar un mantenimiento que no se le hace: deja de aparecer en su lista.
+
+EL KILOMETRAJE. Cada unidad guarda su kilometraje y la fecha en que se leyó. Lo importante:
+al registrar un mantenimiento se escribe el kilometraje del día, y eso ADELANTA solo el de
+la unidad. Quien anota el cambio de aceite ya está mirando el tablero; obligarle a
+actualizarlo por separado es la forma segura de que nadie lo haga.
+
+Si se escribe un kilometraje MENOR que el que ya tiene la unidad, el sistema lo rechaza y
+lo dice: casi siempre es un 180.000 tecleado como 18.000, y dejarlo pasar calcularía todos
+los mantenimientos siguientes sobre un número falso.
+
+Lo que nunca se registró sale como "Nunca se hizo", no como vencido: el sistema no puede
+saber cuándo toca algo que no sabe cuándo se hizo por última vez.
+
+En la ficha de cada unidad hay un panel con lo mismo para esa unidad, su kilometraje y las
+últimas doce cosas que se le hicieron.
+
+
+2. TRES ROLES NUEVOS
+---------------------
+
+    MANTENIMIENTO    registra los servicios y ve los documentos de la flota, para saber
+                     cuándo vence la revisión técnica. NO sube ni corrige documentos, no
+                     ve facturas, no entra al almacén.
+
+    DOCUMENTACIÓN    sube, corrige y controla los documentos de la flota y de los
+                     trabajadores. No registra mantenimientos ni ve facturas.
+
+    OPERACIÓN        todo lo de los dos anteriores, más el almacén completo (inventario,
+                     movimientos, entregas, trabajadores, categorías y reportes).
+                     Sin facturas, sin préstamos, sin usuarios, sin auditoría.
+
+Se asignan desde Administración → Usuarios, como los demás. Al elegir el rol, el formulario
+explica qué puede hacer.
+
+Lo que cada rol NO puede está probado una por una: si alguien escribe /facturas a mano, no
+entra.
+
+
+3. DESCARGAR LOS DOCUMENTOS DE UN CLIC, Y EL DETALLE DE LOS MÓVILES
+--------------------------------------------------------------------
+
+En Documentos, el botón DESCARGAR abre un menú con:
+
+  · DOCUMENTOS EN ZIP. Baja todos los PDF de la flota en un solo archivo, con una carpeta
+    por placa y los archivos renombrados a lo que son: "SOAT 2027-06-30.pdf" en vez del
+    nombre que les puso el escáner. Dentro va un _LEEME.txt con el índice de lo que lleva
+    y de lo que no se pudo incluir. En la prueba salieron 76 archivos, 16 MB, en un solo
+    clic.
+  · DETALLE DE LOS MÓVILES, en Excel, CSV o PDF. Una fila por unidad con placa, situación,
+    marca, modelo, año, capacidades, código MTC, GPS, conductor con su DNI y el
+    vencimiento de la licencia, y la fecha de cada papel con una columna al lado que dice
+    si está vigente, vencido, sin cargar o "no le toca todavía".
+
+Y en la ficha de cada unidad, el botón BAJAR SUS DOCUMENTOS hace lo mismo para esa sola
+placa. Es lo que se manda cuando un cliente pide los papeles de las unidades que van a
+trabajar para él.
+
+El módulo de mantenimiento tiene su propia descarga, con lo que le toca a cada unidad:
+sirve para imprimirla y llevarla al taller.
+
+
+4. EL MENÚ, MÁS CORTO
+----------------------
+
+Dos cambios:
+
+  · Los documentos salieron de ALMACÉN y están ahora en una sección propia, FLOTA, junto a
+    Mantenimiento. La flota no es una carpeta del almacén: tiene a quien le cuida los
+    papeles y a quien le cuida el camión, y son personas distintas.
+  · Las secciones que no se están usando arrancan plegadas, y se abre la de la pantalla en
+    la que estás. Tu menú pasa de 17 entradas a la vista a 7 u 8, sin que desaparezca
+    nada: la sección se abre con un clic y lo que abras o cierres se respeta mientras
+    navegas.
+
+Esto último solo se aplica cuando hay menú de sobra —más de diez entradas—. Un menú corto,
+como el de documentación o el de finanzas, se deja entero: ahí plegar solo añadiría un
+clic.
+
+Y como cada rol ve únicamente sus módulos, los usuarios nuevos tienen un menú de tres o
+cuatro entradas.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  674 comprobaciones de lógica   — todas pasan
+  11 recorridos en el navegador  — todos pasan (441 verificaciones)
+
+De lo nuevo, lo que más importa:
+
+  · Pasarse de kilómetros marca vencido aunque falten meses, y pasarse de meses marca
+    vencido aunque casi no haya rodado.
+  · El día exacto en que toca todavía no está vencido; al día siguiente, sí.
+  · Sin kilometraje de la unidad, lo que va por kilómetros no se juzga en vez de inventarse.
+  · Registrar un servicio adelanta el kilometraje de la unidad; uno con el kilometraje
+    hacia atrás se rechaza y no se guarda.
+  · Una periodicidad propia cambia el estado de esa unidad y de ninguna otra.
+  · Una unidad dada de baja sale de la lista de mantenimiento.
+  · El rol de mantenimiento entra a lo suyo y NO ve facturas, detracciones, almacén ni
+    usuarios, ni escribiendo la dirección a mano.
+  · Operación incluye todo lo de los otros dos roles, permiso por permiso.
+  · Solo el administrador crea usuarios.
+  · El ZIP sale íntegro, con los nombres legibles, y dos documentos del mismo tipo en la
+    misma unidad no se pisan.
+
+
+LO QUE FALTA, Y LO DIGO PORQUE SE NOTA
+---------------------------------------
+
+El historial de mantenimiento que tienes en el Excel (las hojas CONTROL de cambios de
+aceite y FRENERO de lavados) NO está cargado: el módulo arranca vacío y, hasta que se
+registre el primer servicio de cada tipo, todo figura como "Nunca se hizo".
+
+Hay dos caminos: registrar a mano el último servicio de cada unidad —que es rápido, es una
+fila por unidad y tipo—, o que te arme un importador que lea esas dos hojas como el de la
+flota. Dime cuál prefieres.
+
+También quedó pendiente un aviso automático de mantenimiento por correo, como el que ya
+existe para los vencimientos de documentos. No lo hice porque conviene tener primero los
+datos cargados: avisar sobre una flota que figura entera como "nunca se hizo" sería un
+correo de 147 líneas que nadie va a leer.
+
+
+PARA SUBIRLO A PRODUCCIÓN
+-------------------------
+
+    npm install
+    npm run db:migrate          ← primero la base
+    git add -A
+    git commit -m "Mantenimiento de flota, roles nuevos, descargas y menu mas corto"
+    git push
+
+Comprueba antes que .env NO aparezca en `git status --short`.

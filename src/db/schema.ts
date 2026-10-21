@@ -16,7 +16,10 @@ import {
 /** Contenido binario de un adjunto (solo se usa con el modo de almacenamiento "db"). */
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
-export const roleEnum = pgEnum("role", ["ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES"]);
+export const roleEnum = pgEnum("role", [
+  "ADMIN", "USUARIO", "FINANZAS", "JEFE_ALMACEN", "DETRACCIONES",
+  "MANTENIMIENTO", "DOCUMENTACION", "OPERACION",
+]);
 export const movementTypeEnum = pgEnum("movement_type", ["ENTRADA", "SALIDA", "AJUSTE"]);
 /** Facturas de proveedores por servicios de transporte. */
 export const invoiceDocTypeEnum = pgEnum("invoice_doc_type", ["FACTURA", "BOLETA", "NOTA_CREDITO", "NOTA_DEBITO"]);
@@ -637,6 +640,15 @@ export const vehicles = pgTable("vehicles", {
    * conductor en vez de desaparecer.
    */
   driverId: uuid("driver_id").references(() => employees.id, { onDelete: "set null" }),
+  /**
+   * El kilometraje de la unidad y cuándo se leyó.
+   *
+   * Es lo que decide cuándo toca el próximo cambio de aceite. Se guarda con su fecha
+   * porque un kilometraje sin fecha no dice nada: 180.000 km leídos hace ocho meses no
+   * sirven para calcular lo que falta.
+   */
+  odometerKm: integer("odometer_km"),
+  odometerAt: date("odometer_at"),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
   isDemo: boolean("is_demo").notNull().default(false),
@@ -645,6 +657,61 @@ export const vehicles = pgTable("vehicles", {
   index("vehicles_active_idx").on(t.active),
   index("vehicles_driver_idx").on(t.driverId),
   check("vehicles_year_valid", sql`${t.year} is null or (${t.year} >= 1970 and ${t.year} <= 2100)`),
+]);
+
+/**
+ * El mantenimiento de la flota: lo que se le hace a cada unidad y cada cuánto.
+ *
+ * Son dos tablas porque son dos cosas distintas:
+ *
+ *   maintenance_plans   cada cuánto le toca a ESTA unidad ESTE mantenimiento. Es la regla,
+ *                       y solo existe cuando se quiere cambiar la de por defecto.
+ *   maintenance_records lo que de verdad se hizo, con su fecha y su kilometraje. Es el
+ *                       historial, y de su última fila sale cuándo toca el siguiente.
+ *
+ * Mezclarlas tentaba —una sola tabla con "próxima fecha"— y habría sido un error: al
+ * cambiar la periodicidad habría que reescribir el historial, que es justo lo que no se
+ * debe tocar.
+ */
+export const maintenancePlans = pgTable("maintenance_plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  /** ACEITE, FILTROS, FRENOS, LLANTAS, LAVADO, ENGRASE, OTRO. */
+  kind: varchar("kind", { length: 24 }).notNull(),
+  /** Cada cuántos kilómetros toca. Null si este mantenimiento no se mide por kilometraje. */
+  everyKm: integer("every_km"),
+  /** Cada cuántos días toca. Null si solo se mide por kilometraje. */
+  everyDays: integer("every_days"),
+  active: boolean("active").notNull().default(true),
+  notes: text("notes"),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex("maintenance_plans_vehicle_kind").on(t.vehicleId, t.kind),
+  // Una regla que no dice ni cada cuántos kilómetros ni cada cuántos días no es una regla.
+  check("maintenance_plans_tiene_regla",
+    sql`${t.everyKm} is not null or ${t.everyDays} is not null`),
+  check("maintenance_plans_km_positivo", sql`${t.everyKm} is null or ${t.everyKm} > 0`),
+  check("maintenance_plans_dias_positivo", sql`${t.everyDays} is null or ${t.everyDays} > 0`),
+]);
+
+export const maintenanceRecords = pgTable("maintenance_records", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 24 }).notNull(),
+  servicedAt: date("serviced_at").notNull(),
+  /** Kilometraje en el momento del servicio. Es lo que hace avanzar el contador. */
+  odometerKm: integer("odometer_km"),
+  cost: numeric("cost", { precision: 12, scale: 2 }),
+  currency: varchar("currency", { length: 3 }).notNull().default("PEN"),
+  workshop: varchar("workshop", { length: 120 }),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id),
+  ...timestamps,
+}, (t) => [
+  index("maintenance_records_vehicle_idx").on(t.vehicleId, t.kind, t.servicedAt),
+  index("maintenance_records_date_idx").on(t.servicedAt),
+  check("maintenance_records_km_positivo", sql`${t.odometerKm} is null or ${t.odometerKm} >= 0`),
+  check("maintenance_records_costo_positivo", sql`${t.cost} is null or ${t.cost} >= 0`),
 ]);
 
 /**

@@ -76,12 +76,16 @@ def main():
         page.goto(f"{BASE}/dashboard"); page.wait_for_timeout(800)
         for seccion in ["Almacén", "Proveedores", "Finanzas", "Administración"]:
             check(f"el menú tiene la sección {seccion}", page.locator(f"button:has-text('{seccion}')").count() > 0)
-        page.click("button:has-text('Administración')")
-        page.wait_for_timeout(400)
-        check("una sección se puede contraer", page.locator("a[href='/usuarios']").count() == 0)
-        page.click("button:has-text('Administración')")
-        page.wait_for_timeout(400)
-        check("y se vuelve a abrir", page.locator("a[href='/usuarios']").count() > 0)
+        # El menú pliega solo las secciones largas, así que "Administración" puede empezar
+        # abierta o cerrada según dónde esté el usuario: se mira antes de pulsar.
+        boton = page.locator("button:has-text('Administración')").first
+        abierta_antes = boton.get_attribute("aria-expanded") == "true"
+        boton.click(); page.wait_for_timeout(400)
+        check("al pulsar el título, la sección cambia de estado",
+              (page.locator("a[href='/usuarios']").count() > 0) != abierta_antes)
+        boton.click(); page.wait_for_timeout(400)
+        check("y al pulsarlo otra vez, vuelve a como estaba",
+              (page.locator("a[href='/usuarios']").count() > 0) == abierta_antes)
 
         # --- El campo de fecha ya no depende del idioma del navegador ---
         page.goto(f"{BASE}/facturas"); page.wait_for_timeout(600)

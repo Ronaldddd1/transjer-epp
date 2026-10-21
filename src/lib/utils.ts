@@ -236,6 +236,9 @@ export const ROLE_EXPORT_LABEL: Record<string, string> = {
   USUARIO: "Usuario",
   FINANZAS: "Finanzas",
   DETRACCIONES: "Detracciones",
+  MANTENIMIENTO: "Mantenimiento",
+  DOCUMENTACION: "Documentación",
+  OPERACION: "Operación",
 };
 
 // ---------- Detracciones (SPOT) ----------
@@ -546,6 +549,114 @@ export const DOCUMENT_WARNING_DAYS = 30;
  * repetida en la pantalla es lo que hace que se dejen de mirar las de verdad.
  */
 export const REVISION_TECNICA_ANIOS_GRACIA = 3;
+
+// ---------- Mantenimiento de la flota ----------
+
+/**
+ * Lo que se le hace a una unidad, en el orden en que importa.
+ *
+ * El aceite va primero porque es el que se mide en kilómetros y el que de verdad para un
+ * camión si se pasa. Lo demás se controla por tiempo.
+ */
+export const MAINTENANCE_KIND_LABEL = {
+  ACEITE: "Cambio de aceite",
+  FILTROS: "Cambio de filtros",
+  FRENOS: "Revisión de frenos",
+  LLANTAS: "Llantas",
+  LAVADO: "Lavado",
+  ENGRASE: "Engrase",
+  OTRO: "Otro mantenimiento",
+} as const;
+export type MaintenanceKind = keyof typeof MAINTENANCE_KIND_LABEL;
+export const MAINTENANCE_KINDS = Object.keys(MAINTENANCE_KIND_LABEL) as MaintenanceKind[];
+
+/**
+ * Cada cuánto toca cada cosa, mientras nadie diga otra cosa para una unidad concreta.
+ *
+ * Son los intervalos corrientes de un camión de carga. No son ley: cada unidad puede tener
+ * el suyo, y por eso existe la tabla de planes. Estos son los que evitan que haya que
+ * configurar dieciocho unidades a mano antes de que el módulo sirva de algo.
+ */
+export const MAINTENANCE_DEFAULTS: Record<MaintenanceKind, { everyKm: number | null; everyDays: number | null }> = {
+  ACEITE: { everyKm: 10000, everyDays: 180 },
+  FILTROS: { everyKm: 20000, everyDays: 365 },
+  FRENOS: { everyKm: 20000, everyDays: 180 },
+  LLANTAS: { everyKm: 40000, everyDays: null },
+  LAVADO: { everyKm: null, everyDays: 15 },
+  ENGRASE: { everyKm: 10000, everyDays: 90 },
+  OTRO: { everyKm: null, everyDays: 365 },
+};
+
+/** Desde cuántos días (o kilómetros) antes se avisa de un mantenimiento. */
+export const MAINTENANCE_WARNING_DAYS = 15;
+export const MAINTENANCE_WARNING_KM = 1000;
+
+export type MaintenanceStatus = "VENCIDO" | "POR_VENCER" | "AL_DIA" | "SIN_REGISTRO";
+
+export const MAINTENANCE_STATUS_LABEL: Record<MaintenanceStatus, string> = {
+  VENCIDO: "Vencido",
+  POR_VENCER: "Toca pronto",
+  AL_DIA: "Al día",
+  SIN_REGISTRO: "Nunca se registró",
+};
+
+/**
+ * Cuándo toca el próximo mantenimiento y en qué situación está.
+ *
+ * Se calcula por los dos caminos a la vez —kilómetros y tiempo— y manda el que llegue
+ * antes: un camión parado tres meses necesita su cambio de aceite aunque no haya rodado
+ * los 10.000 km, y uno que hace Lima-Arequipa todas las semanas los hace antes de los seis
+ * meses. Quedarse con uno solo deja fuera la mitad de los casos.
+ */
+export function estadoMantenimiento(entrada: {
+  /** Última vez que se hizo: fecha y kilometraje de ese día. */
+  ultimaFecha: string | null;
+  ultimoKm: number | null;
+  /** La regla de esta unidad para este mantenimiento. */
+  everyKm: number | null;
+  everyDays: number | null;
+  /** Lectura actual del odómetro, si se tiene. */
+  kmActual: number | null;
+  hoy?: string;
+}): {
+  estado: MaintenanceStatus;
+  proximaFecha: string | null;
+  proximoKm: number | null;
+  /** Días que faltan (negativo si ya pasó). Null si este mantenimiento no va por tiempo. */
+  diasRestantes: number | null;
+  /** Kilómetros que faltan (negativo si ya se pasó). Null si no va por kilometraje. */
+  kmRestantes: number | null;
+} {
+  const hoy = entrada.hoy ?? todayLima();
+
+  if (!entrada.ultimaFecha) {
+    return { estado: "SIN_REGISTRO", proximaFecha: null, proximoKm: null, diasRestantes: null, kmRestantes: null };
+  }
+
+  const proximaFecha = entrada.everyDays ? addDays(entrada.ultimaFecha, entrada.everyDays) : null;
+  const proximoKm = entrada.everyKm !== null && entrada.ultimoKm !== null
+    ? entrada.ultimoKm + entrada.everyKm
+    : null;
+
+  const diasRestantes = proximaFecha ? daysToExpiry(proximaFecha, hoy) : null;
+  const kmRestantes = proximoKm !== null && entrada.kmActual !== null ? proximoKm - entrada.kmActual : null;
+
+  const vencido = (diasRestantes !== null && diasRestantes < 0) || (kmRestantes !== null && kmRestantes < 0);
+  if (vencido) return { estado: "VENCIDO", proximaFecha, proximoKm, diasRestantes, kmRestantes };
+
+  const cerca = (diasRestantes !== null && diasRestantes <= MAINTENANCE_WARNING_DAYS)
+    || (kmRestantes !== null && kmRestantes <= MAINTENANCE_WARNING_KM);
+  return { estado: cerca ? "POR_VENCER" : "AL_DIA", proximaFecha, proximoKm, diasRestantes, kmRestantes };
+}
+
+/** En qué situación está una unidad de la flota, en palabras. */
+export const FLEET_STATUS_LABEL: Record<string, string> = {
+  AL_DIA: "Puede salir",
+  POR_VENCER: "Algo vence pronto",
+  FALTA: "Le falta un papel",
+  VENCIDO: "Con algo vencido",
+  BAJA: "Dada de baja",
+};
 
 /** Desde qué año se le exige la revisión técnica a una unidad. Null si no se sabe su año. */
 export function anioPrimeraRevision(year: number | null | undefined): number | null {

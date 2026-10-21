@@ -1,4 +1,4 @@
-import { ArrowLeft, Car, IdCard, MapPin, UserRound } from "lucide-react";
+import { ArrowLeft, Car, FileArchive, IdCard, MapPin, UserRound } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -13,7 +13,12 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   anioPrimeraRevision, DOCUMENT_KIND_LABEL, documentStatus, exigeRevisionTecnica, formatDate,
+  formatMoney, MAINTENANCE_KIND_LABEL, type MaintenanceKind,
 } from "@/lib/utils";
+import {
+  DeleteMaintenanceButton, MaintenanceModal, OdometerModal,
+} from "@/components/maintenance/maintenance-actions";
+import { listMaintenanceFor, maintenanceForVehicle } from "@/server/maintenance-queries";
 import {
   employeeOptions, getVehicle, listDocumentsFor, listFleet,
 } from "@/server/document-queries";
@@ -49,9 +54,12 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   if (!vehiculo) notFound();
 
   const canManage = can(user.role, "documents.manage");
-  const [documentos, conductores] = await Promise.all([
+  const canMaintain = can(user.role, "maintenance.view");
+  const [documentos, conductores, mantenimientos, historial] = await Promise.all([
     listDocumentsFor({ vehicleId: id }),
     canManage ? employeeOptions() : Promise.resolve([]),
+    canMaintain ? maintenanceForVehicle(id) : Promise.resolve([]),
+    canMaintain ? listMaintenanceFor(id, 12) : Promise.resolve([]),
   ]);
 
   // La misma consulta de la tabla de flota, acotada a esta unidad: así la ficha y el
@@ -63,6 +71,11 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   const deConducir = papelesChofer.filter((d) => d.kind === "DNI" || d.kind === "LICENCIA");
 
   // A una unidad de menos de tres años todavía no se le exige la revisión técnica.
+  const unidadRef = {
+    id: vehiculo.id, plate: vehiculo.plate,
+    odometerKm: vehiculo.odometerKm, odometerAt: vehiculo.odometerAt,
+  };
+
   const sinRevisionAun = !exigeRevisionTecnica(vehiculo.year) && !resumen?.revisionTecnica;
 
   const vencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
@@ -81,6 +94,14 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
           || vehiculo.description || "Sin descripción"}
         actions={
           <>
+            <a
+              href={`/api/documentos/zip?vehiculo=${vehiculo.id}`}
+              download
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-steel-300 bg-white px-4 text-[15px] text-ink transition-colors hover:border-ink"
+            >
+              <FileArchive className="h-4 w-4 text-steel-500" aria-hidden />
+              Bajar sus documentos
+            </a>
             {canManage && (
               <DocumentFormModal
                 vehicleId={vehiculo.id}
@@ -256,6 +277,96 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               })}
             </tbody>
           </TableShell>
+        </Panel>
+      )}
+
+      {canMaintain && (
+        <Panel
+          title="Mantenimiento"
+          className="mb-4"
+          action={
+            <div className="flex items-center gap-2">
+              <Link href="/mantenimiento" className="text-sm text-steel-500 hover:text-ink hover:underline">
+                Ver toda la flota
+              </Link>
+              {can(user.role, "maintenance.manage") && <OdometerModal unidad={unidadRef} />}
+              {can(user.role, "maintenance.manage") && <MaintenanceModal unidad={unidadRef} />}
+            </div>
+          }
+        >
+          <div className="border-t border-steel-100 px-4 py-3 text-sm text-steel-600">
+            {vehiculo.odometerKm !== null ? (
+              <>
+                <strong className="text-ink">{vehiculo.odometerKm.toLocaleString("es-PE")} km</strong>
+                {vehiculo.odometerAt && <> · leídos el {formatDate(vehiculo.odometerAt)}</>}
+              </>
+            ) : (
+              <>Sin kilometraje anotado: hasta que se anote, lo que se mide por kilómetros no se puede calcular.</>
+            )}
+          </div>
+
+          <TableShell>
+            <thead>
+              <tr>
+                <Th>Mantenimiento</Th>
+                <Th>Última vez</Th>
+                <Th>Toca</Th>
+                <Th>Estado</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {mantenimientos.map((m) => (
+                <Tr
+                  key={m.kind}
+                  tone={m.estado === "VENCIDO" ? "bg-red-50 hover:bg-red-100/70"
+                    : m.estado === "POR_VENCER" ? "bg-brand-soft hover:bg-[#FFEBA8]" : ""}
+                >
+                  <Td className="font-medium">{MAINTENANCE_KIND_LABEL[m.kind]}</Td>
+                  <Td className="whitespace-nowrap text-sm">
+                    {m.ultimaFecha ? formatDate(m.ultimaFecha) : <span className="text-steel-400">Nunca</span>}
+                    {m.ultimoKm !== null && <p className="text-xs text-steel-500">{m.ultimoKm.toLocaleString("es-PE")} km</p>}
+                  </Td>
+                  <Td className="whitespace-nowrap text-sm">
+                    {m.proximaFecha ? formatDate(m.proximaFecha) : "—"}
+                    {m.proximoKm !== null && <p className="text-xs text-steel-500">{m.proximoKm.toLocaleString("es-PE")} km</p>}
+                  </Td>
+                  <Td>
+                    {m.estado === "VENCIDO" && <Badge tone="red">Vencido</Badge>}
+                    {m.estado === "POR_VENCER" && <Badge tone="yellow">Toca pronto</Badge>}
+                    {m.estado === "AL_DIA" && <Badge tone="green">Al día</Badge>}
+                    {m.estado === "SIN_REGISTRO" && <Badge tone="neutral">Nunca se hizo</Badge>}
+                  </Td>
+                </Tr>
+              ))}
+            </tbody>
+          </TableShell>
+
+          {historial.length > 0 && (
+            <div className="border-t border-steel-100 px-4 py-3">
+              <h3 className="mb-2 text-sm font-semibold text-ink">Lo último que se le hizo</h3>
+              <ul className="divide-y divide-steel-100">
+                {historial.map((h) => (
+                  <li key={h.id} className="flex items-center justify-between gap-3 py-2 text-sm">
+                    <span>
+                      <span className="font-medium">{MAINTENANCE_KIND_LABEL[h.kind as MaintenanceKind] ?? h.kind}</span>
+                      <span className="block text-xs text-steel-500">
+                        {formatDate(h.servicedAt)}
+                        {h.odometerKm !== null && ` · ${h.odometerKm.toLocaleString("es-PE")} km`}
+                        {h.workshop && ` · ${h.workshop}`}
+                        {h.cost && ` · ${formatMoney(h.cost, h.currency)}`}
+                      </span>
+                    </span>
+                    {can(user.role, "maintenance.manage") && (
+                      <DeleteMaintenanceButton
+                        id={h.id}
+                        etiqueta={`${MAINTENANCE_KIND_LABEL[h.kind as MaintenanceKind] ?? h.kind} del ${formatDate(h.servicedAt)}`}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </Panel>
       )}
 
