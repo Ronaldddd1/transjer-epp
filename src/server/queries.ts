@@ -323,6 +323,11 @@ export async function listEmployees(opts: { q?: string; area?: string; state?: s
       position: employees.position, area: employees.area, phone: employees.phone, hireDate: employees.hireDate,
       notes: employees.notes, active: employees.active, isDemo: employees.isDemo,
       terminatedAt: employees.terminatedAt, terminationReason: employees.terminationReason,
+      // Hacen falta para que el botón de editar abra el formulario con lo que ya hay.
+      address: employees.address,
+      emergencyContactName: employees.emergencyContactName,
+      emergencyContactPhone: employees.emergencyContactPhone,
+      emergencyContactRelation: employees.emergencyContactRelation,
       delivered: sql<number>`coalesce(${deliveredCount.n}, 0)`,
     }).from(employees).leftJoin(deliveredCount, eq(deliveredCount.employeeId, employees.id))
       .where(where).orderBy(asc(employees.lastName), asc(employees.firstName)).limit(opts.limit).offset(opts.offset),

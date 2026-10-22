@@ -1,7 +1,7 @@
 "use client";
 
 import {
-  ArrowLeftRight, BarChart3, Building2, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
+  ArrowLeftRight, BarChart3, Building2, CalendarCheck, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
   FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
   Tags, Undo2, Users, Wallet, Wrench, X,
 } from "lucide-react";
@@ -37,6 +37,7 @@ const SECTIONS: NavSection[] = [
       { href: "/entregas/resumen", label: "Resumen de EPP", icon: ClipboardCheck, permission: "deliveries.view" },
       { href: "/devoluciones", label: "Devolución de EPP", icon: Undo2, permission: "deliveries.view" },
       { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+      { href: "/asistencia", label: "Asistencia", icon: CalendarCheck, permission: "attendance.view" },
     ],
   },
   {

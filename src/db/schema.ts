@@ -122,6 +122,17 @@ export const employees = pgTable("employees", {
   area: varchar("area", { length: 80 }).notNull(),
   phone: varchar("phone", { length: 20 }),
   hireDate: date("hire_date"),
+  /** Dónde vive. Hace falta el día que hay que mandarle algo o ir a buscarlo. */
+  address: varchar("address", { length: 200 }),
+  /**
+   * A quién avisar si le pasa algo.
+   *
+   * Es el dato que nadie busca hasta que hace falta, y entonces hace falta en minutos.
+   * Por eso va en la ficha y no en una observación suelta.
+   */
+  emergencyContactName: varchar("emergency_contact_name", { length: 120 }),
+  emergencyContactPhone: varchar("emergency_contact_phone", { length: 20 }),
+  emergencyContactRelation: varchar("emergency_contact_relation", { length: 40 }),
   notes: text("notes"),
   active: boolean("active").notNull().default(true),
   /**
@@ -136,6 +147,33 @@ export const employees = pgTable("employees", {
 }, (t) => [
   index("employees_active_lastname_idx").on(t.active, t.lastName),
   index("employees_terminated_idx").on(t.terminatedAt),
+]);
+
+/**
+ * La asistencia diaria.
+ *
+ * Una fila por trabajador y día, y nada más: aquí no se miden horas ni tardanzas, solo si
+ * vino o no. Los días que no se registran simplemente no existen, que es lo correcto para
+ * domingos y feriados: marcarlos como falta sería mentir, y marcarlos como presente
+ * también.
+ *
+ * El motivo solo tiene sentido en lo justificado, y ahí es lo que convierte una falta en
+ * un permiso: sin él, dentro de tres meses nadie sabe por qué ese día no vino.
+ */
+export const attendance = pgTable("attendance", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  employeeId: uuid("employee_id").notNull().references(() => employees.id, { onDelete: "cascade" }),
+  day: date("day").notNull(),
+  /** PRESENTE | FALTA | JUSTIFICADO */
+  status: varchar("status", { length: 12 }).notNull(),
+  reason: varchar("reason", { length: 160 }),
+  recordedBy: uuid("recorded_by").references(() => users.id),
+  ...timestamps,
+}, (t) => [
+  // Un trabajador tiene una sola asistencia por día: volver a marcarlo corrige la que hay.
+  uniqueIndex("attendance_employee_day").on(t.employeeId, t.day),
+  index("attendance_day_idx").on(t.day),
+  check("attendance_status_valid", sql`${t.status} in ('PRESENTE','FALTA','JUSTIFICADO')`),
 ]);
 
 export const inventoryMovements = pgTable("inventory_movements", {

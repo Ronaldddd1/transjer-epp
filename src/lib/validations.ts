@@ -101,6 +101,12 @@ export const employeeSchema = z.object({
   area: requiredText("El área", 80),
   phone: z.string().trim().regex(/^[\d +()-]{0,20}$/, "Teléfono inválido").optional().transform((v) => (v ? v : null)),
   hireDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+  address: optionalText(200),
+  /** A quién avisar si le pasa algo: nombre, teléfono y qué es suyo. */
+  emergencyContactName: optionalText(120),
+  emergencyContactPhone: z.string().trim().regex(/^[\d +()-]{0,20}$/, "Teléfono inválido")
+    .optional().transform((v) => (v ? v : null)),
+  emergencyContactRelation: optionalText(40),
   notes: optionalText(1000),
 });
 

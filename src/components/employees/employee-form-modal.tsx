@@ -10,6 +10,10 @@ import { FormModal } from "@/components/ui/form-modal";
 type EmployeeData = {
   id: string; dni: string; firstName: string; lastName: string; position: string; area: string;
   phone: string | null; hireDate: string | null; notes: string | null;
+  address?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactRelation?: string | null;
 };
 
 export const POSITIONS = ["Conductor", "Ayudante de reparto", "Operario de almacén", "Supervisor de operaciones", "Mecánico", "Administrativo"];
@@ -59,6 +63,36 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
           <Field label="Teléfono" name="phone" error={errors.phone}>
             <Input name="phone" type="tel" inputMode="tel" defaultValue={employee?.phone ?? ""} maxLength={20} invalid={!!errors.phone} />
           </Field>
+          <Field label="Dirección" name="address" error={errors.address} className="sm:col-span-2">
+            <Input name="address" defaultValue={employee?.address ?? ""} maxLength={200}
+              placeholder="Av. Los Álamos 123, San Martín de Porres" />
+          </Field>
+
+          {/*
+            * A quién avisar si le pasa algo.
+            *
+            * Es el dato que nadie busca hasta que hace falta, y entonces hace falta en
+            * minutos. Por eso va en la ficha, con su propio recuadro, y no escondido en
+            * las observaciones.
+            */}
+          <fieldset className="sm:col-span-2 rounded-md border border-steel-200 px-3 pb-3 pt-2">
+            <legend className="px-1 text-sm font-semibold text-ink">Contacto de emergencia</legend>
+            <div className="grid gap-4 sm:grid-cols-3">
+              <Field label="Nombre" name="emergencyContactName" error={errors.emergencyContactName}>
+                <Input name="emergencyContactName" defaultValue={employee?.emergencyContactName ?? ""} maxLength={120} />
+              </Field>
+              <Field label="Teléfono" name="emergencyContactPhone" error={errors.emergencyContactPhone}>
+                <Input name="emergencyContactPhone" type="tel" inputMode="tel"
+                  defaultValue={employee?.emergencyContactPhone ?? ""} maxLength={20}
+                  invalid={!!errors.emergencyContactPhone} />
+              </Field>
+              <Field label="Qué es suyo" name="emergencyContactRelation" error={errors.emergencyContactRelation}
+                hint="Esposa, hijo, hermano…">
+                <Input name="emergencyContactRelation" defaultValue={employee?.emergencyContactRelation ?? ""} maxLength={40} />
+              </Field>
+            </div>
+          </fieldset>
+
           <Field label="Observaciones" name="notes" error={errors.notes} className="sm:col-span-2">
             <Textarea name="notes" rows={2} defaultValue={employee?.notes ?? ""} maxLength={1000} />
           </Field>

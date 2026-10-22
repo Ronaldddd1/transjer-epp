@@ -70,7 +70,9 @@ export function DateInput({
 }: Props) {
   const controlado = value !== undefined;
   const [iso, setIso] = useState<string>(defaultValue ?? "");
-  const [texto, setTexto] = useState<string>(isoToDisplay(defaultValue));
+  // Usado controlado, lo que se muestra al abrir sale de `value`, no de `defaultValue`:
+  // si no, el campo arranca en blanco aunque el padre ya tenga una fecha puesta.
+  const [texto, setTexto] = useState<string>(isoToDisplay(controlado ? value : defaultValue));
   const picker = useRef<HTMLInputElement>(null);
   const propio = useId();
   const campoId = id ?? name ?? propio;

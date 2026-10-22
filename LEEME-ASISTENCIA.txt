@@ -1,0 +1,109 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Asistencia diaria y la ficha del trabajador completa
+=====================================================
+
+Dos cambios. Piden migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, crea la asistencia y los campos nuevos
+
+
+1. ASISTENCIA
+--------------
+
+Pantalla nueva, en ALMACÉN → ASISTENCIA. La registran el jefe de almacén y operación,
+además del administrador.
+
+Arriba, el día: la lista de los trabajadores activos y tres botones por cada uno.
+
+    VINO · FALTÓ · JUSTIFICADO
+
+Solo eso. Ni horas, ni tardanzas, ni turnos: para eso haría falta un reloj en la puerta, y
+lo que hay es una persona con una lista.
+
+Lo JUSTIFICADO abre un campo de motivo —permiso, descanso médico, vacaciones— y no cuenta
+como falta. Sin ese tercer botón, cada domingo y cada permiso habría que anotarlos como
+falta o no anotarlos, y las dos cosas ensucian el único número que esta pantalla tiene que
+dar bien.
+
+CÓMO SE GUARDA. Se marca a todos y se pulsa GUARDAR LA LISTA una sola vez. El botón dice
+cuántos cambios lleva, y si no hay cambios está apagado. Se hizo así, y no guardando con
+cada clic, porque pasar lista es de corrido: con veinte peticiones de por medio, basta que
+el internet falle a la mitad para no saber por dónde ibas.
+
+Hay un botón MARCAR A TODOS COMO QUE VINIERON, para el día normal en que vino todo el
+mundo: se marca a todos y se corrigen las dos excepciones.
+
+LO QUE NO SE MARCA NO SE GUARDA. Un día sin registrar es un dato que falta, no una falta.
+Los domingos y feriados simplemente no se pasan, y nadie aparece con faltas que no tuvo.
+
+CORREGIR. Con las flechas DÍA ANTERIOR / DÍA SIGUIENTE, o el calendario, se va a cualquier
+día pasado y se corrige: volver a marcar pisa lo que había, no duplica. No se puede pasar
+lista de un día que todavía no llegó.
+
+EL RESUMEN DEL MES, debajo, en la misma pantalla: cuántos días vino cada trabajador, cuántos
+faltó y cuántos justificó. Y una última columna, DÍAS CON REGISTRO, que es la que hace
+honesto el cuadro: un trabajador con cero faltas en un mes donde solo se pasó lista un día
+no está diciendo lo mismo que uno con cero faltas en un mes entero.
+
+Todo se descarga en Excel, con dos hojas: el día que estás viendo y el resumen del mes.
+
+
+2. LA FICHA DEL TRABAJADOR
+---------------------------
+
+Se agregaron los dos que faltaban:
+
+    DIRECCIÓN
+    CONTACTO DE EMERGENCIA   nombre, teléfono y qué es suyo (esposa, hijo, hermano)
+
+Ya estaban el DNI, los nombres, el cargo, el área, el teléfono y la fecha de ingreso.
+
+Los dos nuevos se ven en la ficha del trabajador, en un recuadro propio arriba a la
+derecha, no escondidos dentro del formulario: el contacto de emergencia es el dato que
+nadie busca hasta que hace falta, y entonces hace falta en minutos. El teléfono es
+pulsable desde el celular.
+
+Si un trabajador no lo tiene cargado, la ficha lo dice en ámbar: SIN REGISTRAR.
+
+En esa misma columna aparece ahora su asistencia: cuántos días vino, faltó y justificó, y
+los últimos días marcados con su motivo.
+
+Te propuse cuatro datos más —tallas de EPP, contrato con su vencimiento, fecha de
+nacimiento y categoría de licencia— y quedamos en dejarlos para después. Cuando los
+quieras, se agregan sin tocar nada de lo que ya está.
+
+
+LO QUE SE PROBÓ
+---------------
+
+  690 comprobaciones de lógica   — todas pasan
+  12 recorridos en el navegador  — todos pasan (463 verificaciones)
+
+De lo nuevo, lo que más importa:
+
+  · Un día sin pasar lista sale con todos SIN MARCAR, y la cuenta dice "3 sin marcar", no
+    "3 faltas". Es el error que habría arruinado el módulo entero.
+  · El motivo se guarda solo en los justificados; en los presentes y las faltas queda vacío.
+  · Volver a marcar a alguien corrige su marca: nunca quedan dos filas del mismo día.
+  · No se puede pasar lista de un día futuro.
+  · A un trabajador desactivado deja de pasársele lista.
+  · El resumen del mes cuenta solo los días de ese mes, y dice cuántos tienen registro.
+  · La dirección y el contacto de emergencia se guardan y se ven en la ficha.
+
+De paso se corrigió un fallo del campo de fecha que compartían varias pantallas: usado de
+forma controlada, arrancaba en blanco aunque ya tuviera una fecha puesta.
+
+
+PARA SUBIRLO A PRODUCCIÓN
+-------------------------
+
+    npm install
+    npm run db:migrate          ← primero la base
+    git add -A
+    git commit -m "Asistencia diaria y datos del trabajador"
+    git push
+
+Comprueba antes que .env NO aparezca en `git status --short`.

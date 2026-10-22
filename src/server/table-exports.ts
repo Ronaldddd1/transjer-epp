@@ -5,7 +5,7 @@ import {
   EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
   PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
   DOCUMENT_STATUS_LABEL, documentStatus, exigeRevisionTecnica, FLEET_STATUS_LABEL,
-  MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL,
+  MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL, todayLima,
   STOCK_STATUS_LABEL, stockStatus,
   type RejectReasonKey, type SearchParamsRecord,
 } from "@/lib/utils";
@@ -19,6 +19,7 @@ import {
 } from "./invoice-queries";
 import { estadoFlota, listFleet } from "./document-queries";
 import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
+import { attendanceMonth, listAttendanceDay, readAttendanceFilters } from "./attendance-queries";
 import { listInstallments, listObligations, listPaymentCalendar, readObligationFilters } from "./obligation-queries";
 import type { Report } from "./reports";
 
@@ -920,6 +921,84 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { label: "Tocan pronto", value: filas.filter((r) => r.estado === "POR_VENCER").length },
         ],
       }];
+    },
+  },
+
+  /**
+   * La asistencia: el día que se está viendo y el acumulado del mes, en dos hojas.
+   *
+   * Las dos juntas porque son las dos preguntas que se hacen: "quién vino hoy" y "cuántas
+   * faltas lleva este mes".
+   */
+  asistencia: {
+    title: "Asistencia",
+    permission: "attendance.view",
+    async build(sp) {
+      const f = readAttendanceFilters(sp);
+      const dia = f.day ?? todayLima();
+      const mes = typeof sp.mes === "string" && /^\d{4}-\d{2}$/.test(sp.mes) ? sp.mes : dia.slice(0, 7);
+      const [delDia, delMes] = await Promise.all([
+        listAttendanceDay(f),
+        attendanceMonth(mes, { q: f.q, area: f.area }),
+      ]);
+
+      const etiqueta = (s: string | null) =>
+        s === "PRESENTE" ? "Vino" : s === "FALTA" ? "Faltó" : s === "JUSTIFICADO" ? "Justificado" : "Sin registrar";
+
+      return [
+        {
+          title: `Asistencia del ${formatDate(dia)}`,
+          columns: [
+            { key: "trabajador", header: "Trabajador", width: 28 },
+            { key: "dni", header: "DNI", width: 11 },
+            { key: "cargo", header: "Cargo", width: 22 },
+            { key: "area", header: "Área", width: 16 },
+            { key: "estado", header: "Asistencia", width: 14 },
+            { key: "motivo", header: "Motivo", width: 30 },
+            { key: "marco", header: "Lo marcó", width: 22 },
+          ],
+          rows: delDia.map((r) => ({
+            trabajador: r.nombre,
+            dni: r.dni,
+            cargo: r.position,
+            area: r.area,
+            estado: etiqueta(r.status),
+            motivo: texto(r.reason),
+            marco: texto(r.recordedByName),
+          })),
+          summary: [
+            { label: "Vinieron", value: delDia.filter((r) => r.status === "PRESENTE").length },
+            { label: "Faltaron", value: delDia.filter((r) => r.status === "FALTA").length },
+            { label: "Justificados", value: delDia.filter((r) => r.status === "JUSTIFICADO").length },
+            { label: "Sin registrar", value: delDia.filter((r) => r.status === null).length },
+          ],
+        },
+        {
+          title: `Resumen de ${mes}`,
+          columns: [
+            { key: "trabajador", header: "Trabajador", width: 28 },
+            { key: "dni", header: "DNI", width: 11 },
+            { key: "area", header: "Área", width: 16 },
+            { key: "presentes", header: "Vino", width: 9, align: "right" as const },
+            { key: "faltas", header: "Faltó", width: 9, align: "right" as const },
+            { key: "justificados", header: "Justificado", width: 12, align: "right" as const },
+            { key: "registrados", header: "Días con registro", width: 16, align: "right" as const },
+          ],
+          rows: delMes.filas.map((r) => ({
+            trabajador: r.nombre,
+            dni: r.dni,
+            area: r.area,
+            presentes: r.presentes,
+            faltas: r.faltas,
+            justificados: r.justificados,
+            registrados: r.registrados,
+          })),
+          summary: [
+            { label: "Días con lista pasada", value: delMes.diasRegistrados },
+            { label: "Faltas del mes", value: delMes.filas.reduce((n, r) => n + r.faltas, 0) },
+          ],
+        },
+      ];
     },
   },
 

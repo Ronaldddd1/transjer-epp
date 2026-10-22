@@ -17,6 +17,7 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { cn, documentStatus, formatDate, todayLima } from "@/lib/utils";
 import { listDocumentsFor } from "@/server/document-queries";
+import { attendanceFor } from "@/server/attendance-queries";
 import {
   employeeHoldings, getEmployee, getEmployeeOptions, getProductOptions, listDeliveries, listReturns,
 } from "@/server/queries";
@@ -32,13 +33,15 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const canDeliver = can(user.role, "deliveries.create") && employee.active;
   // Quien no tiene acceso a documentos no ve la sección, igual que no ve el menú.
   const verDocumentos = can(user.role, "documents.view");
-  const [{ rows }, holdings, devoluciones, products, employees, documentos] = await Promise.all([
+  const verAsistencia = can(user.role, "attendance.view");
+  const [{ rows }, holdings, devoluciones, products, employees, documentos, asistencia] = await Promise.all([
     listDeliveries({ employeeId: id }),
     employeeHoldings(id),
     listReturns({ employeeId: id }),
     canDeliver ? getProductOptions() : Promise.resolve([]),
     canDeliver ? getEmployeeOptions() : Promise.resolve([]),
     verDocumentos ? listDocumentsFor({ employeeId: id }) : Promise.resolve([]),
+    verAsistencia ? attendanceFor(id, 60) : Promise.resolve([]),
   ]);
   const docsVencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
   const canVoid = can(user.role, "deliveries.void");
@@ -158,6 +161,105 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
         </section>
 
         <aside className="grid min-w-0 content-start gap-4">
+          {/*
+            * Los datos personales, a la vista.
+            *
+            * El contacto de emergencia es el que nadie busca hasta que hace falta, y
+            * entonces hace falta en minutos: por eso va aquí y no dentro de un formulario
+            * que hay que abrir.
+            */}
+          <Panel title="Datos del trabajador">
+            <dl className="divide-y divide-steel-100 border-t border-steel-100">
+              <div className="px-4 py-2.5">
+                <dt className="text-xs text-steel-500">DNI</dt>
+                <dd className="text-sm font-medium tabular">{employee.dni}</dd>
+              </div>
+              <div className="px-4 py-2.5">
+                <dt className="text-xs text-steel-500">Ingresó</dt>
+                <dd className="text-sm font-medium">{employee.hireDate ? formatDate(employee.hireDate) : "—"}</dd>
+              </div>
+              <div className="px-4 py-2.5">
+                <dt className="text-xs text-steel-500">Teléfono</dt>
+                <dd className="text-sm font-medium">{employee.phone ?? "—"}</dd>
+              </div>
+              <div className="px-4 py-2.5">
+                <dt className="text-xs text-steel-500">Dirección</dt>
+                <dd className="text-sm font-medium">{employee.address ?? "—"}</dd>
+              </div>
+              <div className="px-4 py-2.5">
+                <dt className="text-xs text-steel-500">Contacto de emergencia</dt>
+                <dd className="text-sm font-medium">
+                  {employee.emergencyContactName ? (
+                    <>
+                      {employee.emergencyContactName}
+                      {employee.emergencyContactRelation && (
+                        <span className="text-steel-500"> · {employee.emergencyContactRelation}</span>
+                      )}
+                      {employee.emergencyContactPhone && (
+                        <a href={`tel:${employee.emergencyContactPhone}`} className="block text-sm text-steel-600 hover:underline">
+                          {employee.emergencyContactPhone}
+                        </a>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-amber-700">Sin registrar</span>
+                  )}
+                </dd>
+              </div>
+            </dl>
+          </Panel>
+
+          {asistencia.length > 0 && (
+            <Panel
+              title="Asistencia"
+              action={
+                <Link href="/asistencia" className="text-sm text-steel-500 hover:text-ink hover:underline">
+                  Pasar lista
+                </Link>
+              }
+            >
+              <dl className="grid grid-cols-3 divide-x divide-steel-200 border-t border-steel-100">
+                <div className="p-3 text-center">
+                  <dt className="text-xs text-steel-500">Vino</dt>
+                  <dd className="font-display text-2xl font-bold tabular text-emerald-700">
+                    {asistencia.filter((a) => a.status === "PRESENTE").length}
+                  </dd>
+                </div>
+                <div className="p-3 text-center">
+                  <dt className="text-xs text-steel-500">Faltó</dt>
+                  <dd className="font-display text-2xl font-bold tabular text-red-700">
+                    {asistencia.filter((a) => a.status === "FALTA").length}
+                  </dd>
+                </div>
+                <div className="p-3 text-center">
+                  <dt className="text-xs text-steel-500">Justificado</dt>
+                  <dd className="font-display text-2xl font-bold tabular text-[#7A5A00]">
+                    {asistencia.filter((a) => a.status === "JUSTIFICADO").length}
+                  </dd>
+                </div>
+              </dl>
+              <ul className="divide-y divide-steel-100 border-t border-steel-100">
+                {asistencia.slice(0, 8).map((a) => (
+                  <li key={a.day} className="flex items-center justify-between gap-2 px-4 py-2 text-sm">
+                    <span className="tabular text-steel-600">{formatDate(a.day)}</span>
+                    <span className={cn(
+                      "text-sm",
+                      a.status === "FALTA" && "font-semibold text-red-700",
+                      a.status === "JUSTIFICADO" && "text-[#7A5A00]",
+                      a.status === "PRESENTE" && "text-emerald-700",
+                    )}>
+                      {a.status === "PRESENTE" ? "Vino" : a.status === "FALTA" ? "Faltó" : "Justificado"}
+                      {a.reason && <span className="block text-xs text-steel-500">{a.reason}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
+                Lo registrado en los últimos días. Los días sin registrar no cuentan.
+              </p>
+            </Panel>
+          )}
+
           <Panel>
             <dl className="grid grid-cols-2 divide-x divide-steel-200">
               <div className="p-4"><dt className="text-xs text-steel-500">Unidades recibidas</dt><dd className="font-display text-3xl font-bold tabular">{totalUnits}</dd></div>
