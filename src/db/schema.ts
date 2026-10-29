@@ -9,6 +9,7 @@ import {
   type InvoiceEmailStatusKey, type InvoiceServiceTypeKey, type ObligationTypeKey,
 } from "@/lib/utils";
 import {
+  type AnyPgColumn,
   boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   uniqueIndex, uuid, varchar,
 } from "drizzle-orm/pg-core";
@@ -27,7 +28,7 @@ export const invoiceStatusEnum = pgEnum("invoice_status", ["PENDIENTE", "PAGADA"
 export const invoiceSourceEnum = pgEnum("invoice_source", ["MANUAL", "CORREO"]);
 // El estado del correo es texto con CHECK, no un enum: agregarle un estado más (como
 // "por aprobar" y "rechazado") dentro de una migración exige que no sea enum.
-export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FACTURA_XML", "GRT", "OTRO"]);
+export const attachmentKindEnum = pgEnum("attachment_kind", ["FACTURA_PDF", "FACTURA_XML", "GRT", "VOUCHER", "OTRO"]);
 /**
  * Condición de pago pactada con el proveedor.
  *   CONTADO  el plazo corre desde que llega la factura por correo.
@@ -167,6 +168,8 @@ export const attendance = pgTable("attendance", {
   /** PRESENTE | FALTA | JUSTIFICADO */
   status: varchar("status", { length: 12 }).notNull(),
   reason: varchar("reason", { length: 160 }),
+  /** En qué se ocupó el día que vino. Obligatoria en los presentes, vacía en el resto. */
+  activity: varchar("activity", { length: 250 }),
   recordedBy: uuid("recorded_by").references(() => users.id),
   ...timestamps,
 }, (t) => [
@@ -333,6 +336,8 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   detractionOperation: varchar("detraction_operation", { length: 40 }),
   detractionBy: uuid("detraction_by").references(() => users.id),
   detractionNotes: text("detraction_notes"),
+  /** La imagen de la constancia del Banco de la Nación. Sin ella no se da por depositada. */
+  detractionProofId: uuid("detraction_proof_id").references((): AnyPgColumn => invoiceAttachments.id, { onDelete: "set null" }),
 
   /** Condición de pago: contado cuenta desde el correo, crédito desde la entrega de la guía. */
   paymentTerm: paymentTermEnum("payment_term").notNull().default("CONTADO"),
@@ -350,6 +355,8 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   paymentReference: varchar("payment_reference", { length: 120 }),
   paymentNotes: text("payment_notes"),
   paidBy: uuid("paid_by").references(() => users.id),
+  /** La imagen de la transferencia al proveedor. Sin ella el pago no se registra. */
+  paymentProofId: uuid("payment_proof_id").references((): AnyPgColumn => invoiceAttachments.id, { onDelete: "set null" }),
   /** Motivo cuando la factura se devuelve al proveedor o se anula. */
   statusReason: varchar("status_reason", { length: 250 }),
   /**
@@ -451,6 +458,8 @@ export const invoiceAttachments = pgTable("invoice_attachments", {
   id: uuid("id").primaryKey().defaultRandom(),
   invoiceId: uuid("invoice_id").references(() => supplierInvoices.id, { onDelete: "cascade" }),
   emailId: uuid("email_id").references(() => invoiceEmails.id, { onDelete: "cascade" }),
+  /** El voucher del pago de una cuota de préstamo o servicio, que no cuelga de ninguna factura. */
+  installmentId: uuid("installment_id").references(() => obligationInstallments.id, { onDelete: "cascade" }),
   kind: attachmentKindEnum("kind").notNull().default("OTRO"),
   filename: varchar("filename", { length: 250 }).notNull(),
   contentType: varchar("content_type", { length: 120 }).notNull(),
@@ -464,7 +473,33 @@ export const invoiceAttachments = pgTable("invoice_attachments", {
 }, (t) => [
   index("invoice_attachments_invoice_idx").on(t.invoiceId),
   index("invoice_attachments_email_idx").on(t.emailId),
-  check("invoice_attachments_owner", sql`${t.invoiceId} is not null or ${t.emailId} is not null`),
+  index("invoice_attachments_installment_idx").on(t.installmentId),
+  check("invoice_attachments_owner",
+    sql`${t.invoiceId} is not null or ${t.emailId} is not null or ${t.installmentId} is not null`),
+]);
+
+/**
+ * Los adelantos entregados al proveedor a cuenta de una factura.
+ *
+ * Cada uno es un pago de verdad —sale plata y hay un voucher— así que queda con su fecha,
+ * su importe y su comprobante, y no como un número suelto dentro de la factura. La columna
+ * `advances` de la factura sigue existiendo: es la suma de estas filas, y es de donde salen
+ * el saldo a transferir y los reportes.
+ */
+export const invoiceAdvances = pgTable("invoice_advances", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references(() => supplierInvoices.id, { onDelete: "cascade" }),
+  amount: numeric("amount", { precision: 12, scale: 2 }).notNull(),
+  paidAt: date("paid_at").notNull(),
+  paymentReference: varchar("payment_reference", { length: 120 }),
+  notes: varchar("notes", { length: 500 }),
+  /** La imagen de la transferencia. Sin ella el adelanto no se registra. */
+  proofId: uuid("proof_id").references(() => invoiceAttachments.id, { onDelete: "set null" }),
+  paidBy: uuid("paid_by").references(() => users.id),
+  ...timestamps,
+}, (t) => [
+  index("invoice_advances_invoice_idx").on(t.invoiceId),
+  check("invoice_advances_amount_positive", sql`${t.amount} > 0`),
 ]);
 
 /** Ajustes del sistema en pares clave/valor: estado de la conexión con el buzón, etc. */
@@ -570,6 +605,8 @@ export const obligationInstallments = pgTable("obligation_installments", {
   paidAmount: numeric("paid_amount", { precision: 14, scale: 2 }),
   paymentReference: varchar("payment_reference", { length: 120 }),
   paidBy: uuid("paid_by").references(() => users.id),
+  /** El voucher del pago. Aquí es opcional: muchos préstamos se pagan en efectivo. */
+  proofId: uuid("proof_id").references((): AnyPgColumn => invoiceAttachments.id, { onDelete: "set null" }),
   notes: text("notes"),
   /**
    * Cuándo se avisó por WhatsApp que esta cuota estaba por vencer. Evita que el mismo
@@ -636,6 +673,10 @@ export const suppliersRelations = relations(suppliers, ({ many }) => ({ invoices
 export const supplierInvoicesRelations = relations(supplierInvoices, ({ one, many }) => ({
   supplier: one(suppliers, { fields: [supplierInvoices.supplierId], references: [suppliers.id] }),
   attachments: many(invoiceAttachments),
+  advances: many(invoiceAdvances),
+}));
+export const invoiceAdvancesRelations = relations(invoiceAdvances, ({ one }) => ({
+  invoice: one(supplierInvoices, { fields: [invoiceAdvances.invoiceId], references: [supplierInvoices.id] }),
 }));
 export const invoiceAttachmentsRelations = relations(invoiceAttachments, ({ one }) => ({
   invoice: one(supplierInvoices, { fields: [invoiceAttachments.invoiceId], references: [supplierInvoices.id] }),

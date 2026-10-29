@@ -3,7 +3,7 @@ import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type 
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
-  invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
+  invoiceAdvances, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
   type DetractionStatus, type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
 } from "@/db/schema";
 import { first, INVOICE_EMAIL_STATUSES, isYmd, type SearchParamsRecord } from "@/lib/utils";
@@ -180,6 +180,8 @@ const invoiceColumns = {
   detractionReceipt: supplierInvoices.detractionReceipt,
   detractionOperation: supplierInvoices.detractionOperation,
   detractionNotes: supplierInvoices.detractionNotes,
+  detractionProofId: supplierInvoices.detractionProofId,
+  paymentProofId: supplierInvoices.paymentProofId,
   paymentTerm: supplierInvoices.paymentTerm,
   termDays: supplierInvoices.termDays,
   guideReceivedAt: supplierInvoices.guideReceivedAt,
@@ -256,6 +258,29 @@ export async function listInvoiceAttachments(invoiceId: string) {
     .leftJoin(users, eq(invoiceAttachments.uploadedBy, users.id))
     .where(eq(invoiceAttachments.invoiceId, invoiceId))
     .orderBy(asc(invoiceAttachments.kind), asc(invoiceAttachments.createdAt));
+}
+
+/**
+ * Los adelantos entregados a cuenta de una factura, del más reciente al más antiguo.
+ *
+ * Cada uno trae su voucher, que es lo que se mira cuando el proveedor dice que no le
+ * llegó: la captura está al lado del importe y de la fecha, no suelta entre los archivos.
+ */
+export async function listInvoiceAdvances(invoiceId: string) {
+  return db.select({
+    id: invoiceAdvances.id,
+    amount: invoiceAdvances.amount,
+    paidAt: invoiceAdvances.paidAt,
+    paymentReference: invoiceAdvances.paymentReference,
+    notes: invoiceAdvances.notes,
+    proofId: invoiceAdvances.proofId,
+    paidByName: users.name,
+    createdAt: invoiceAdvances.createdAt,
+  })
+    .from(invoiceAdvances)
+    .leftJoin(users, eq(invoiceAdvances.paidBy, users.id))
+    .where(eq(invoiceAdvances.invoiceId, invoiceId))
+    .orderBy(desc(invoiceAdvances.paidAt), desc(invoiceAdvances.createdAt));
 }
 
 /** Correo del que provino la factura, si llegó por el buzón. */

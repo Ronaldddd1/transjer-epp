@@ -67,6 +67,22 @@ def proveedor_opcion(page):
     return [o for o in page.locator("select[name=supplierId] option").all_inner_texts() if SELLO in o][0]
 
 
+def pdf_valido(ruta, kb=12):
+    """Un PDF completo y con páginas: lo que el sistema acepta como voucher."""
+    cuerpo = (
+        b"%PDF-1.4\n"
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+        b"trailer << /Root 1 0 R >>\n"
+    )
+    open(ruta, "wb").write(cuerpo + b"% " + b"r" * (kb * 1024) + b"\n%%EOF")
+    return ruta
+
+
+os.makedirs("/tmp/e2e-files", exist_ok=True)
+VOUCHER = pdf_valido("/tmp/e2e-files/voucher-cuota.pdf")
+
+
 def enviar(page, etiqueta, timeout=15000):
     """Pulsa un botón de formulario y espera a que el modal se cierre de verdad.
 
@@ -211,17 +227,32 @@ def main():
         check("el cronograma queda guardado", "0 de 4 cuotas pagadas" in page.content(), page.content()[:0])
 
         # --- Pagar una cuota ---
+        # Aquí el voucher es opcional, al contrario que en las facturas: muchas cuotas se
+        # pagan en efectivo o por descuento automático. Esta primera va sin él.
         page.locator("button:has-text('Pagar')").first.click()
         page.wait_for_timeout(600)
+        check("el comprobante del pago se ofrece como opcional",
+              "opcional" in page.locator("label[for=voucher]").inner_text().lower(),
+              page.locator("label[for=voucher]").inner_text())
         fecha(page, "paidAt", hoy.isoformat())
         enviar(page, "Confirmar pago")
-        check("la cuota queda pagada", "1 de 4 cuotas pagadas" in page.content(), page.content()[:0])
+        check("la cuota queda pagada sin adjuntar nada", "1 de 4 cuotas pagadas" in page.content(), page.content()[:0])
         # El BCP imprime el saldo ANTES de la cuota; tras pagar la primera, lo que queda
         # debido es 250,000 − 8,699.63. Si se guardara el saldo tal cual, la ficha diría que
         # aún se deben los 250,000 completos después de haber pagado.
         check("el saldo de capital descuenta la cuota pagada",
               "241,300.37" in page.content(), page.content()[:0])
         check("no muestra el capital entero tras pagar", "S/ 250,000.00" not in page.inner_text("aside"))
+
+        # Y la siguiente, con voucher: se guarda y queda a la vista en el cronograma.
+        page.locator("button:has-text('Pagar')").first.click()
+        page.wait_for_timeout(600)
+        fecha(page, "paidAt", hoy.isoformat())
+        page.set_input_files("input[name=voucher]", VOUCHER)
+        enviar(page, "Confirmar pago")
+        check("la cuota pagada con voucher lo guarda",
+              int(psql("select count(*) from invoice_attachments where installment_id is not null and kind = 'VOUCHER'")) >= 1)
+        check("y el cronograma deja abrirlo", "ver comprobante" in page.content())
 
         # --- Servicio de monto variable ---
         page.goto(f"{BASE}/obligaciones")

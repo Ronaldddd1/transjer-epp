@@ -105,8 +105,13 @@ export const ATTACHMENT_KIND_LABEL = {
   FACTURA_PDF: "Factura (PDF)",
   FACTURA_XML: "Factura (XML)",
   GRT: "Guía de remisión",
+  /** La captura o el PDF que respalda un pago: la transferencia, la constancia del banco. */
+  VOUCHER: "Comprobante de pago",
   OTRO: "Otro documento",
 } as const;
+
+/** Lo que se acepta como comprobante de un pago, igual en el formulario y en el servidor. */
+export const VOUCHER_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 
 /**
  * En qué punto está un correo del buzón.

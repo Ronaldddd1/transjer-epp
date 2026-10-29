@@ -238,10 +238,17 @@ export async function rejectEmail(id: string, formData: FormData): Promise<Actio
       throw new BusinessError("Este comprobante ya fue aceptado. Si hay que darlo de baja, anula la factura.");
     }
     if (email.status === "RECHAZADO") throw new BusinessError("Este comprobante ya fue rechazado.");
+    if (email.status === "DESCARTADO") {
+      throw new BusinessError("Este correo quedó descartado, no es algo que se le devuelva al proveedor.");
+    }
 
     const destino = (data.replyTo || email.fromAddress || "").trim();
     const parsed = parsedOf(email);
     const label = parsed ? invoiceNumber(parsed.series, parsed.number) : null;
+    // Un correo sin XML legible se rechaza igual: el proveedor tiene que enterarse de que
+    // lo que mandó no se va a pagar. Lo único que no se puede hacer es registrar la
+    // factura anulada, porque no hay datos de comprobante que registrar.
+    const registrarPedido = data.registrar && !!parsed;
 
     let envio: { ok: boolean; error?: string } = { ok: false, error: "No se envió ningún correo al proveedor." };
     if (data.send) {
@@ -262,7 +269,7 @@ export async function rejectEmail(id: string, formData: FormData): Promise<Actio
     // registro, el correo no queda rechazado "a medias" con una factura que no existe.
     let registrada: { label: string } | null = null;
     let avisoRegistro = "";
-    if (data.registrar) {
+    if (registrarPedido) {
       const r = await db.transaction((tx) => registerRejectedEmail(tx, email, user, {
         reason: data.reason, comment: data.comment,
       }));
@@ -301,9 +308,10 @@ export async function rejectEmail(id: string, formData: FormData): Promise<Actio
     if (data.send && !envio.ok) {
       return { ok: false, message: `El comprobante quedó rechazado, pero el correo no salió: ${envio.error}` };
     }
+    const qué = label ? "Comprobante rechazado" : "Correo rechazado";
     const base = data.send
-      ? `Comprobante rechazado. Se le avisó a ${destino}.`
-      : "Comprobante rechazado, sin avisar al proveedor.";
+      ? `${qué}. Se le avisó a ${destino}.`
+      : `${qué}, sin avisar al proveedor.`;
     return {
       ok: true,
       message: base

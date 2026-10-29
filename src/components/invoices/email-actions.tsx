@@ -31,7 +31,7 @@ export function DiscardEmailModal({ id, subject }: { id: string; subject: string
   return (
     <FormModal
       title="Descartar correo"
-      description="Úsalo cuando el correo no corresponde a una factura por pagar."
+      description="Úsalo cuando el correo no corresponde a una factura por pagar. No se le avisa a nadie: para devolverle un comprobante al proveedor, usa Rechazar."
       submitLabel="Descartar"
       size="sm"
       action={(fd) => discardEmail(id, fd)}

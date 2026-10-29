@@ -494,6 +494,19 @@ export const payInvoiceSchema = z.object({
 });
 
 /**
+ * Un adelanto entregado al proveedor a cuenta de una factura.
+ *
+ * El importe se escribe a mano porque un adelanto es, por definición, una parte: lo que
+ * el sistema comprueba es que no pase del saldo que queda por transferir.
+ */
+export const advanceSchema = z.object({
+  amount: money("El importe del adelanto"),
+  paidAt: ymd,
+  paymentReference: optionalText(120),
+  notes: optionalText(500),
+});
+
+/**
  * La nota de crédito con la que el proveedor anula una factura.
  *
  * El número se escribe tal como viene en el comprobante ("NC-01", "E001-29"): es una

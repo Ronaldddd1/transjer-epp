@@ -12,13 +12,18 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  if (!can(user.role, "invoices.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Archivo inválido" }, { status: 400 });
 
   const [file] = await db.select().from(invoiceAttachments).where(eq(invoiceAttachments.id, id)).limit(1);
   if (!file) return NextResponse.json({ error: "El archivo no existe" }, { status: 404 });
+
+  // El permiso depende de a qué cuelga el archivo. El voucher del pago de una cuota de
+  // préstamo no es un papel de facturas: quien lleva las obligaciones tiene que poder
+  // abrirlo, y quien solo ve facturas no.
+  const permiso = file.installmentId ? "obligations.view" : "invoices.view";
+  if (!can(user.role, permiso)) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   try {
     const data = await readFile(file);

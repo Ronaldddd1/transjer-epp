@@ -73,10 +73,21 @@ def correo(sufijo, numero, concepto=None):
     return psql(f"select id from invoice_emails where message_id = 'e2e-{SELLO}-{sufijo}'")
 
 
+def correo_sin_xml(sufijo):
+    """Un correo cuyo comprobante no se pudo leer: queda por revisar, sin datos."""
+    ejecutar(
+        "insert into invoice_emails (message_id, subject, from_address, from_name, received_at, status, attachment_count, detail) "
+        f"values ('e2e-{SELLO}-{sufijo}', 'Cobranza sin XML {SELLO}', 'cobranzas@prueba.pe', 'Prueba SAC', "
+        f"now() - interval '2 hours', 'REVISAR', 1, 'El correo no trae XML')"
+    )
+    return psql(f"select id from invoice_emails where message_id = 'e2e-{SELLO}-{sufijo}'")
+
+
 limpiar()
 aceptar_id = correo("ok", f"{SELLO}1")
 rechazar_id = correo("no", f"{SELLO}2")
 transporte_id = correo("flete", f"{SELLO}3", CONCEPTO)
+sin_xml_id = correo_sin_xml("sinxml")
 
 with sync_playwright() as p:
     nav = p.chromium.launch()
@@ -270,6 +281,43 @@ with sync_playwright() as p:
     page.wait_for_timeout(1600)
     fila3 = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}2")
     check("la lista avisa que el proveedor quedó sin avisar", "sin avisar" in fila3.inner_text().lower(), fila3.inner_text())
+
+    # --- Un correo sin XML legible también se devuelve al proveedor ---
+    # Antes solo se podía descartar, y descartar no le avisa a nadie: el comprobante se iba
+    # de la bandeja y el proveedor seguía esperando el pago.
+    page.goto(f"{BASE}/facturas/correos?estado=REVISAR")
+    page.wait_for_timeout(1600)
+    fila_sin = page.get_by_role("row").filter(has_text=f"Cobranza sin XML {SELLO}")
+    check("un correo sin XML ofrece rechazar, no solo descartar",
+          fila_sin.get_by_role("button", name="Rechazar").count() == 1, fila_sin.inner_text())
+
+    fila_sin.get_by_role("button", name="Rechazar").click()
+    page.wait_for_timeout(900)
+    check("el modal habla del correo, no de un comprobante que no se leyó",
+          "no trae XML legible" in page.content())
+    texto = page.locator("textarea[name=body]").input_value()
+    check("el aviso al proveedor se arma igual, sin número de comprobante",
+          len(texto) > 80 and "el comprobante que nos enviaron" in texto, texto[:120])
+    check("y no se ofrece registrar una factura que no existe",
+          page.is_disabled("input[name=registrar]"))
+
+    page.select_option("select[name=reason]", "FALTA_GRT")
+    page.fill("textarea[name=comment]", "No llegó el XML ni la guía de remisión.")
+    page.wait_for_timeout(500)
+    check("el motivo elegido entra en el texto",
+          "guía de remisión" in page.locator("textarea[name=body]").input_value().lower())
+
+    page.uncheck("input[name=send]")
+    page.wait_for_timeout(300)
+    page.get_by_role("button", name="Rechazar sin avisar").click()
+    page.wait_for_timeout(2600)
+
+    estado_sin = psql("select status || '|' || coalesce(reject_reason,'') || '|' || coalesce(reject_comment,'') "
+                      f"from invoice_emails where id = '{sin_xml_id}'")
+    check("el correo sin XML queda rechazado con su motivo y su comentario",
+          estado_sin.startswith("RECHAZADO|FALTA_GRT|") and "guía de remisión" in estado_sin, estado_sin)
+    check("y no inventó ninguna factura",
+          psql(f"select count(*) from supplier_invoices where created_at > now() - interval '1 minute' and series = ''") == "0")
 
     check("ninguna pantalla lanzó errores de JavaScript", len(errores) == 0, errores[:2])
     nav.close()

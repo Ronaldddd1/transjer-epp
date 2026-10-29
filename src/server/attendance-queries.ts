@@ -43,6 +43,7 @@ export async function listAttendanceDay(f: AttendanceFilters) {
     area: employees.area,
     status: attendance.status,
     reason: attendance.reason,
+    activity: attendance.activity,
     recordedByName: users.name,
     recordedAt: attendance.updatedAt,
   })
@@ -130,6 +131,7 @@ export async function attendanceFor(employeeId: string, limit = 60) {
     day: attendance.day,
     status: attendance.status,
     reason: attendance.reason,
+    activity: attendance.activity,
     recordedByName: users.name,
   })
     .from(attendance)

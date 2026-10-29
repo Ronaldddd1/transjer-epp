@@ -10,6 +10,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
+import { VoucherField } from "@/components/ui/voucher-field";
 import { formatDate, formatMoney, todayLima } from "@/lib/utils";
 
 export type InstallmentRef = {
@@ -62,6 +63,9 @@ export function PayInstallmentModal({ installment, compact = false }: { installm
           <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación o transferencia.">
             <Input name="paymentReference" maxLength={120} />
           </Field>
+          {/* Aquí el voucher es opcional, a diferencia de las facturas: muchas cuotas se
+              pagan en efectivo o por descuento automático y no hay captura que subir. */}
+          <VoucherField requerido={false} error={errors.voucher} />
           <Field label="Observaciones" name="notes" error={errors.notes}>
             <Textarea name="notes" maxLength={1000} rows={2} />
           </Field>

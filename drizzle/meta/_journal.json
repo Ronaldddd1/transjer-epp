@@ -134,6 +134,20 @@
       "when": 1792675632848,
       "tag": "0018_blushing_drax",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793300493898,
+      "tag": "0019_vouchers_y_adelantos",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793300938195,
+      "tag": "0020_actividad_en_asistencia",
+      "breakpoints": true
     }
   ]
 }

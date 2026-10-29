@@ -1,18 +1,19 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { invoiceAttachments, supplierInvoices, suppliers } from "@/db/schema";
+import { invoiceAdvances, invoiceAttachments, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { computePayDueDate, detractionFor, DETRACTION_STATUS_LABEL, DETRACTION_THRESHOLD, formatDate, formatMoney, invoiceNumber, limaDayStart, todayLima } from "@/lib/utils";
-import { creditNoteSchema, detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
+import { computePayDueDate, detractionFor, DETRACTION_STATUS_LABEL, DETRACTION_THRESHOLD, formatDate, formatMoney, invoiceNumber, limaDayStart, saldoAPagar, todayLima } from "@/lib/utils";
+import { advanceSchema, creditNoteSchema, detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
 import {
   assertNoDuplicate, customerWarning, deleteAttachment, detractionFields, findDuplicate,
   findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
 } from "@/server/invoice-service";
+import { guardarVoucher, leerVoucher } from "@/server/payment-proof";
 import { activeDriver, maxBytesFor } from "@/server/storage";
 
 const label = (i: { series: string; number: string }) => invoiceNumber(i.series, i.number);
@@ -164,6 +165,12 @@ export async function payInvoice(id: string, formData: FormData): Promise<Action
     const user = await requireActionUser("invoices.pay");
     const data = payInvoiceSchema.parse(formToObject(formData));
     if (data.paidAt > todayLima()) throw new BusinessError("La fecha de pago no puede ser futura.");
+    // El voucher se lee y se revisa antes de abrir la transacción: si no sirve, la factura
+    // no tiene por qué haber empezado a marcarse como pagada.
+    const voucher = await leerVoucher(formData, {
+      requerido: true,
+      falta: "Falta la imagen de la transferencia: sin el voucher el pago no se registra.",
+    });
 
     const after = await db.transaction(async (tx) => {
       // Bloqueo de la fila: si dos personas la pagan a la vez, solo una lo consigue.
@@ -172,12 +179,15 @@ export async function payInvoice(id: string, formData: FormData): Promise<Action
       if (before.status === "PAGADA") throw new BusinessError("Esta factura ya figura como pagada.");
       if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
 
+      const proofId = await guardarVoucher(tx, voucher!, { invoiceId: id, uploadedBy: user.id });
+
       const [row] = await tx.update(supplierInvoices).set({
         status: "PAGADA",
         paidAt: data.paidAt,
         paymentReference: data.paymentReference,
         paymentNotes: data.paymentNotes,
         paidBy: user.id,
+        paymentProofId: proofId,
         statusReason: null,
       }).where(eq(supplierInvoices.id, id)).returning();
 
@@ -195,6 +205,141 @@ export async function payInvoice(id: string, formData: FormData): Promise<Action
   }
 }
 
+/**
+ * Registra un adelanto entregado al proveedor a cuenta de una factura.
+ *
+ * Vive aparte del pago porque no cierra la factura: baja el saldo y la deja pendiente por
+ * la diferencia. Cada adelanto queda con su fecha, su importe y su voucher.
+ *
+ * La columna `advances` de la factura —de donde salen el saldo a transferir y los reportes—
+ * queda como la suma de los adelantos registrados MÁS lo que hubiera anotado a mano antes
+ * de que existiera este registro. Las facturas que vinieron del control en Excel traen su
+ * adelanto como un número suelto, y recalcular solo desde las filas lo haría desaparecer el
+ * día en que se registre el primer adelanto nuevo de esa factura.
+ */
+export async function payAdvance(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.pay");
+    const data = advanceSchema.parse(formToObject(formData));
+    if (data.paidAt > todayLima()) throw new BusinessError("La fecha del adelanto no puede ser futura.");
+    const voucher = await leerVoucher(formData, {
+      requerido: true,
+      falta: "Falta la imagen de la transferencia: sin el voucher el adelanto no se registra.",
+    });
+
+    const resultado = await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, id)).for("update");
+      if (!before) throw new BusinessError("La factura no existe.");
+      if (before.status === "PAGADA") {
+        throw new BusinessError("Esta factura ya figura como pagada: no caben más adelantos.");
+      }
+      if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
+
+      // Lo que todavía se le debe al proveedor: el total menos la detracción y menos lo ya
+      // adelantado. Un adelanto por encima de eso sería pagarle de más.
+      const saldo = Number(saldoAPagar(before.total, before.detractionAmount, before.advances));
+      const monto = Number(data.amount);
+      if (monto > saldo + 0.004) {
+        throw new BusinessError(
+          `El adelanto es mayor que el saldo: quedan ${formatMoney(saldo, before.currency)} por transferirle.`,
+        );
+      }
+
+      // Lo anotado a mano que no corresponde a ninguna fila: se conserva tal cual.
+      const [{ suma: previas }] = await tx.select({ suma: sql<string>`coalesce(sum(${invoiceAdvances.amount}), 0)::text` })
+        .from(invoiceAdvances).where(eq(invoiceAdvances.invoiceId, id));
+      const aMano = Math.max(0, Number(before.advances ?? 0) - Number(previas));
+
+      const proofId = await guardarVoucher(tx, voucher!, { invoiceId: id, uploadedBy: user.id });
+
+      const [adelanto] = await tx.insert(invoiceAdvances).values({
+        invoiceId: id,
+        amount: data.amount,
+        paidAt: data.paidAt,
+        paymentReference: data.paymentReference,
+        notes: data.notes,
+        proofId,
+        paidBy: user.id,
+      }).returning();
+
+      // La suma se recalcula desde las filas, no se le suma al número que había: así un
+      // adelanto borrado o corregido no deja la factura descuadrada.
+      const [{ suma }] = await tx.select({ suma: sql<string>`coalesce(sum(${invoiceAdvances.amount}), 0)::text` })
+        .from(invoiceAdvances).where(eq(invoiceAdvances.invoiceId, id));
+
+      const [row] = await tx.update(supplierInvoices)
+        .set({ advances: (aMano + Number(suma)).toFixed(2) })
+        .where(eq(supplierInvoices.id, id)).returning();
+
+      await logAudit({
+        user, action: "PAGAR", module: "FACTURAS", recordId: id,
+        description: `${user.name} registró un adelanto de ${formatMoney(adelanto.amount, row.currency)}`
+          + ` a cuenta de la factura ${label(row)}${data.paymentReference ? ` (${data.paymentReference})` : ""}.`,
+        oldData: { adelantos: before.advances, saldo: saldo.toFixed(2) },
+        newData: { adelantos: row.advances, saldo: saldoAPagar(row.total, row.detractionAmount, row.advances) },
+      }, tx);
+
+      return { row, adelanto };
+    });
+
+    revalidatePath("/", "layout");
+    const saldo = saldoAPagar(resultado.row.total, resultado.row.detractionAmount, resultado.row.advances);
+    return {
+      ok: true,
+      message: `Adelanto de ${formatMoney(resultado.adelanto.amount, resultado.row.currency)} registrado.`
+        + ` Quedan ${formatMoney(saldo, resultado.row.currency)} por transferirle.`,
+    };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Deshace un adelanto registrado por error. El voucher queda entre los archivos de la factura. */
+export async function removeAdvance(id: string): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.pay");
+
+    const resultado = await db.transaction(async (tx) => {
+      const [adelanto] = await tx.select().from(invoiceAdvances).where(eq(invoiceAdvances.id, id)).limit(1);
+      if (!adelanto) throw new BusinessError("El adelanto no existe.");
+
+      const [invoice] = await tx.select().from(supplierInvoices)
+        .where(eq(supplierInvoices.id, adelanto.invoiceId)).for("update");
+      if (invoice.status === "PAGADA") {
+        throw new BusinessError("La factura ya está pagada: reabre el pago antes de tocar los adelantos.");
+      }
+
+      // Lo anotado a mano se respeta igual que al registrar: quitar un adelanto no puede
+      // llevarse por delante el número que traía la factura del control en Excel.
+      const [{ suma: previas }] = await tx.select({ suma: sql<string>`coalesce(sum(${invoiceAdvances.amount}), 0)::text` })
+        .from(invoiceAdvances).where(eq(invoiceAdvances.invoiceId, adelanto.invoiceId));
+      const aMano = Math.max(0, Number(invoice.advances ?? 0) - Number(previas));
+
+      await tx.delete(invoiceAdvances).where(eq(invoiceAdvances.id, id));
+      const [{ suma }] = await tx.select({ suma: sql<string>`coalesce(sum(${invoiceAdvances.amount}), 0)::text` })
+        .from(invoiceAdvances).where(eq(invoiceAdvances.invoiceId, adelanto.invoiceId));
+      const total = aMano + Number(suma);
+      const [row] = await tx.update(supplierInvoices)
+        .set({ advances: total > 0 ? total.toFixed(2) : null })
+        .where(eq(supplierInvoices.id, adelanto.invoiceId)).returning();
+
+      await logAudit({
+        user, action: "ELIMINAR", module: "FACTURAS", recordId: adelanto.invoiceId,
+        description: `${user.name} quitó un adelanto de ${formatMoney(adelanto.amount, row.currency)}`
+          + ` de la factura ${label(row)}.`,
+        oldData: adelanto, newData: { adelantos: row.advances },
+      }, tx);
+
+      return row;
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true, message: `El adelanto se quitó de la factura ${label(resultado)}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
 /** Deshace un pago registrado por error. */
 export async function reopenInvoice(id: string, formData: FormData): Promise<ActionResult> {
   try {
@@ -205,7 +350,10 @@ export async function reopenInvoice(id: string, formData: FormData): Promise<Act
 
     const after = await db.transaction(async (tx) => {
       const [row] = await tx.update(supplierInvoices).set({
-        status: "PENDIENTE", paidAt: null, paidBy: null, paymentReference: null, paymentNotes: null, statusReason,
+        status: "PENDIENTE", paidAt: null, paidBy: null, paymentReference: null, paymentNotes: null,
+        // El voucher se queda entre los archivos de la factura —el pago existió— pero deja
+        // de respaldar un pago vigente.
+        paymentProofId: null, statusReason,
       }).where(eq(supplierInvoices.id, id)).returning();
       await logAudit({
         user, action: "REABRIR", module: "FACTURAS", recordId: id,
@@ -589,8 +737,21 @@ export async function setDetraction(id: string, formData: FormData): Promise<Act
       throw new BusinessError("Para dar una detracción por pagada hace falta el número de constancia.");
     }
 
+    // La imagen de la constancia se exige solo al darla por depositada, que es cuando sale
+    // la plata. Si ya había una guardada, no hay que volver a subirla para corregir una nota.
+    const exigeVoucher = data.detractionStatus === "PAGADA" && !before.detractionProofId;
+    const voucher = await leerVoucher(formData, {
+      requerido: exigeVoucher,
+      falta: "Falta la imagen de la constancia del depósito: sin ella la detracción no se da por pagada.",
+    });
+
     const after = await db.transaction(async (tx) => {
+      const proofId = voucher
+        ? await guardarVoucher(tx, voucher, { invoiceId: id, uploadedBy: user.id })
+        : before.detractionProofId;
+
       const [row] = await tx.update(supplierInvoices).set({
+        detractionProofId: data.detractionStatus === "PAGADA" ? proofId : before.detractionProofId,
         detractionStatus: data.detractionStatus,
         detractionAmount: calculo.amount.toFixed(2),
         detractionPaidAt: data.detractionPaidAt,

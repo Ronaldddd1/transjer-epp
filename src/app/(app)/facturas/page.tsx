@@ -1,7 +1,7 @@
 import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
+import { AdvanceModal, InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
 import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
 import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
@@ -292,7 +292,14 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                 </Td>
                 <Td className="sticky right-0 z-10 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">
                   <div className="flex items-center justify-end gap-1">
-                    {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && <PayInvoiceModal invoice={ref} compact />}
+                    {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && (
+                      <>
+                        <PayInvoiceModal invoice={ref} compact />
+                        {/* El adelanto se entrega mientras la factura sigue pendiente, así que
+                            se anota desde aquí: antes había que entrar a la ficha. */}
+                        <AdvanceModal invoice={ref} compact />
+                      </>
+                    )}
                     {/* Observar salió de la fila: se usa poco y ocupaba el ancho que hacía
                         falta para lo que sí se mira. Sigue estando dentro de Ver. */}
                     <ButtonLink href={`/facturas/${i.id}`} variant="ghost" size="sm" title="Ver la factura" aria-label="Ver la factura">

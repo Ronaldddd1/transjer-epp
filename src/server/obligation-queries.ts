@@ -184,6 +184,7 @@ export async function listInstallments(obligationId: string) {
     paidAmount: obligationInstallments.paidAmount,
     paymentReference: obligationInstallments.paymentReference,
     notes: obligationInstallments.notes,
+    proofId: obligationInstallments.proofId,
     paidByName: payer.name,
   })
     .from(obligationInstallments)

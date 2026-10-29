@@ -203,6 +203,8 @@ export async function insertInvoice(
 export type AttachmentInput = {
   invoiceId?: string | null;
   emailId?: string | null;
+  /** Para el voucher del pago de una cuota, que no cuelga de ninguna factura. */
+  installmentId?: string | null;
   filename: string;
   contentType: string;
   data: Buffer;
@@ -219,6 +221,7 @@ export async function saveAttachment(tx: Tx, input: AttachmentInput) {
   const [row] = await tx.insert(invoiceAttachments).values({
     invoiceId: input.invoiceId ?? null,
     emailId: input.emailId ?? null,
+    installmentId: input.installmentId ?? null,
     kind,
     filename: input.filename.slice(0, 250),
     contentType: input.contentType.slice(0, 120),

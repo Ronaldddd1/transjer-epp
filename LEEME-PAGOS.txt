@@ -1,0 +1,142 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Comprobante obligatorio en los pagos, adelantos desde la tabla,
+rechazo de correos sin XML y la actividad en la asistencia
+===============================================================
+
+Cuatro cambios. Piden migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, crea los adelantos y los campos nuevos
+
+SI CORRES LAS PRUEBAS. Las de lógica (npm test) pasan las 703. La batería de navegador
+(npm run test:e2e) pasa las doce suites, pero de vez en cuando se detiene en la última
+comprobación de una suite —"ninguna pantalla lanzó errores de JavaScript"— con el aviso
+#418 de React. Es un aviso de hidratación que ya existía antes de esta actualización,
+aparece en una página distinta cada vez, solo en consola y bajo la carga de correr las doce
+suites seguidas: no afecta a ningún dato ni se ha visto nunca usando el sistema. Volviendo
+a correr la suite, pasa. No he conseguido reproducirlo a voluntad, ni en modo desarrollo ni
+forzando carga, así que lo dejo anotado en vez de silenciarlo en las pruebas.
+
+
+1. SIN IMAGEN NO SE REGISTRA EL PAGO
+-------------------------------------
+
+Donde sale plata, ahora se pide el comprobante: la captura de la transferencia o el PDF
+que devuelve el banco.
+
+    FACTURA       obligatorio
+    ADELANTO      obligatorio
+    DETRACCIÓN    obligatorio al darla por depositada
+    PRÉSTAMOS Y SERVICIOS    opcional
+
+Es obligatorio en los tres primeros porque son los pagos que después hay que poder
+reconstruir: cuando el banco ya no muestra el movimiento en pantalla, el único rastro era
+la captura que alguien tenía en su celular. En las cuotas de préstamos y servicios queda
+opcional a propósito: muchas se pagan en efectivo o por descuento automático y no hay nada
+que adjuntar.
+
+QUÉ SE ACEPTA. PDF, JPG, PNG o WEBP. El archivo se revisa con la misma vara que los
+documentos de los vehículos: si está vacío, cortado a mitad de la subida, protegido con
+contraseña, o es un Word al que le cambiaron la extensión, no entra y dice por qué. Una
+captura de 300 píxeles donde no se lee el número de operación tampoco sirve de respaldo.
+
+DÓNDE QUEDA. Colgado de la factura, en ARCHIVOS, marcado como COMPROBANTE DE PAGO. En la
+detracción, la constancia se pide una sola vez: corregir una nota después no obliga a
+volver a subirla.
+
+Si se reabre un pago registrado por error, el comprobante no se borra —el pago existió—
+pero deja de respaldar un pago vigente.
+
+
+2. EL ADELANTO, DESDE LA TABLA PRINCIPAL
+-----------------------------------------
+
+En FACTURAS, al lado de PAGAR, hay un botón ADELANTO. Antes había que entrar al ojo y
+editar la factura para anotarlo, y por eso los adelantos se anotaban después —o no se
+anotaban— y el saldo que figuraba no era el que se le debía al proveedor.
+
+Un adelanto no cierra la factura: baja el saldo y la deja pendiente por la diferencia.
+
+    Total                 S/ 2,950.00
+    − Detracción          S/   118.00     va al Banco de la Nación
+    − Adelanto            S/   832.00     ya lo tiene el proveedor
+    = Saldo               S/ 2,000.00     lo que falta transferirle
+
+NO PUEDE PASAR DEL SALDO. Un adelanto mayor sería pagarle de más, y el sistema lo rechaza
+diciendo cuánto queda.
+
+CADA ADELANTO QUEDA CON SU HISTORIA. En la ficha de la factura hay un cuadro ADELANTOS A
+CUENTA con la fecha, el importe, la referencia, quién lo registró y su comprobante. Antes
+los adelantos eran un solo número suelto dentro de la factura, sin rastro de cuándo ni
+contra qué se habían pagado.
+
+Se puede quitar uno anotado por error y el saldo vuelve a subir; el comprobante se queda
+entre los archivos de la factura. El número de ADELANTOS de la factura se recalcula siempre
+como la suma de las filas, así que no puede quedar descuadrado.
+
+LAS FACTURAS QUE VINIERON DEL EXCEL traen su adelanto como un número suelto, sin fila ni
+comprobante. Ese número se respeta: no desaparece al registrar el primer adelanto nuevo de
+esa factura, y el cuadro avisa de cuánto de lo adelantado está anotado a mano.
+
+
+3. UN CORREO SIN XML TAMBIÉN SE RECHAZA
+----------------------------------------
+
+En COMPROBANTES RECIBIDOS, los correos que llegan sin XML legible quedan como POR REVISAR.
+Antes solo se podían DESCARTAR, y descartar no le avisa a nadie: el correo se iba de la
+bandeja y el proveedor seguía esperando el pago.
+
+Ahora esos correos ofrecen también RECHAZAR, con el mismo formulario que los demás: motivo,
+comentario y el correo de devolución ya escrito, que se puede corregir antes de enviarlo.
+Al no haber número de comprobante, el texto dice "el comprobante que nos enviaron" y se
+identifica por el asunto y el remitente.
+
+Lo único que no se puede hacer en estos casos es dejar la factura registrada como anulada
+esperando la nota de crédito: no hay datos de comprobante que registrar, así que esa casilla
+queda apagada y lo explica.
+
+CUÁNDO USAR CADA UNO:
+
+    RECHAZAR     el proveedor mandó algo que no se le va a pagar y tiene que enterarse
+    DESCARTAR    no era una factura: publicidad, un correo repetido, algo ajeno
+
+El modal de descartar ahora lo dice, para que no se vuelva a usar uno por el otro.
+
+
+4. LA ACTIVIDAD, AL MARCAR QUE VINO
+------------------------------------
+
+En ASISTENCIA, marcar VINO abre un campo de actividad, y sin detallarla no se guarda la
+asistencia de esa persona. Es la misma regla que ya tenía el motivo en los justificados.
+
+La lista del día pasa a decir, además de quién vino, en qué se ocupó: es lo que después
+hace falta para explicar un día de almacén o cuadrar una jornada con lo que se despachó.
+
+SI FALTA ALGUNA, NO SE GUARDA NADA. Se avisa de quiénes son y los campos quedan marcados en
+rojo. Media lista con actividad y media sin ella sería peor, porque nadie sabría a cuáles
+les falta.
+
+SOLO SE MANDA LO QUE CAMBIÓ. Guardar no vuelve a tocar las marcas que nadie modificó, así
+que corregir un día registrado antes de esta actualización no obliga a completar hacia atrás
+la actividad de todos: se pide solo la de quien se acaba de marcar.
+
+CUANDO LA CUADRILLA HIZO LO MISMO. Arriba aparece un campo para escribir la actividad una
+vez y ponérsela de golpe a todos los que vinieron y están sin detallar. Aparece solo cuando
+hay más de uno pendiente.
+
+Las faltas y los justificados no llevan actividad: un día que no se vino no tiene qué
+contar.
+
+DÓNDE SE VE. En la columna ACTIVIDAD O MOTIVO de la lista del día, en la ficha del
+trabajador debajo de cada día, y en el Excel de asistencia, en su propia columna.
+
+
+LO QUE NO CAMBIÓ
+-----------------
+
+Nada de lo anterior se toca: los cálculos de detracción, los plazos de pago, las notas de
+crédito, el mantenimiento y los documentos de la flota siguen igual. Lo registrado antes de
+esta actualización se queda como está —los pagos viejos no tienen comprobante y las
+asistencias viejas no tienen actividad— y no hace falta completarlo hacia atrás.

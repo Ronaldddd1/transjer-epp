@@ -297,7 +297,7 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
               <Field label="Destino" name="destinationCity" error={errors.destinationCity} className="sm:col-span-2">
                 <Input name="destinationCity" defaultValue={invoice?.destinationCity ?? ""} maxLength={120} placeholder="Trujillo - Piura" />
               </Field>
-              <Field label="Adelantos" name="advances" error={errors.advances} hint="Pagos a cuenta ya entregados." className="sm:col-span-2">
+              <Field label="Adelantos" name="advances" error={errors.advances} hint="Total ya entregado a cuenta. Los adelantos que se registran con su voucher se suman aquí solos." className="sm:col-span-2">
                 <Input name="advances" defaultValue={invoice?.advances ?? ""} inputMode="decimal" placeholder="0.00" invalid={!!errors.advances} />
               </Field>
 

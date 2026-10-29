@@ -135,6 +135,7 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
               detractionStatus: i.detractionStatus, detractionPaidAt: i.detractionPaidAt,
               detractionReceipt: i.detractionReceipt, detractionOperation: i.detractionOperation,
               detractionNotes: i.detractionNotes,
+              tieneConstancia: !!i.detractionProofId,
             };
             return (
               <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>

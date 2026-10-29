@@ -33,11 +33,12 @@ export async function saveAttendance(formData: FormData): Promise<ActionResult> 
     }
 
     /**
-     * Las marcas vienen como estado_<id> y motivo_<id>. Lo que no trae estado es un
-     * trabajador que se dejó sin marcar, y eso NO se guarda: un día sin registrar es un
-     * dato que falta, no una falta.
+     * Las marcas vienen como estado_<id>, motivo_<id> y actividad_<id>. Lo que no trae
+     * estado es un trabajador que se dejó sin marcar, y eso NO se guarda: un día sin
+     * registrar es un dato que falta, no una falta.
      */
-    const marcas: { employeeId: string; status: Estado; reason: string | null }[] = [];
+    const marcas: { employeeId: string; status: Estado; reason: string | null; activity: string | null }[] = [];
+    const sinActividad: string[] = [];
     for (const [clave, valor] of formData.entries()) {
       if (!clave.startsWith("estado_")) continue;
       const employeeId = clave.slice("estado_".length);
@@ -45,12 +46,32 @@ export async function saveAttendance(formData: FormData): Promise<ActionResult> 
       if (!ESTADOS.includes(status as Estado)) continue;
 
       const motivo = String(formData.get(`motivo_${employeeId}`) ?? "").trim().slice(0, 160);
+      const actividad = String(formData.get(`actividad_${employeeId}`) ?? "").trim().slice(0, 250);
+      // Sin actividad no se guarda la asistencia de quien vino: una lista que solo dice
+      // "vino" no sirve para explicar después en qué se ocupó el día.
+      if (status === "PRESENTE" && !actividad) sinActividad.push(employeeId);
+
       marcas.push({
         employeeId,
         status: status as Estado,
         // El motivo solo significa algo en lo justificado; en lo demás ensucia el historial.
         reason: status === "JUSTIFICADO" ? (motivo || null) : null,
+        // Y la actividad solo en los presentes: un día de falta no tiene qué contar.
+        activity: status === "PRESENTE" ? actividad : null,
       });
+    }
+
+    // Se corta antes de guardar nada: media lista con actividad y media sin ella sería
+    // peor que no haber guardado, porque nadie sabría a cuáles les falta.
+    if (sinActividad.length > 0) {
+      const nombres = await db.select({ nombre: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}` })
+        .from(employees).where(inArray(employees.id, sinActividad));
+      const lista = nombres.map((n) => n.nombre).join(", ");
+      throw new BusinessError(
+        sinActividad.length === 1
+          ? `Falta la actividad de ${lista || "un trabajador"}: sin detallar qué hizo no se registra su asistencia.`
+          : `Falta la actividad de ${sinActividad.length} trabajadores (${lista}): sin detallar qué hicieron no se registra su asistencia.`,
+      );
     }
 
     if (marcas.length === 0) {
@@ -75,6 +96,7 @@ export async function saveAttendance(formData: FormData): Promise<ActionResult> 
           day,
           status: m.status,
           reason: m.reason,
+          activity: m.activity,
           recordedBy: user.id,
         })),
       ).onConflictDoUpdate({
@@ -83,6 +105,7 @@ export async function saveAttendance(formData: FormData): Promise<ActionResult> 
           // `excluded` es la fila que chocó: lo que se acaba de marcar pisa lo anterior.
           status: sql`excluded.status`,
           reason: sql`excluded.reason`,
+          activity: sql`excluded.activity`,
           recordedBy: user.id,
           updatedAt: new Date(),
         },

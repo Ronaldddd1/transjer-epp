@@ -46,6 +46,22 @@ def sembrar_obligacion():
         "insert into obligation_installments (obligation_id, number, due_date, total) "
         f"select id, 1, current_date + 10, 450.00 from obligations where name='PRUEBA deuda {SELLO}'")
 
+def pdf_valido(ruta, kb=12):
+    """Un PDF completo y con páginas: lo que el sistema acepta como constancia."""
+    cuerpo = (
+        b"%PDF-1.4\n"
+        b"1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"
+        b"2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj\n"
+        b"trailer << /Root 1 0 R >>\n"
+    )
+    open(ruta, "wb").write(cuerpo + b"% " + b"r" * (kb * 1024) + b"\n%%EOF")
+    return ruta
+
+
+os.makedirs("/tmp/e2e-files", exist_ok=True)
+CONSTANCIA = pdf_valido("/tmp/e2e-files/constancia.pdf")
+
+
 def enviar(page, etiqueta, timeout=15000):
     page.click(f"button:has-text('{etiqueta}')")
     page.wait_for_selector("div.fixed.inset-0.z-50", state="detached", timeout=timeout)
@@ -148,8 +164,22 @@ def main():
         page.select_option("select[name=detractionStatus]", "PAGADA")
         page.wait_for_timeout(400)
         page.fill("input[name=detractionReceipt]", "301536291")
+
+        # Sin la imagen de la constancia no se da por depositada: es el papel que después
+        # permite cuadrar el depósito con el Banco de la Nación.
+        page.click("button:has-text('Guardar')")
+        page.wait_for_timeout(2200)
+        check("sin la imagen de la constancia no se da por depositada",
+              "Falta la imagen de la constancia" in page.content())
+        check("y la detracción sigue pendiente",
+              psql(f"select detraction_status from supplier_invoices where series='{serie}'") == "PENDIENTE")
+
+        page.set_input_files("input[name=voucher]", CONSTANCIA)
         enviar(page, "Guardar")
         check("la detracción queda pagada", "Pagada" in page.content() and "301536291" in page.content())
+        check("y la constancia quedó guardada como comprobante de pago",
+              psql("select kind from invoice_attachments where id = "
+                   f"(select detraction_proof_id from supplier_invoices where series='{serie}')") == "VOUCHER")
         guardado = psql(f"select detraction_status from supplier_invoices where series='{serie}'")
         check("y así consta en la base", guardado == "PAGADA", guardado)
 

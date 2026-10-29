@@ -7,6 +7,7 @@ import { Button, type ButtonVariant } from "@/components/ui/button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
+import { VoucherField } from "@/components/ui/voucher-field";
 import { DETRACTION_STATUS_LABEL, formatMoney, todayLima, type DetractionStatusKey } from "@/lib/utils";
 
 export type DetractionRef = {
@@ -22,6 +23,8 @@ export type DetractionRef = {
   detractionReceipt: string | null;
   detractionOperation: string | null;
   detractionNotes: string | null;
+  /** Si ya hay una imagen de la constancia guardada, no se vuelve a pedir. */
+  tieneConstancia?: boolean;
 };
 
 /**
@@ -79,6 +82,16 @@ export function DetractionModal({ invoice, variant = "primary", compact = false 
               <Field label="N.º de operación" name="detractionOperation" error={errors.detractionOperation}>
                 <Input name="detractionOperation" defaultValue={invoice.detractionOperation ?? ""} maxLength={40} />
               </Field>
+              {/* La constancia en papel se pide una sola vez: si ya está guardada, corregir
+                  una nota no obliga a volver a subirla. */}
+              <VoucherField
+                requerido={!invoice.tieneConstancia}
+                etiqueta={invoice.tieneConstancia ? "Cambiar la constancia (opcional)" : "Imagen de la constancia"}
+                error={errors.voucher}
+                ayuda={invoice.tieneConstancia
+                  ? "Ya hay una constancia guardada. Sube otra solo si reemplaza a la anterior."
+                  : "La captura o el PDF de la constancia del Banco de la Nación. Sin esto no se da por depositada."}
+              />
             </>
           )}
 

@@ -175,6 +175,20 @@ export default async function ObligationDetailPage({ params }: { params: Promise
                           <p className="mt-1 text-xs text-steel-500">
                             {formatDate(c.paidAt)}
                             {c.paidByName && ` · ${c.paidByName}`}
+                            {/* Si se subió el voucher del pago, se abre desde aquí. */}
+                            {c.proofId && (
+                              <>
+                                {" · "}
+                                <a
+                                  href={`/api/facturas/adjuntos/${c.proofId}`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="underline hover:text-ink"
+                                >
+                                  ver comprobante
+                                </a>
+                              </>
+                            )}
                           </p>
                         )}
                       </Td>

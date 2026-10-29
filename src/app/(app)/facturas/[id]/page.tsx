@@ -1,10 +1,11 @@
-import { ArrowLeft, Download, FileText, Mail, Paperclip } from "lucide-react";
+import { ArrowLeft, Download, FileText, HandCoins, Mail, Paperclip } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { RemoveAttachmentButton, UploadAttachmentsModal } from "@/components/invoices/attachments";
 import {
-  CreditNoteModal, GuideReceivedModal, InvoiceReasonModal, PayInvoiceModal, RestoreInvoiceButton,
+  AdvanceModal, CreditNoteModal, GuideReceivedModal, InvoiceReasonModal, PayInvoiceModal,
+  RemoveAdvanceButton, RestoreInvoiceButton,
 } from "@/components/invoices/invoice-actions";
 import { InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
 import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
@@ -18,7 +19,10 @@ import {
   invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, saldoAPagar,
   type RejectReasonKey,
 } from "@/lib/utils";
-import { getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAttachments } from "@/server/invoice-queries";
+import {
+  getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAdvances,
+  listInvoiceAttachments,
+} from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Detalle de factura" };
@@ -42,8 +46,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const invoice = await getInvoice(id);
   if (!invoice) notFound();
 
-  const [attachments, email, suppliers, clients] = await Promise.all([
+  const [attachments, advances, email, suppliers, clients] = await Promise.all([
     listInvoiceAttachments(id),
+    listInvoiceAdvances(id),
     getInvoiceEmail(id),
     can(user.role, "invoices.manage") ? getSupplierOptions() : Promise.resolve([]),
     can(user.role, "invoices.manage") ? getClientOptions() : Promise.resolve([]),
@@ -58,7 +63,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     detractionAmount: invoice.detractionAmount, detractionStatus: invoice.detractionStatus,
     detractionPaidAt: invoice.detractionPaidAt, detractionReceipt: invoice.detractionReceipt,
     detractionOperation: invoice.detractionOperation, detractionNotes: invoice.detractionNotes,
+    tieneConstancia: !!invoice.detractionProofId,
   };
+  // Lo adelantado que no corresponde a ninguna fila registrada: viene del Excel o se
+  // escribió editando la factura.
+  const adelantadoAMano = Math.max(
+    0,
+    Number(invoice.advances ?? 0) - advances.reduce((n, a) => n + Number(a.amount), 0),
+  );
   const neto = Number(invoice.total) - Number(invoice.detractionAmount ?? 0);
   const saldo = neto - Number(invoice.advances ?? 0);
   // El cuadro del viaje se muestra en toda factura de transporte, aunque esté vacía: lo
@@ -85,6 +97,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         actions={
           <>
             {canPay && editable && <PayInvoiceModal invoice={ref} />}
+            {canPay && editable && <AdvanceModal invoice={ref} />}
             {canManage && editable && <InvoiceFormModal suppliers={suppliers} invoice={{
               id: invoice.id, supplierId: invoice.supplierId, docType: invoice.docType,
               serviceType: invoice.serviceType, series: invoice.series,
@@ -278,6 +291,58 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               {invoice.detractionNotes && <p className="mt-1 text-steel-600"><span className="text-steel-500">Observaciones: </span>{invoice.detractionNotes}</p>}
             </div>
           </Panel>
+
+          {advances.length > 0 && (
+            <Panel title="Adelantos a cuenta">
+              <ul className="divide-y divide-steel-100 border-t border-steel-100">
+                {advances.map((a) => (
+                  <li key={a.id} className="flex items-center gap-3 px-4 py-3">
+                    <HandCoins className="h-5 w-5 shrink-0 text-steel-400" aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium tabular">{formatMoney(a.amount, invoice.currency)}</p>
+                      <p className="text-xs text-steel-500">
+                        {formatDate(a.paidAt)}
+                        {a.paymentReference && ` · ${a.paymentReference}`}
+                        {a.paidByName && ` · ${a.paidByName}`}
+                      </p>
+                      {a.notes && <p className="mt-0.5 text-xs text-steel-600">{a.notes}</p>}
+                    </div>
+                    {a.proofId && (
+                      <a
+                        href={`/api/facturas/adjuntos/${a.proofId}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded p-2 text-steel-500 hover:bg-steel-100 hover:text-ink"
+                        title="Ver el comprobante del adelanto"
+                        aria-label="Ver el comprobante del adelanto"
+                      >
+                        <FileText className="h-4 w-4" />
+                      </a>
+                    )}
+                    {canPay && editable && (
+                      <RemoveAdvanceButton
+                        id={a.id}
+                        detalle={`${formatMoney(a.amount, invoice.currency)} del ${formatDate(a.paidAt)}`}
+                      />
+                    )}
+                  </li>
+                ))}
+              </ul>
+              <p className="border-t border-steel-100 px-4 py-3 text-sm text-steel-600">
+                Suman <strong className="text-ink">{formatMoney(invoice.advances, invoice.currency)}</strong>.
+                Queda <strong className="text-ink">{formatMoney(saldo.toFixed(2), invoice.currency)}</strong> por transferirle.
+                {/* Las facturas que vinieron del control en Excel traen su adelanto como un
+                    número suelto, sin fila ni comprobante. Se dice, para que no parezca que
+                    la cuenta no cuadra. */}
+                {adelantadoAMano > 0.004 && (
+                  <span className="mt-1 block text-xs text-steel-500">
+                    Incluye {formatMoney(adelantadoAMano.toFixed(2), invoice.currency)} anotados a mano en la
+                    factura, sin comprobante.
+                  </span>
+                )}
+              </p>
+            </Panel>
+          )}
 
           {invoice.status === "PAGADA" && (
             <Panel title="Pago registrado">

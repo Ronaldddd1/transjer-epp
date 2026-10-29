@@ -82,6 +82,25 @@ with sync_playwright() as p:
           and fila_ana.locator("input[placeholder*='Permiso']").count() == 0)
     fila_carla.locator("input[placeholder*='Permiso']").fill("Descanso médico")
 
+    # La actividad solo se pide a quien vino: una falta no tiene qué contar.
+    check("la actividad se pide al que vino, y no en las faltas ni en los justificados",
+          fila_ana.locator("input[placeholder*='Descarga']").count() == 1
+          and fila_beto.locator("input[placeholder*='Descarga']").count() == 0
+          and fila_carla.locator("input[placeholder*='Descarga']").count() == 0)
+
+    # Guardar sin detallar la actividad no registra nada: ni la de Ana ni las otras dos.
+    page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
+    page.wait_for_timeout(2200)
+    cuerpo = page.locator("body").inner_text()
+    check("sin detallar la actividad no se guarda la asistencia",
+          "Falta la actividad" in cuerpo, cuerpo[:300])
+    check("y no quedó nada a medio guardar",
+          psql(f"select count(*) from attendance a join employees e on e.id=a.employee_id where e.area='{AREA}'") == "0")
+    check("el campo que falta queda señalado",
+          fila_ana.locator("input[aria-invalid=true]").count() == 1)
+
+    fila_ana.locator("input[placeholder*='Descarga']").fill("Descarga de mercadería")
+
     cuerpo = page.locator("body").inner_text()
     check("el contador de arriba va cambiando mientras se marca",
           "1 vinieron" in cuerpo.replace("\n", " ") or "1" in cuerpo, cuerpo[:200])
@@ -104,12 +123,19 @@ with sync_playwright() as p:
     check("y NO se guardó motivo en los otros",
           psql("select coalesce(a.reason,'-') from attendance a join employees e on e.id=a.employee_id "
                f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "-")
+    check("la actividad se guardó en el que vino",
+          psql("select a.activity from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and e.first_name='Ana' and a.day=current_date") == "Descarga de mercadería")
+    check("y la falta quedó sin actividad",
+          psql("select coalesce(a.activity,'-') from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "-")
 
     # --- Corregir: volver a marcar pisa, no duplica ---
     page.reload(); page.wait_for_timeout(1700)
     fila_beto = page.get_by_role("row").filter(has_text="Beto")
     fila_beto.get_by_role("button", name="Vino").click()
     page.wait_for_timeout(300)
+    fila_beto.locator("input[placeholder*='Descarga']").fill("Apoyo en despacho")
     page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
     page.wait_for_timeout(2600)
     check("corregir una marca no deja dos filas del mismo día",
@@ -135,6 +161,7 @@ with sync_playwright() as p:
     if fila_ana.count() > 0:
         fila_ana.get_by_role("button", name="Vino").click()
         page.wait_for_timeout(300)
+        fila_ana.locator("input[placeholder*='Descarga']").fill("Lo que sea")
         page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
         page.wait_for_timeout(2200)
         check("no deja pasar lista de un día que no llegó",

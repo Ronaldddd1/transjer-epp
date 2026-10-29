@@ -7,3 +7,5 @@ out
 next-env.d.ts
 .vercel
 respaldos/
+# Los archivos que las pruebas de navegador crean al vuelo (PDF de prueba, vouchers).
+tests/tmp-*

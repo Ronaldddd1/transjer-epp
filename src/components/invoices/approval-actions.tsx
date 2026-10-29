@@ -432,15 +432,17 @@ export function RechazarModal({ correo, empresa }: { correo: CorreoParaDecidir; 
 
   return (
     <FormModal
-      title="Rechazar el comprobante"
-      description="Al proveedor le llega la devolución con el motivo, y el motivo queda guardado."
+      title={correo.comprobante ? "Rechazar el comprobante" : "Rechazar el correo"}
+      description={correo.comprobante
+        ? "Al proveedor le llega la devolución con el motivo, y el motivo queda guardado."
+        : "Este correo no trae XML legible. Se devuelve igual: al proveedor le llega el motivo y queda guardado."}
       submitLabel={enviar ? "Rechazar y enviar el correo" : "Rechazar sin avisar"}
       submitVariant="danger"
       size="lg"
       action={(fd) => rejectEmail(correo.id, fd)}
       onClosed={() => setTexto(null)}
       trigger={(open) => (
-        <Button variant="outline" size="sm" onClick={open} title="Rechazar el comprobante">
+        <Button variant="outline" size="sm" onClick={open} title={correo.comprobante ? "Rechazar el comprobante" : "Rechazar el correo y avisarle al proveedor"}>
           <X className="h-4 w-4 text-red-600" /><span className="sr-only 2xl:not-sr-only">Rechazar</span>
         </Button>
       )}

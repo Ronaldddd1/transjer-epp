@@ -251,8 +251,14 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                       <>
                         <InvoiceFromEmailModal emailId={e.id} subject={e.subject ?? "(sin asunto)"} suppliers={suppliers} />
                         {status.configured && <RetryEmailButton id={e.id} subject={e.subject ?? "(sin asunto)"} />}
-                        <DiscardEmailModal id={e.id} subject={e.subject ?? "(sin asunto)"} />
                       </>
+                    )}
+                    {/* Un correo sin XML legible también se devuelve al proveedor. Antes solo
+                        se podía descartar, y descartar no le avisa a nadie: el comprobante
+                        desaparecía de la bandeja y el proveedor seguía esperando el pago. */}
+                    {sinLeer && canApprove && <RechazarModal correo={correo} />}
+                    {sinLeer && canManage && (
+                      <DiscardEmailModal id={e.id} subject={e.subject ?? "(sin asunto)"} />
                     )}
                   </div>
                 </Td>
@@ -264,8 +270,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
 
       <p className="mt-3 text-xs text-steel-500">
         {EMAIL_STATUS_LABEL.POR_APROBAR}: el comprobante se leyó y espera decisión ·{" "}
-        {EMAIL_STATUS_LABEL.REVISAR}: no se pudo leer el XML, se registra a mano ·{" "}
-        {EMAIL_STATUS_LABEL.DESCARTADO}: no era una factura por pagar, o ya estaba registrada.
+        {EMAIL_STATUS_LABEL.REVISAR}: no se pudo leer el XML, se registra a mano o se rechaza igual ·{" "}
+        {EMAIL_STATUS_LABEL.DESCARTADO}: no era una factura por pagar, o ya estaba registrada (sin avisar al proveedor).
       </p>
 
       <Pagination basePath="/facturas/correos" searchParams={sp} page={page} pageSize={pageSize} total={total} />

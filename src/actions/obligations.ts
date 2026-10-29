@@ -12,6 +12,7 @@ import { formatMoney, OBLIGATION_TYPE_LABEL, todayLima } from "@/lib/utils";
 import {
   installmentAmountSchema, obligationSchema, payInstallmentSchema, renegotiationSchema, scheduleSchema,
 } from "@/lib/validations";
+import { guardarVoucher, leerVoucher } from "@/server/payment-proof";
 
 /**
  * Préstamos, servicios y demás pagos que se repiten.
@@ -396,6 +397,9 @@ export async function payInstallment(id: string, formData: FormData): Promise<Ac
     const user = await requireActionUser("obligations.pay");
     const data = payInstallmentSchema.parse(formToObject(formData));
     if (data.paidAt > todayLima()) throw new BusinessError("La fecha de pago no puede ser futura.");
+    // Aquí el voucher es opcional: un préstamo se paga muchas veces en efectivo o por
+    // descuento automático, y no hay captura que subir. Si la suben, se revisa igual.
+    const voucher = await leerVoucher(formData, { requerido: false });
 
     const result = await db.transaction(async (tx) => {
       // Bloqueo de la fila: si dos personas registran el mismo pago a la vez, solo una gana.
@@ -405,10 +409,15 @@ export async function payInstallment(id: string, formData: FormData): Promise<Ac
       if (before.status === "PAGADA") throw new BusinessError("Esta cuota ya figura como pagada.");
       if (before.status === "ANULADA") throw new BusinessError("La cuota está anulada.");
 
+      const proofId = voucher
+        ? await guardarVoucher(tx, voucher, { installmentId: id, uploadedBy: user.id })
+        : null;
+
       const [row] = await tx.update(obligationInstallments).set({
         status: "PAGADA",
         paidAt: data.paidAt,
         paidAmount: data.paidAmount,
+        proofId,
         // Si la cuota no tenía importe (servicio variable), lo pagado pasa a ser el importe.
         total: before.total ?? data.paidAmount,
         paymentReference: data.paymentReference,
@@ -460,6 +469,7 @@ export async function reopenInstallment(id: string): Promise<ActionResult> {
     await db.transaction(async (tx) => {
       const [row] = await tx.update(obligationInstallments).set({
         status: "PENDIENTE", paidAt: null, paidAmount: null, paymentReference: null, paidBy: null,
+        proofId: null,
       }).where(eq(obligationInstallments.id, id)).returning();
       // Si la obligación se había cerrado sola con este pago, vuelve a estar activa.
       if (obligation.status === "CERRADA") {

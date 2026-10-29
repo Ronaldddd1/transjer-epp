@@ -1,15 +1,16 @@
 "use client";
 
-import { Ban, CheckCircle2, FileCheck2, FileMinus2, RotateCcw, Undo2 } from "lucide-react";
+import { Ban, CheckCircle2, FileCheck2, FileMinus2, HandCoins, RotateCcw, Trash2, Undo2 } from "lucide-react";
 import {
-  observeInvoice, payInvoice, registerCreditNote, reopenInvoice, restoreInvoice,
-  setGuideReceived, voidInvoice,
+  observeInvoice, payAdvance, payInvoice, registerCreditNote, removeAdvance, reopenInvoice,
+  restoreInvoice, setGuideReceived, voidInvoice,
 } from "@/actions/invoices";
 import { Button, type ButtonVariant } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
+import { VoucherField } from "@/components/ui/voucher-field";
 import { formatMoney, saldoAPagar, todayLima } from "@/lib/utils";
 
 export type InvoiceRef = {
@@ -114,8 +115,76 @@ export function PayInvoiceModal({ invoice, variant = "primary", compact = false 
           <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación, transferencia o cheque.">
             <Input name="paymentReference" maxLength={120} placeholder="Transferencia 0012345" />
           </Field>
+          <VoucherField error={errors.voucher} />
           <Field label="Observaciones del pago" name="paymentNotes" error={errors.paymentNotes}>
             <Textarea name="paymentNotes" maxLength={1000} rows={2} />
+          </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
+
+/**
+ * Registra un adelanto a cuenta de la factura, sin cerrarla.
+ *
+ * Va en la tabla principal, al lado de Pagar: un adelanto se entrega mientras la factura
+ * sigue pendiente, y tener que entrar a la ficha para anotarlo hacía que se anotaran
+ * después —o no se anotaran— y el saldo que figuraba no era el que se le debía.
+ */
+export function AdvanceModal({ invoice, variant = "outline", compact = false }: { invoice: InvoiceRef; variant?: ButtonVariant; compact?: boolean }) {
+  const saldo = saldoAPagar(invoice.total, invoice.detractionAmount, invoice.advances);
+  return (
+    <FormModal
+      title="Registrar un adelanto"
+      description="Baja el saldo de la factura y la deja pendiente por la diferencia."
+      submitLabel="Registrar el adelanto"
+      size="sm"
+      action={(fd) => payAdvance(invoice.id, fd)}
+      trigger={(open) => (
+        <Button variant={variant} size={compact ? "sm" : "md"} onClick={open} title="Registrar un adelanto" aria-label={compact ? "Registrar un adelanto" : undefined}>
+          <HandCoins className="h-4 w-4" />
+          <span className={compact ? "sr-only lg:not-sr-only" : ""}>Adelanto</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-steel-200 bg-steel-50 p-3 text-sm">
+            <dt className="text-steel-500">Comprobante</dt><dd className="font-medium">{docLabel(invoice)}</dd>
+            <dt className="text-steel-500">Proveedor</dt><dd className="font-medium">{invoice.supplierName}</dd>
+            {Number(invoice.advances ?? 0) > 0 && (
+              <>
+                <dt className="text-steel-500">Ya adelantado</dt>
+                <dd className="tabular text-steel-600">{formatMoney(invoice.advances, invoice.currency)}</dd>
+              </>
+            )}
+            <dt className="border-t border-steel-200 pt-1.5 font-medium text-ink">Saldo</dt>
+            <dd className="border-t border-steel-200 pt-1.5 font-display text-base font-bold">
+              {formatMoney(saldo, invoice.currency)}
+            </dd>
+          </dl>
+          <Field
+            label="Importe del adelanto"
+            name="amount"
+            required
+            error={errors.amount}
+            hint={`No puede pasar del saldo: ${formatMoney(saldo, invoice.currency)}.`}
+          >
+            <Input name="amount" inputMode="decimal" placeholder="500.00" invalid={!!errors.amount} autoFocus />
+          </Field>
+          <Field label="Fecha del adelanto" name="paidAt" required error={errors.paidAt}>
+            <DateInput name="paidAt" defaultValue={todayLima()} max={todayLima()} required invalid={!!errors.paidAt} />
+          </Field>
+          <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación o transferencia.">
+            <Input name="paymentReference" maxLength={120} placeholder="Transferencia 0012345" />
+          </Field>
+          <VoucherField
+            error={errors.voucher}
+            ayuda="La captura o el PDF de la transferencia. Sin esto el adelanto no se registra."
+          />
+          <Field label="Observaciones" name="notes" error={errors.notes}>
+            <Textarea name="notes" maxLength={500} rows={2} placeholder="A cuenta del flete de Trujillo." />
           </Field>
         </>
       )}
@@ -260,6 +329,23 @@ export function CreditNoteModal({ invoice, compact = false }: { invoice: Invoice
         </div>
       )}
     </FormModal>
+  );
+}
+
+/** Quita un adelanto anotado por error. El voucher se queda entre los archivos de la factura. */
+export function RemoveAdvanceButton({ id, detalle }: { id: string; detalle: string }) {
+  return (
+    <ConfirmButton
+      action={() => removeAdvance(id)}
+      title="Quitar el adelanto"
+      message={`Se quitará el adelanto de ${detalle} y el saldo de la factura volverá a subir. El comprobante queda entre los archivos.`}
+      confirmLabel="Quitar"
+      confirmVariant="danger"
+      triggerVariant="ghost"
+      triggerLabel={<Trash2 className="h-4 w-4" />}
+      triggerTitle="Quitar el adelanto"
+      size="icon"
+    />
   );
 }
 

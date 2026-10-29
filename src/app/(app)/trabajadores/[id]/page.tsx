@@ -249,6 +249,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
                       a.status === "PRESENTE" && "text-emerald-700",
                     )}>
                       {a.status === "PRESENTE" ? "Vino" : a.status === "FALTA" ? "Faltó" : "Justificado"}
+                      {a.activity && <span className="block text-xs text-steel-500">{a.activity}</span>}
                       {a.reason && <span className="block text-xs text-steel-500">{a.reason}</span>}
                     </span>
                   </li>
