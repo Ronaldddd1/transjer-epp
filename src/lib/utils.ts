@@ -133,6 +133,41 @@ export const EMAIL_STATUS_LABEL = {
 } as const;
 
 export const INVOICE_EMAIL_STATUSES = Object.keys(EMAIL_STATUS_LABEL) as InvoiceEmailStatusKey[];
+
+/**
+ * El filtro del monto, el paso que va antes de aceptar o rechazar.
+ *
+ *   PENDIENTE   todavía nadie comparó el importe con lo pactado
+ *   CONFORME    coincide, o la diferencia se aprobó dejando dicho por qué
+ *   OBSERVADO   no coincide: el comprobante no se puede aceptar hasta resolverlo
+ */
+export const AMOUNT_CHECK_LABEL = {
+  PENDIENTE: "Monto sin verificar",
+  CONFORME: "Monto conforme",
+  OBSERVADO: "Monto observado",
+} as const;
+export type AmountCheckKey = keyof typeof AMOUNT_CHECK_LABEL;
+
+/**
+ * Hasta cuánto se considera que dos importes son el mismo.
+ *
+ * Un sol de diferencia es redondeo —el proveedor que factura el IGV con otro decimal— y
+ * frenar una factura por eso sería frenarlas todas. Más que eso ya es otro precio.
+ */
+export const TOLERANCIA_MONTO = 1;
+
+/** Lo que el filtro encuentra al comparar lo facturado con lo pactado. */
+export function compararMonto(facturado: string | number | null | undefined, pactado: string | number | null | undefined) {
+  const f = Number(facturado ?? 0);
+  const p = Number(pactado ?? 0);
+  const diferencia = Number((f - p).toFixed(2));
+  return {
+    diferencia,
+    /** Positiva: el proveedor está cobrando de más. */
+    cobraDeMas: diferencia > 0,
+    coincide: Math.abs(diferencia) <= TOLERANCIA_MONTO,
+  };
+}
 export type InvoiceEmailStatusKey = keyof typeof EMAIL_STATUS_LABEL;
 
 /** Motivos por los que se devuelve un comprobante al proveedor. */

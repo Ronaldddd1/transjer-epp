@@ -432,6 +432,20 @@ export const invoiceEmails = pgTable("invoice_emails", {
   detail: text("detail"),
   parsed: jsonb("parsed"),
   processedAt: timestamp("processed_at", { withTimezone: true }),
+  /**
+   * El filtro del monto, que va ANTES de aceptar o rechazar.
+   *
+   * `agreedAmount` es lo que se pactó por el flete, escrito por quien revisa; el sistema lo
+   * compara con el total del comprobante. Mientras `amountStatus` no sea CONFORME, el
+   * comprobante no se puede aceptar: esa es toda la gracia del filtro.
+   */
+  agreedAmount: numeric("agreed_amount", { precision: 12, scale: 2 }),
+  /** PENDIENTE | CONFORME | OBSERVADO */
+  amountStatus: varchar("amount_status", { length: 12 }).notNull().default("PENDIENTE"),
+  /** Por qué se aprobó una diferencia, o qué se observó. */
+  amountNote: varchar("amount_note", { length: 250 }),
+  amountCheckedBy: uuid("amount_checked_by").references(() => users.id, { onDelete: "set null" }),
+  amountCheckedAt: timestamp("amount_checked_at", { withTimezone: true }),
   /** Quién aceptó o rechazó el comprobante, y cuándo. */
   decidedBy: uuid("decided_by").references(() => users.id, { onDelete: "set null" }),
   decidedAt: timestamp("decided_at", { withTimezone: true }),
@@ -450,8 +464,11 @@ export const invoiceEmails = pgTable("invoice_emails", {
 }, (t) => [
   index("invoice_emails_status_date_idx").on(t.status, t.receivedAt),
   index("invoice_emails_date_idx").on(t.receivedAt),
+  index("invoice_emails_amount_idx").on(t.amountStatus),
   check("invoice_emails_status_valid",
     sql`${t.status} in ('POR_APROBAR','PROCESADO','REVISAR','DESCARTADO','RECHAZADO','ERROR')`),
+  check("invoice_emails_amount_status_valid",
+    sql`${t.amountStatus} in ('PENDIENTE','CONFORME','OBSERVADO')`),
 ]);
 
 export const invoiceAttachments = pgTable("invoice_attachments", {

@@ -284,6 +284,8 @@ export async function listInvoiceAdvances(invoiceId: string) {
 }
 
 /** Correo del que provino la factura, si llegó por el buzón. */
+const verificador = alias(users, "verificador");
+
 export async function getInvoiceEmail(invoiceId: string) {
   const [row] = await db.select({
     id: invoiceEmails.id,
@@ -296,6 +298,13 @@ export async function getInvoiceEmail(invoiceId: string) {
     // qué se devolvió, qué se le dijo al proveedor, y si el aviso llegó a salir.
     rejectReason: invoiceEmails.rejectReason,
     rejectComment: invoiceEmails.rejectComment,
+    // El filtro del monto que pasó antes de aceptarse: cuánto se había pactado y qué se
+    // dijo si no coincidía. Es lo que explica, desde la factura, por qué se pagó esto.
+    agreedAmount: invoiceEmails.agreedAmount,
+    amountStatus: invoiceEmails.amountStatus,
+    amountNote: invoiceEmails.amountNote,
+    amountCheckedByName: verificador.name,
+    amountCheckedAt: invoiceEmails.amountCheckedAt,
     decidedAt: invoiceEmails.decidedAt,
     decidedByName: users.name,
     replyTo: invoiceEmails.replyTo,
@@ -304,6 +313,7 @@ export async function getInvoiceEmail(invoiceId: string) {
     replyError: invoiceEmails.replyError,
   }).from(invoiceEmails)
     .leftJoin(users, eq(invoiceEmails.decidedBy, users.id))
+    .leftJoin(verificador, eq(invoiceEmails.amountCheckedBy, verificador.id))
     .where(eq(invoiceEmails.invoiceId, invoiceId)).limit(1);
   return row ?? null;
 }
@@ -442,19 +452,41 @@ export async function getSupplierOptions() {
 
 // ---------- Bandeja de correos ----------
 
-export type EmailFilters = { q?: string; status?: InvoiceEmailStatus; from?: string; to?: string };
+export type EmailFilters = {
+  q?: string;
+  status?: InvoiceEmailStatus;
+  /** En qué punto del filtro del monto está: lo que separa las dos primeras pestañas. */
+  amount?: "POR_VERIFICAR" | "CONFORME";
+  from?: string;
+  to?: string;
+};
 const EMAIL_STATUSES: InvoiceEmailStatus[] = INVOICE_EMAIL_STATUSES;
 
+/**
+ * "Por verificar" no es un estado del correo, es un punto del camino.
+ *
+ * El comprobante que espera decisión pasa por dos manos seguidas: primero se compara el
+ * importe con lo pactado, y recién después se acepta o se rechaza. Los dos momentos viven
+ * dentro del mismo estado POR_APROBAR, así que la pestaña los separa por el filtro del
+ * monto y no por el estado, que es lo que el resto del sistema ya entiende.
+ */
 export function readEmailFilters(sp: SearchParamsRecord): EmailFilters {
-  const status = first(sp.estado) as InvoiceEmailStatus | undefined;
+  const pestaña = first(sp.estado);
   const from = first(sp.from);
   const to = first(sp.to);
-  return {
+  const base = {
     q: first(sp.q)?.trim() || undefined,
-    status: status && EMAIL_STATUSES.includes(status) ? status : undefined,
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
   };
+  if (pestaña === "POR_VERIFICAR") {
+    return { ...base, status: "POR_APROBAR", amount: "POR_VERIFICAR" };
+  }
+  if (pestaña === "POR_APROBAR") {
+    return { ...base, status: "POR_APROBAR", amount: "CONFORME" };
+  }
+  const status = pestaña as InvoiceEmailStatus | undefined;
+  return { ...base, status: status && EMAIL_STATUSES.includes(status) ? status : undefined };
 }
 
 export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0) {
@@ -464,6 +496,8 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
   const where = and(
     f.status === "REVISAR" ? inArray(invoiceEmails.status, ["REVISAR", "ERROR"])
       : f.status ? eq(invoiceEmails.status, f.status) : undefined,
+    f.amount === "POR_VERIFICAR" ? inArray(invoiceEmails.amountStatus, ["PENDIENTE", "OBSERVADO"])
+      : f.amount === "CONFORME" ? eq(invoiceEmails.amountStatus, "CONFORME") : undefined,
     f.from ? gte(invoiceEmails.receivedAt, new Date(`${f.from}T00:00:00-05:00`)) : undefined,
     f.to ? lte(invoiceEmails.receivedAt, new Date(`${f.to}T23:59:59.999-05:00`)) : undefined,
     f.q ? or(ilike(invoiceEmails.subject, like(f.q)), ilike(invoiceEmails.fromAddress, like(f.q)), ilike(invoiceEmails.fromName, like(f.q))) : undefined,
@@ -485,6 +519,10 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
       // Los datos leídos del XML. Son los que se miran para aceptar o rechazar, así que
       // viajan con la fila: sin ellos habría que abrir cada correo para saber qué trae.
       parsed: invoiceEmails.parsed,
+      agreedAmount: invoiceEmails.agreedAmount,
+      amountStatus: invoiceEmails.amountStatus,
+      amountNote: invoiceEmails.amountNote,
+      amountCheckedAt: invoiceEmails.amountCheckedAt,
       rejectReason: invoiceEmails.rejectReason,
       rejectComment: invoiceEmails.rejectComment,
       replyTo: invoiceEmails.replyTo,
@@ -514,14 +552,21 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
  */
 export async function emailCounts() {
   const [row] = await db.select({
-    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR')::int`,
+    // Los dos pasos del camino: primero el filtro del monto, después la decisión.
+    porVerificar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} in ('PENDIENTE','OBSERVADO'))::int`,
+    observados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'OBSERVADO')::int`,
+    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'CONFORME')::int`,
+    esperando: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR')::int`,
     revisar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,
     aceptados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'PROCESADO')::int`,
     rechazados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'RECHAZADO')::int`,
     descartados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'DESCARTADO')::int`,
     total: sql<number>`count(*)::int`,
   }).from(invoiceEmails);
-  return row ?? { porAprobar: 0, revisar: 0, aceptados: 0, rechazados: 0, descartados: 0, total: 0 };
+  return row ?? {
+    porVerificar: 0, observados: 0, porAprobar: 0, esperando: 0,
+    revisar: 0, aceptados: 0, rechazados: 0, descartados: 0, total: 0,
+  };
 }
 
 /**

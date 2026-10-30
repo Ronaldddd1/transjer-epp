@@ -1,13 +1,13 @@
 import "server-only";
 import {
-  ATTACHMENT_KIND_LABEL, DETRACTION_STATUS_LABEL, formatDate, formatDateTime, INSTALLMENT_STATUS_LABEL,
+  AMOUNT_CHECK_LABEL, compararMonto, DETRACTION_STATUS_LABEL, formatDate, formatDateTime, INSTALLMENT_STATUS_LABEL,
   INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL, INVOICE_STATUS_LABEL, invoiceNumber,
   EMAIL_STATUS_LABEL, monthEnd, monthStart, MOVEMENT_LABEL, OBLIGATION_STATUS_LABEL, OBLIGATION_TYPE_LABEL,
   PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
   DOCUMENT_STATUS_LABEL, documentStatus, exigeRevisionTecnica, FLEET_STATUS_LABEL,
   MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL, todayLima,
   STOCK_STATUS_LABEL, stockStatus,
-  type RejectReasonKey, type SearchParamsRecord,
+  type AmountCheckKey, type RejectReasonKey, type SearchParamsRecord,
 } from "@/lib/utils";
 import type { Permission } from "@/lib/permissions";
 import {
@@ -708,6 +708,9 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "comprobante", header: "Comprobante", width: 14 },
           { key: "proveedor", header: "Proveedor", width: 32 },
           { key: "importe", header: "Importe", width: 12, align: "right" },
+          { key: "pactado", header: "Pactado", width: 12, align: "right" },
+          { key: "diferencia", header: "Diferencia", width: 12, align: "right" },
+          { key: "filtroMonto", header: "Filtro del monto", width: 18 },
           { key: "de", header: "De", width: 28 },
           { key: "estado", header: "Estado", width: 13 },
           { key: "decidio", header: "Decidió", width: 20 },
@@ -723,6 +726,13 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
             comprobante: c?.series && c?.number ? invoiceNumber(c.series, c.number) : "",
             proveedor: texto(c?.supplierName ?? e.supplierName),
             importe: c?.total ? `${c.currency === "USD" ? "US$" : "S/"} ${c.total}` : "",
+            // El filtro del monto, que es por donde pasa el comprobante antes de aceptarse.
+            pactado: e.agreedAmount ? `${c?.currency === "USD" ? "US$" : "S/"} ${e.agreedAmount}` : "",
+            diferencia: c?.total && e.agreedAmount
+              ? `${c.currency === "USD" ? "US$" : "S/"} ${compararMonto(c.total, e.agreedAmount).diferencia.toFixed(2)}`
+              : "",
+            filtroMonto: AMOUNT_CHECK_LABEL[(e.amountStatus as AmountCheckKey) ?? "PENDIENTE"]
+              + (e.amountNote ? ` — ${e.amountNote}` : ""),
             de: texto(e.fromAddress),
             estado: EMAIL_STATUS_LABEL[e.status],
             decidio: texto(e.decidedByName),
@@ -740,7 +750,8 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         }),
         summary: [
           { label: "Correos", value: rows.length },
-          { label: "Por aprobar", value: rows.filter((e) => e.status === "POR_APROBAR").length },
+          { label: "Por verificar monto", value: rows.filter((e) => e.status === "POR_APROBAR" && e.amountStatus !== "CONFORME").length },
+          { label: "Por aprobar", value: rows.filter((e) => e.status === "POR_APROBAR" && e.amountStatus === "CONFORME").length },
           { label: "Rechazados", value: rows.filter((e) => e.status === "RECHAZADO").length },
           { label: "Por revisar", value: rows.filter((e) => e.status === "REVISAR" || e.status === "ERROR").length },
         ],

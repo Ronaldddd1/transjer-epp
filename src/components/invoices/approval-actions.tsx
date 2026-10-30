@@ -1,8 +1,8 @@
 "use client";
 
-import { AlertTriangle, Check, Eye, FileMinus2, FileText, Mail, MailX, X } from "lucide-react";
+import { AlertTriangle, Check, Eye, FileMinus2, FileText, Mail, MailX, Scale, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { applyCreditNoteEmail, approveEmail, rejectEmail } from "@/actions/mailbox";
+import { applyCreditNoteEmail, approveEmail, rejectEmail, verifyEmailAmount } from "@/actions/mailbox";
 import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
@@ -10,11 +10,12 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
 import { Modal } from "@/components/ui/modal";
 import {
+  AMOUNT_CHECK_LABEL, cn, compararMonto,
   DEFAULT_TERM_DAYS, formatDate, formatDateTime, formatFileSize, formatMoney,
   INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, invoiceNumber, PIDEN_NOTA_DE_CREDITO,
   REJECT_REASON_LABEL,
   rejectionEmailBody, TERM_DAYS_BY_SERVICE_TYPE,
-  type InvoiceServiceTypeKey, type PaymentTermKey, type RejectReasonKey,
+  type AmountCheckKey, type InvoiceServiceTypeKey, type PaymentTermKey, type RejectReasonKey,
 } from "@/lib/utils";
 
 /**
@@ -55,6 +56,13 @@ export type CorreoParaDecidir = {
   detail: string | null;
   comprobante: ComprobanteLeido | null;
   archivos: ArchivoCorreo[];
+  /** El filtro del monto, que va antes de aceptar o rechazar. */
+  monto: {
+    estado: AmountCheckKey;
+    pactado: string | null;
+    nota: string | null;
+    verificadoEl: string | null;
+  };
   rejectReason: string | null;
   rejectComment: string | null;
   replyTo: string | null;
@@ -190,6 +198,7 @@ export function VerComprobanteModal({ correo }: { correo: CorreoParaDecidir }) {
       >
         <div className="grid gap-4">
           <DatosComprobante correo={correo} />
+          <ResumenMonto correo={correo} />
           <DatosCorreo correo={correo} />
           {correo.status === "RECHAZADO" && <ResumenRechazo correo={correo} />}
           {correo.decidedByName && correo.status === "PROCESADO" && (
@@ -200,6 +209,51 @@ export function VerComprobanteModal({ correo }: { correo: CorreoParaDecidir }) {
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * En qué quedó el filtro del monto.
+ *
+ * Se muestra en la ficha del comprobante porque es la primera pregunta de quien lo abre:
+ * si lo que cobran es lo que se pactó. Mientras nadie lo haya verificado, lo dice.
+ */
+export function ResumenMonto({ correo }: { correo: CorreoParaDecidir }) {
+  const c = correo.comprobante;
+  if (!c || c.docType === "NOTA_CREDITO") return null;
+  const { estado, pactado, nota } = correo.monto;
+
+  if (estado === "PENDIENTE" || !pactado) {
+    return (
+      <p className="rounded-lg border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-600">
+        El monto todavía no se verificó contra lo pactado por el flete. Hasta que eso pase, el
+        comprobante no se puede aceptar.
+      </p>
+    );
+  }
+
+  const { diferencia, coincide, cobraDeMas } = compararMonto(c.total, pactado);
+  const observado = estado === "OBSERVADO";
+  return (
+    <div className={cn(
+      "grid gap-1 rounded-lg border px-4 py-3 text-sm",
+      observado ? "border-red-200 bg-red-50" : "border-emerald-200 bg-emerald-50",
+    )}>
+      <p className={cn("font-semibold", observado ? "text-red-800" : "text-emerald-800")}>
+        {AMOUNT_CHECK_LABEL[estado]}
+      </p>
+      <p className="text-ink-800">
+        Facturado {formatMoney(c.total, c.currency)} · pactado {formatMoney(pactado, c.currency)}
+        {!coincide && (
+          <> · cobra <strong>{formatMoney(Math.abs(diferencia).toFixed(2), c.currency)}</strong>{" "}
+            {cobraDeMas ? "de más" : "de menos"}</>
+        )}
+      </p>
+      {nota && <p className="text-steel-700">{nota}</p>}
+      {correo.monto.verificadoEl && (
+        <p className="text-xs text-steel-600">Verificado el {formatDateTime(correo.monto.verificadoEl)}.</p>
+      )}
+    </div>
   );
 }
 
@@ -239,6 +293,150 @@ export function ResumenRechazo({ correo }: { correo: CorreoParaDecidir }) {
  * único que se elige es la condición de pago, que no viene en el comprobante porque la
  * pacta la empresa, no el proveedor.
  */
+/**
+ * El filtro del monto: el primer par de ojos sobre el comprobante.
+ *
+ * Quien revisa escribe lo que se pactó por el flete y la ventana dice en el acto si
+ * coincide, y por cuánto no. Es a propósito que el número se escriba a mano: lo pactado
+ * vive en el trato con el proveedor, no en el sistema, y pedir que alguien lo ponga por
+ * escrito es justo lo que convierte una comprobación mental en una comprobación.
+ *
+ * Mientras esto no quede conforme, el comprobante no se puede aceptar.
+ */
+export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
+  const c = correo.comprobante;
+  const [pactado, setPactado] = useState(correo.monto.pactado ?? "");
+  const [nota, setNota] = useState(correo.monto.nota ?? "");
+  const [aprobar, setAprobar] = useState(false);
+
+  const escrito = pactado.trim() !== "" && !Number.isNaN(Number(pactado));
+  const comparacion = escrito && c ? compararMonto(c.total, pactado) : null;
+  const hayDiferencia = !!comparacion && !comparacion.coincide;
+  const observado = correo.monto.estado === "OBSERVADO";
+
+  return (
+    <FormModal
+      title="Verificar el monto"
+      description="Antes de aceptar o rechazar: lo facturado contra lo que se pactó por el flete."
+      submitLabel={hayDiferencia && !aprobar ? "Dejar el monto observado" : "Guardar la verificación"}
+      submitVariant={hayDiferencia && !aprobar ? "danger" : undefined}
+      size="sm"
+      action={(fd) => verifyEmailAmount(correo.id, fd)}
+      trigger={(open) => (
+        <Button
+          variant={observado ? "outline" : "primary"}
+          size="sm"
+          onClick={open}
+          title="Verificar el monto del flete"
+          className={observado ? "text-red-700" : undefined}
+        >
+          <Scale className="h-4 w-4" />
+          <span className="sr-only 2xl:not-sr-only">{observado ? "Revisar monto" : "Verificar monto"}</span>
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 rounded-md border border-steel-200 bg-steel-50 p-3 text-sm">
+            <dt className="text-steel-500">Comprobante</dt>
+            <dd className="font-medium">{c ? invoiceNumber(c.series, c.number) : (correo.subject ?? "(sin asunto)")}</dd>
+            <dt className="text-steel-500">Proveedor</dt>
+            <dd className="font-medium">{c?.supplierName ?? correo.fromName ?? "—"}</dd>
+            <dt className="text-steel-500">Facturado</dt>
+            <dd className="font-display text-base font-bold tabular">
+              {c ? formatMoney(c.total, c.currency) : "—"}
+            </dd>
+          </dl>
+
+          {observado && correo.monto.nota && (
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+              Quedó observado: {correo.monto.nota}
+            </p>
+          )}
+
+          <Field
+            label="Monto pactado por el flete"
+            name="agreedAmount"
+            required
+            error={errors.agreedAmount}
+            hint="Lo acordado con el proveedor, con IGV, tal como debería venir facturado."
+          >
+            <Input
+              name="agreedAmount"
+              inputMode="decimal"
+              value={pactado}
+              onChange={(e) => setPactado(e.target.value)}
+              placeholder="2950.00"
+              invalid={!!errors.agreedAmount}
+              autoFocus
+            />
+          </Field>
+
+          {/* El veredicto, en el momento: quien revisa no tiene por qué restar de cabeza. */}
+          {comparacion && c && (
+            comparacion.coincide ? (
+              <p className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                <Check className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                Coincide con lo pactado. Al guardar, el comprobante pasa a esperar que lo aceptes o lo rechaces.
+              </p>
+            ) : (
+              <p className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                <span>
+                  El proveedor está cobrando{" "}
+                  <strong>{formatMoney(Math.abs(comparacion.diferencia).toFixed(2), c.currency)}</strong>{" "}
+                  {comparacion.cobraDeMas ? "de más" : "de menos"} de lo pactado.
+                </span>
+              </p>
+            )
+          )}
+
+          {hayDiferencia && (
+            <label className="flex items-start gap-2 rounded-md border border-steel-200 px-3 py-2.5 text-sm">
+              <input
+                type="checkbox"
+                name="aprobarDiferencia"
+                value="true"
+                checked={aprobar}
+                onChange={(e) => setAprobar(e.target.checked)}
+                className="mt-0.5 h-4 w-4"
+              />
+              <span>
+                Aprobar la diferencia igual
+                <span className="block text-xs text-steel-500">
+                  Úsalo cuando la diferencia tiene explicación —un recargo acordado, una espera, un
+                  retorno— y el comprobante se va a pagar así. Sin esto queda observado y no se puede aceptar.
+                </span>
+              </span>
+            </label>
+          )}
+
+          <Field
+            label={hayDiferencia && aprobar ? "Por qué se aprueba la diferencia" : "Observación"}
+            name="amountNote"
+            required={hayDiferencia && aprobar}
+            error={errors.amountNote}
+            hint={hayDiferencia && !aprobar
+              ? "Qué hay que reclamarle al proveedor. Lo verá quien retome este comprobante."
+              : undefined}
+          >
+            <Textarea
+              name="amountNote"
+              rows={2}
+              maxLength={250}
+              value={nota}
+              onChange={(e) => setNota(e.target.value)}
+              placeholder={hayDiferencia
+                ? "Se acordó un recargo de S/ 120 por la espera en planta."
+                : undefined}
+            />
+          </Field>
+        </>
+      )}
+    </FormModal>
+  );
+}
+
 export function AceptarModal({ correo, condicion }: {
   correo: CorreoParaDecidir;
   /** Lo acordado con ese proveedor, si ya está registrado. */

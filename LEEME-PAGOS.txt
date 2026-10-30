@@ -1,16 +1,16 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Comprobante de pago, adelantos desde la tabla, rechazo de correos
-sin XML, actividad en la asistencia e importe por cuota
-===============================================================
+Filtro del monto en el buzón, comprobante de pago, adelantos desde
+la tabla, rechazo de correos sin XML, actividad e importe por cuota
+====================================================================
 
-Cinco cambios. Piden migración.
+Seis cambios. Piden migración.
 
 ANTES DE SUBIRLA:
 
     npm install
-    npm run db:migrate     ← obligatorio, crea los adelantos y los campos nuevos
+    npm run db:migrate     ← obligatorio, crea los adelantos y el filtro del monto
 
-SI CORRES LAS PRUEBAS. Las de lógica (npm test) pasan las 704. La batería de navegador
+SI CORRES LAS PRUEBAS. Las de lógica (npm test) pasan las 720. La batería de navegador
 (npm run test:e2e) pasa las doce suites, pero de vez en cuando se detiene en la última
 comprobación de una suite —"ninguna pantalla lanzó errores de JavaScript"— con el aviso
 #418 de React. Es un aviso de hidratación que ya existía antes de esta actualización,
@@ -20,7 +20,53 @@ a correr la suite, pasa. No he conseguido reproducirlo a voluntad, ni en modo de
 forzando carga, así que lo dejo anotado en vez de silenciarlo en las pruebas.
 
 
-1. EL COMPROBANTE DEL PAGO: OPCIONAL, Y AHORA ENTRAN LAS FOTOS GRANDES
+1. EL FILTRO DEL MONTO, ANTES DE ACEPTAR O RECHAZAR
+----------------------------------------------------
+
+El camino de un comprobante que llega al buzón ahora tiene tres tramos, en este orden:
+
+    1) SE VERIFICA EL MONTO     contra lo pactado por el flete
+    2) SE ACEPTA O SE RECHAZA   como hasta ahora
+    3) PASA A FACTURAS          a la cola de pagos
+
+Antes el primer tramo no existía: se aceptaba o se rechazaba de una, y la comparación con
+lo acordado quedaba en la cabeza de quien aprobaba. Eso es justo lo que el control en Excel
+hacía mal —una factura por un importe distinto al pactado entraba en la cola como cualquier
+otra y se descubría al pagarla, cuando ya era tarde para reclamar.
+
+CÓMO FUNCIONA. En COMPROBANTES RECIBIDOS hay una pestaña nueva, POR VERIFICAR MONTO, que es
+por donde se entra. Cada comprobante ofrece VERIFICAR MONTO en vez de ACEPTAR. Se abre, se
+escribe lo que se pactó por el flete —con IGV, tal como debería venir facturado— y la
+ventana dice en el acto si coincide y, si no, por cuánto:
+
+    "El proveedor está cobrando S/ 180.00 de más de lo pactado."
+
+El monto pactado se escribe a mano a propósito: vive en el trato con el proveedor, no en el
+sistema, y ponerlo por escrito es lo que convierte una comprobación mental en una
+comprobación de verdad. Un sol de diferencia se deja pasar, porque es el redondeo del IGV.
+
+SI COINCIDE, el comprobante pasa a la pestaña POR APROBAR y recién ahí aparece el botón de
+aceptar.
+
+SI NO COINCIDE, hay dos salidas y las dos quedan escritas:
+
+    DEJARLO OBSERVADO        no se puede aceptar hasta resolverlo; se anota qué reclamar
+    APROBAR LA DIFERENCIA    con el motivo obligatorio: "recargo acordado por la espera"
+
+Sin una de las dos, el comprobante no avanza. Rechazarlo sí se puede en cualquier momento:
+devolverle al proveedor una factura mal emitida no tiene por qué esperar a nada.
+
+DÓNDE QUEDA. En la lista, al lado del importe, sale la diferencia en rojo (+ S/ 180.00) y
+el estado del filtro. En la ficha del comprobante, un cuadro con lo facturado, lo pactado y
+lo que se decidió. Y en la factura ya registrada, el apartado MONTO PACTADO AL VERIFICAR,
+con quién lo verificó y cuándo: es lo que permite explicar meses después por qué se pagó
+eso. El Excel del buzón trae tres columnas nuevas: pactado, diferencia y filtro del monto.
+
+LAS NOTAS DE CRÉDITO no pasan por el filtro: no son un flete que se vaya a pagar, son la
+anulación de uno. Los correos sin XML legible tampoco, porque no hay importe que comparar.
+
+
+2. EL COMPROBANTE DEL PAGO: OPCIONAL, Y AHORA ENTRAN LAS FOTOS GRANDES
 -----------------------------------------------------------------------
 
 En factura, adelanto, detracción y cuotas de préstamos y servicios hay un campo para subir
@@ -49,7 +95,7 @@ Si se reabre un pago registrado por error, el comprobante no se borra —el pago
 pero deja de respaldar un pago vigente.
 
 
-2. EL ADELANTO, DESDE LA TABLA PRINCIPAL
+3. EL ADELANTO, DESDE LA TABLA PRINCIPAL
 -----------------------------------------
 
 En FACTURAS, al lado de PAGAR, hay un botón ADELANTO. Antes había que entrar al ojo y
@@ -80,7 +126,7 @@ comprobante. Ese número se respeta: no desaparece al registrar el primer adelan
 esa factura, y el cuadro avisa de cuánto de lo adelantado está anotado a mano.
 
 
-3. UN CORREO SIN XML TAMBIÉN SE RECHAZA
+4. UN CORREO SIN XML TAMBIÉN SE RECHAZA
 ----------------------------------------
 
 En COMPROBANTES RECIBIDOS, los correos que llegan sin XML legible quedan como POR REVISAR.
@@ -104,7 +150,7 @@ CUÁNDO USAR CADA UNO:
 El modal de descartar ahora lo dice, para que no se vuelva a usar uno por el otro.
 
 
-4. LA ACTIVIDAD, AL MARCAR QUE VINO
+5. LA ACTIVIDAD, AL MARCAR QUE VINO
 ------------------------------------
 
 En ASISTENCIA, marcar VINO abre un campo de actividad, y sin detallarla no se guarda la
@@ -132,7 +178,7 @@ DÓNDE SE VE. En la columna ACTIVIDAD O MOTIVO de la lista del día, en la ficha
 trabajador debajo de cada día, y en el Excel de asistencia, en su propia columna.
 
 
-5. CORREGIR EL IMPORTE DE UNA SOLA CUOTA
+6. CORREGIR EL IMPORTE DE UNA SOLA CUOTA
 -----------------------------------------
 
 En los servicios —luz, agua, teléfono, alquiler— cada cuota tiene su propio importe, y

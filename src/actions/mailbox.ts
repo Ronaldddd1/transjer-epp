@@ -7,8 +7,12 @@ import { invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { formatMoney, invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey } from "@/lib/utils";
-import { approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema } from "@/lib/validations";
+import {
+  compararMonto, formatMoney, invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey,
+} from "@/lib/utils";
+import {
+  approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema, verifyAmountSchema,
+} from "@/lib/validations";
 import {
   createSubscription, deleteSubscription, getSubscription, notificationUrl,
   renewSubscription, resetTokenCache, testConnection,
@@ -173,6 +177,95 @@ export async function syncMailboxNow(): Promise<ActionResult> {
 }
 
 /**
+ * El filtro del monto: el paso que va antes de aceptar o rechazar.
+ *
+ * Quien revisa escribe lo que se pactó por el flete y el sistema lo compara con el total
+ * del comprobante. Mientras esto no quede conforme, el comprobante no se puede aceptar.
+ *
+ * Es la comprobación que en el control en Excel se hacía de memoria, y por eso a veces no
+ * se hacía: una factura por un importe distinto al acordado entraba en la cola de pagos
+ * como cualquier otra y se descubría al pagarla, cuando ya era tarde para reclamar.
+ *
+ * Si hay diferencia hay dos salidas, y las dos quedan escritas: dejarlo observado —que lo
+ * frena— o aprobar la diferencia explicando por qué. Lo que no se puede es aceptarlo sin
+ * que nadie haya mirado el importe.
+ */
+export async function verifyEmailAmount(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("invoices.approve");
+    const data = verifyAmountSchema.parse(formToObject(formData));
+
+    const [email] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, id)).limit(1);
+    if (!email) throw new BusinessError("El correo no existe.");
+    if (email.status === "PROCESADO") {
+      throw new BusinessError("Este comprobante ya fue aceptado: el filtro del monto va antes.");
+    }
+    if (email.status === "RECHAZADO") throw new BusinessError("Este comprobante ya fue rechazado.");
+
+    const comprobante = parsedOf(email);
+    if (!comprobante) {
+      throw new BusinessError("Este correo no trae los datos del comprobante leídos, así que no hay importe que comparar.");
+    }
+
+    const { diferencia, coincide, cobraDeMas } = compararMonto(comprobante.total, data.agreedAmount);
+    const nota = data.amountNote?.trim() || null;
+
+    // Aprobar una diferencia sin decir por qué deja el mismo agujero que había antes.
+    if (!coincide && data.aprobarDiferencia && !nota) {
+      throw new BusinessError("Para aprobar la diferencia hay que explicar por qué: escribe el motivo.");
+    }
+
+    const conforme = coincide || data.aprobarDiferencia;
+    const estado = conforme ? "CONFORME" : "OBSERVADO";
+    const plata = (n: number) => formatMoney(Math.abs(n).toFixed(2), comprobante.currency);
+
+    await db.update(invoiceEmails).set({
+      agreedAmount: data.agreedAmount,
+      amountStatus: estado,
+      amountNote: nota,
+      amountCheckedBy: user.id,
+      amountCheckedAt: new Date(),
+    }).where(eq(invoiceEmails.id, id));
+
+    const label = invoiceNumber(comprobante.series, comprobante.number);
+    await logAudit({
+      user, action: "EDITAR", module: "CORREO", recordId: id,
+      description: `${user.name} verificó el monto del comprobante ${label}:`
+        + ` facturado ${formatMoney(comprobante.total, comprobante.currency)},`
+        + ` pactado ${formatMoney(data.agreedAmount, comprobante.currency)}.`
+        + (coincide
+          ? " Coincide."
+          : ` Diferencia de ${plata(diferencia)} ${cobraDeMas ? "de más" : "de menos"}.`
+            + (conforme ? ` Se aprobó: ${nota}` : " Queda observado.")),
+      oldData: { monto: email.amountStatus, pactado: email.agreedAmount },
+      newData: { monto: estado, pactado: data.agreedAmount, diferencia },
+    });
+
+    revalidatePath("/", "layout");
+    if (coincide) {
+      return {
+        ok: true,
+        message: `El monto coincide con lo pactado. ${label} ya se puede aceptar o rechazar.`,
+      };
+    }
+    if (conforme) {
+      return {
+        ok: true,
+        message: `Diferencia de ${plata(diferencia)} ${cobraDeMas ? "de más" : "de menos"} aprobada.`
+          + ` ${label} ya se puede aceptar o rechazar.`,
+      };
+    }
+    return {
+      ok: true,
+      message: `${label} queda con el monto observado: el proveedor cobra ${plata(diferencia)}`
+        + ` ${cobraDeMas ? "más" : "menos"} de lo pactado. No se puede aceptar hasta resolverlo.`,
+    };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
  * Acepta el comprobante: recién aquí nace la factura por pagar.
  *
  * Hasta este momento el correo era solo lo que mandó el proveedor. Al aceptarlo, la
@@ -188,6 +281,17 @@ export async function approveEmail(id: string, formData: FormData): Promise<Acti
     if (email.status === "PROCESADO") throw new BusinessError("Este comprobante ya fue aceptado.");
     if (email.status !== "POR_APROBAR") {
       throw new BusinessError("Solo se pueden aceptar los comprobantes que están por aprobar.");
+    }
+    // El filtro del monto va antes. Sin él, aceptar sería reconocer una deuda cuyo importe
+    // nadie comparó con lo que se pactó por el flete.
+    if (email.amountStatus === "PENDIENTE") {
+      throw new BusinessError("Antes de aceptar hay que verificar el monto: compáralo con lo pactado por el flete.");
+    }
+    if (email.amountStatus === "OBSERVADO") {
+      throw new BusinessError(
+        `El monto está observado: ${email.amountNote || "no coincide con lo pactado"}.`
+        + " Corrígelo o apruébalo con un comentario antes de aceptar el comprobante.",
+      );
     }
 
     const resultado = await db.transaction((tx) => registerApprovedEmail(tx, email, user, {

@@ -148,6 +148,13 @@
       "when": 1793300938195,
       "tag": "0020_actividad_en_asistencia",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793377450218,
+      "tag": "0021_filtro_de_monto",
+      "breakpoints": true
     }
   ]
 }

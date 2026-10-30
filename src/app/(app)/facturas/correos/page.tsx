@@ -2,7 +2,7 @@ import { ArrowLeft, MailX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
-  AceptarModal, AplicarNotaCreditoModal, RechazarModal, VerComprobanteModal,
+  AceptarModal, AplicarNotaCreditoModal, RechazarModal, VerComprobanteModal, VerificarMontoModal,
   type ComprobanteLeido, type CorreoParaDecidir,
 } from "@/components/invoices/approval-actions";
 import { DiscardEmailModal, InvoiceFromEmailModal, RetryEmailButton } from "@/components/invoices/email-actions";
@@ -17,7 +17,8 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
-  cn, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, invoiceNumber, pageParams, type SearchParams,
+  AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney,
+  invoiceNumber, pageParams, type AmountCheckKey, type SearchParams,
 } from "@/lib/utils";
 import { leerConceptoTransporte, pareceTransporte } from "@/server/concepto-transporte";
 import { notificationUrl } from "@/server/graph";
@@ -45,12 +46,13 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
   const { page, pageSize, offset } = pageParams(sp, 20);
   const f = readEmailFilters(sp);
 
-  // Sin pestaña elegida se entra por lo que espera decisión, que es a lo que se viene.
-  // Si se está buscando algo, no: una búsqueda acotada a una pestaña no encontraría el
-  // correo que se busca y parecería que no existe.
+  // Sin pestaña elegida se entra por el primer paso del camino: verificar el monto, que es
+  // lo que hay que hacer antes de decidir nada. Si se está buscando algo, no: una búsqueda
+  // acotada a una pestaña no encontraría el correo que se busca y parecería que no existe.
+  const elegida = first(sp.estado);
   const buscando = !!(f.q || f.from || f.to);
-  const pestaña = first(sp.estado) ?? (buscando ? "" : "POR_APROBAR");
-  const filtros = { ...f, status: buscando && !first(sp.estado) ? undefined : f.status };
+  const pestaña = elegida ?? (buscando ? "" : "POR_VERIFICAR");
+  const filtros = !elegida && buscando ? f : readEmailFilters({ ...sp, estado: pestaña });
 
   const config = readMailboxConfig();
   const [{ rows, total }, cuentas, subscription, sync, suppliers] = await Promise.all([
@@ -98,6 +100,12 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
     detail: e.detail,
     comprobante: (e.parsed as ComprobanteLeido | null) ?? null,
     archivos: (attachments.get(e.id) ?? []).map((a) => ({ id: a.id, filename: a.filename, sizeBytes: a.sizeBytes })),
+    monto: {
+      estado: (e.amountStatus as AmountCheckKey) ?? "PENDIENTE",
+      pactado: e.agreedAmount,
+      nota: e.amountNote,
+      verificadoEl: e.amountCheckedAt?.toISOString() ?? null,
+    },
     rejectReason: e.rejectReason,
     rejectComment: e.rejectComment,
     replyTo: e.replyTo,
@@ -131,10 +139,21 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
 
       <MailboxPanel status={status} canConfigure={can(user.role, "invoices.mailbox")} />
 
+      {/* El camino, en dos avisos: primero cuántos esperan el filtro del monto, después
+          cuántos ya pasaron y esperan decisión. */}
+      {cuentas.porVerificar > 0 && (
+        <p className="mb-3 rounded-lg border border-brand-ink/30 bg-brand-soft px-4 py-3 text-sm text-ink-800">
+          <strong>{cuentas.porVerificar} comprobante(s)</strong> esperan que se verifique el monto contra lo
+          pactado por el flete. Hasta que eso no pase, no se pueden aceptar.
+          {cuentas.observados > 0 && (
+            <> <strong>{cuentas.observados}</strong> de ellos ya quedaron observados por una diferencia.</>
+          )}
+        </p>
+      )}
       {cuentas.porAprobar > 0 && (
         <p className="mb-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
-          <strong>{cuentas.porAprobar} comprobante(s)</strong> esperan tu decisión. Mientras no se acepten no
-          figuran como deuda, y el proveedor sigue esperando respuesta.
+          <strong>{cuentas.porAprobar} comprobante(s)</strong> con el monto conforme esperan tu decisión.
+          Mientras no se acepten no figuran como deuda, y el proveedor sigue esperando respuesta.
         </p>
       )}
 
@@ -145,6 +164,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         params={sp}
         className="mb-3"
         tabs={[
+          { value: "POR_VERIFICAR", label: "Por verificar monto", count: cuentas.porVerificar },
           { value: "POR_APROBAR", label: "Por aprobar", count: cuentas.porAprobar },
           { value: "REVISAR", label: "Por revisar", count: cuentas.revisar },
           { value: "PROCESADO", label: "Aceptados", count: cuentas.aceptados },
@@ -178,10 +198,14 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
           {rows.length === 0 && (
             <EmptyRow
               colSpan={6}
-              title={pestaña === "POR_APROBAR" ? "No hay nada esperando decisión" : "No hay correos para mostrar"}
-              hint={status.configured
-                ? "Cuando llegue una factura al buzón aparecerá aquí. Puedes forzar una revisión con Revisar ahora."
-                : "Esta bandeja se llena cuando se conecta el buzón de correo."}
+              title={pestaña === "POR_VERIFICAR" ? "No hay montos por verificar"
+                : pestaña === "POR_APROBAR" ? "No hay nada esperando decisión"
+                : "No hay correos para mostrar"}
+              hint={!status.configured
+                ? "Esta bandeja se llena cuando se conecta el buzón de correo."
+                : pestaña === "POR_VERIFICAR"
+                  ? "Cuando llegue un comprobante, lo primero será comparar su importe con lo pactado por el flete."
+                  : "Cuando llegue una factura al buzón aparecerá aquí. Puedes forzar una revisión con Revisar ahora."}
             />
           )}
           {rows.map((e) => {
@@ -211,10 +235,30 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                 </Td>
                 <Td className="whitespace-nowrap text-right font-medium tabular">
                   {c ? formatMoney(c.total, c.currency) : <span className="text-steel-400">—</span>}
+                  {/* Lo pactado al lado de lo facturado: la diferencia se ve sin abrir nada. */}
+                  {c && e.agreedAmount && (() => {
+                    const { diferencia, coincide, cobraDeMas } = compararMonto(c.total, e.agreedAmount);
+                    return coincide ? (
+                      <p className="text-xs font-normal text-emerald-700">= lo pactado</p>
+                    ) : (
+                      <p className="text-xs font-semibold text-red-700">
+                        {cobraDeMas ? "+" : "−"} {formatMoney(Math.abs(diferencia).toFixed(2), c.currency)}
+                      </p>
+                    );
+                  })()}
                 </Td>
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 xl:table-cell">{formatDateTime(e.receivedAt)}</Td>
                 <Td>
                   <EmailStatusBadge status={e.status} />
+                  {porAprobar && c && (
+                    <p className={cn(
+                      "mt-0.5 text-xs",
+                      e.amountStatus === "OBSERVADO" ? "font-semibold text-red-700"
+                        : e.amountStatus === "CONFORME" ? "text-emerald-700" : "text-steel-600",
+                    )}>
+                      {AMOUNT_CHECK_LABEL[(e.amountStatus as AmountCheckKey) ?? "PENDIENTE"]}
+                    </p>
+                  )}
                   {e.invoiceId && (
                     <Link href={`/facturas/${e.invoiceId}`} className="mt-0.5 block text-xs text-steel-600 hover:underline">
                       Ver la factura
@@ -236,13 +280,22 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                       <>
                         {/* Una nota de crédito no se "acepta" como factura por pagar: se
                             aplica a la factura que anula, que es lo único que cabe hacer
-                            con ella. */}
+                            con ella. Tampoco pasa por el filtro del monto: no es un flete
+                            que se vaya a pagar, es la anulación de uno. */}
                         {c?.docType === "NOTA_CREDITO" ? (
                           <AplicarNotaCreditoModal correo={correo} />
+                        ) : c && e.amountStatus !== "CONFORME" ? (
+                          /* Primero el filtro: hasta que el monto no esté conforme, aceptar
+                             sería reconocer una deuda que nadie comparó con lo pactado. */
+                          <VerificarMontoModal correo={correo} />
                         ) : (
                           /* Si ese proveedor ya está registrado, la condición de pago que
                              se propone es la pactada con él, no la de por defecto. */
                           <AceptarModal correo={correo} condicion={condicionDe(c?.supplierRuc)} />
+                        )}
+                        {/* Ya verificado, se deja a mano por si hay que corregir lo pactado. */}
+                        {c && e.amountStatus === "CONFORME" && c.docType !== "NOTA_CREDITO" && (
+                          <VerificarMontoModal correo={correo} />
                         )}
                         <RechazarModal correo={correo} />
                       </>
@@ -269,6 +322,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
       </TableShell>
 
       <p className="mt-3 text-xs text-steel-500">
+        El camino es: se verifica el monto contra lo pactado, después se acepta o se rechaza, y lo
+        aceptado pasa a facturas por pagar ·{" "}
         {EMAIL_STATUS_LABEL.POR_APROBAR}: el comprobante se leyó y espera decisión ·{" "}
         {EMAIL_STATUS_LABEL.REVISAR}: no se pudo leer el XML, se registra a mano o se rechaza igual ·{" "}
         {EMAIL_STATUS_LABEL.DESCARTADO}: no era una factura por pagar, o ya estaba registrada (sin avisar al proveedor).

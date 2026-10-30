@@ -14,7 +14,7 @@ import { PageHeader, Panel } from "@/components/ui/page-header";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
-  ATTACHMENT_KIND_LABEL, cn, formatDate, formatDateTime, formatFileSize, formatMoney,
+  ATTACHMENT_KIND_LABEL, cn, compararMonto, formatDate, formatDateTime, formatFileSize, formatMoney,
   DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL,
   invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, saldoAPagar,
   type RejectReasonKey,
@@ -467,6 +467,31 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   {email.fromAddress && <p className="text-xs text-steel-500">{email.fromAddress}</p>}
                 </Dato>
                 <Dato label="Recibido">{formatDateTime(email.receivedAt)}</Dato>
+                {/* El filtro que pasó antes de aceptarse: contra qué importe se comparó.
+                    Es lo que permite explicar, meses después, por qué se pagó esto. */}
+                {email.agreedAmount && (
+                  <Dato label="Monto pactado al verificar">
+                    {formatMoney(email.agreedAmount, invoice.currency)}
+                    {(() => {
+                      const { diferencia, coincide, cobraDeMas } = compararMonto(invoice.total, email.agreedAmount);
+                      return coincide ? (
+                        <span className="block text-xs text-emerald-700">Coincidía con lo facturado</span>
+                      ) : (
+                        <span className="block text-xs font-medium text-red-700">
+                          Facturó {formatMoney(Math.abs(diferencia).toFixed(2), invoice.currency)}{" "}
+                          {cobraDeMas ? "de más" : "de menos"}
+                          {email.amountNote && <span className="block font-normal text-steel-600">{email.amountNote}</span>}
+                        </span>
+                      );
+                    })()}
+                    {email.amountCheckedByName && (
+                      <span className="block text-xs text-steel-500">
+                        Lo verificó {email.amountCheckedByName}
+                        {email.amountCheckedAt && ` · ${formatDateTime(email.amountCheckedAt)}`}
+                      </span>
+                    )}
+                  </Dato>
+                )}
               </dl>
               {canManage && (
                 <div className="border-t border-steel-100 px-4 py-3">

@@ -551,6 +551,20 @@ export const approveEmailSchema = z.object({
 });
 
 /**
+ * El filtro del monto, antes de aceptar o rechazar.
+ *
+ * `agreedAmount` es lo pactado por el flete. `aprobarDiferencia` es la decisión de quien
+ * revisa cuando no cuadra: sin eso, el comprobante queda observado y no se puede aceptar.
+ * El comentario es obligatorio justo en ese caso —aprobar una diferencia sin decir por qué
+ * es exactamente el agujero que este filtro viene a tapar—, y lo exige el servidor.
+ */
+export const verifyAmountSchema = z.object({
+  agreedAmount: money("El monto pactado"),
+  aprobarDiferencia: checkbox,
+  amountNote: optionalText(250),
+});
+
+/**
  * Rechazar un comprobante. El cuerpo del correo llega ya armado desde la pantalla, donde
  * quien rechaza pudo leerlo y corregirlo: se guarda y se envía tal cual lo aprobó.
  */

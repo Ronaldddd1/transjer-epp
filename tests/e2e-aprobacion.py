@@ -105,11 +105,12 @@ with sync_playwright() as p:
     page.goto(f"{BASE}/facturas/correos")
     page.wait_for_timeout(1800)
 
-    # --- Se entra por lo que espera decisión ---
+    # --- Se entra por el primer paso del camino: verificar el monto ---
     activa = page.locator("[role=tab][aria-selected=true]").inner_text()
-    check("se entra por lo que hay que aprobar", "aprobar" in activa.lower(), activa)
+    check("se entra por lo que hay que verificar", "verificar" in activa.lower(), activa)
     cuerpo = page.content()
-    check("avisa cuántos esperan decisión", "esperan tu decisión" in cuerpo)
+    check("avisa cuántos esperan que se verifique el monto",
+          "esperan que se verifique el monto" in cuerpo)
 
     # --- Los datos del comprobante se ven en la lista, sin abrir nada ---
     fila = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}1")
@@ -129,7 +130,7 @@ with sync_playwright() as p:
           caja[1] <= caja[0] + 1, {"visible": caja[0], "real": caja[1], "tabla": ancho_tabla})
 
     # --- Ver el comprobante sin salir del buzón ---
-    fila.get_by_role("button", name="Ver").click()
+    fila.get_by_role("button", name="Ver", exact=True).click()
     page.wait_for_timeout(900)
     dialogo = page.get_by_role("dialog")
     detalle = dialogo.inner_text()
@@ -140,9 +141,71 @@ with sync_playwright() as p:
     page.keyboard.press("Escape")
     page.wait_for_timeout(600)
 
-    # --- Aceptar: recién aquí nace la factura ---
+    # --- El filtro del monto va antes de poder aceptar ---
     antes = int(psql(f"select count(*) from supplier_invoices where series = '{SERIE}' and number like '{SELLO}%'"))
     check("antes de aceptar no hay ninguna factura registrada", antes == 0, antes)
+
+    check("sin verificar el monto no se ofrece aceptar",
+          fila.get_by_role("button", name="Aceptar").count() == 0, fila.inner_text())
+    check("lo que se ofrece es verificar el monto",
+          fila.get_by_role("button", name="Verificar monto").count() == 1, fila.inner_text())
+
+    # Un importe distinto al pactado deja el comprobante observado y lo frena.
+    fila.get_by_role("button", name="Verificar monto").click()
+    page.wait_for_timeout(900)
+    dlg_monto = page.get_by_role("dialog")
+    dlg_monto.locator("input[name=agreedAmount]").fill("1000")
+    page.wait_for_timeout(500)
+    check("la ventana calcula la diferencia al escribir el monto pactado",
+          "180.00" in dlg_monto.inner_text() and "de más" in dlg_monto.inner_text(),
+          dlg_monto.inner_text()[:260])
+    dlg_monto.get_by_role("button", name="Dejar el monto observado").click()
+    page.wait_for_timeout(2400)
+
+    check("el comprobante queda con el monto observado",
+          psql(f"select amount_status from invoice_emails where id = '{aceptar_id}'") == "OBSERVADO")
+    check("y sigue esperando decisión, sin factura registrada",
+          psql(f"select status from invoice_emails where id = '{aceptar_id}'") == "POR_APROBAR"
+          and psql(f"select count(*) from supplier_invoices where series = '{SERIE}' and number = '{SELLO}1'") == "0")
+
+    page.goto(f"{BASE}/facturas/correos")
+    page.wait_for_timeout(1700)
+    fila = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}1")
+    check("la lista muestra la diferencia sin abrir nada", "+ S/ 180.00" in fila.inner_text(), fila.inner_text())
+    check("y con el monto observado tampoco deja aceptar",
+          fila.get_by_role("button", name="Aceptar").count() == 0, fila.inner_text())
+
+    # Aprobar la diferencia exige decir por qué; con el motivo, el filtro queda conforme.
+    fila.get_by_role("button", name="Revisar monto").click()
+    page.wait_for_timeout(900)
+    dlg_monto = page.get_by_role("dialog")
+    dlg_monto.locator("input[name=agreedAmount]").fill("1000")
+    page.wait_for_timeout(400)
+    dlg_monto.locator("input[name=aprobarDiferencia]").check()
+    page.wait_for_timeout(300)
+    dlg_monto.get_by_role("button", name="Guardar la verificación").click()
+    page.wait_for_timeout(2200)
+    check("aprobar una diferencia sin explicarla no pasa",
+          "explicar por qué" in page.content(),
+          page.content()[-400:] if "explicar por qué" not in page.content() else "")
+
+    dlg_monto.locator("textarea[name=amountNote]").fill("Recargo acordado por la espera en planta")
+    dlg_monto.get_by_role("button", name="Guardar la verificación").click()
+    page.wait_for_timeout(2600)
+    estado_monto = psql("select amount_status || '|' || agreed_amount || '|' || coalesce(amount_note,'') "
+                        f"from invoice_emails where id = '{aceptar_id}'")
+    check("con el motivo, el monto queda conforme y guarda lo pactado",
+          estado_monto.startswith("CONFORME|1000.00|Recargo acordado"), estado_monto)
+    check("y queda registrado quién lo verificó",
+          psql(f"select amount_checked_by is not null from invoice_emails where id = '{aceptar_id}'") == "t")
+
+    # --- Recién ahora se puede aceptar: aquí nace la factura ---
+    page.goto(f"{BASE}/facturas/correos?estado=POR_APROBAR")
+    page.wait_for_timeout(1700)
+    fila = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}1")
+    check("con el monto conforme, el comprobante pasa a la pestaña de aprobar",
+          fila.count() == 1 and fila.get_by_role("button", name="Aceptar").count() == 1,
+          fila.inner_text() if fila.count() else "no está en la pestaña")
 
     fila.get_by_role("button", name="Aceptar").click()
     page.wait_for_timeout(900)
@@ -168,6 +231,22 @@ with sync_playwright() as p:
     # --- Una factura de transporte: el tipo, el plazo y los datos del viaje ---
     page.goto(f"{BASE}/facturas/correos")
     page.wait_for_timeout(1600)
+    fila_t = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
+    # Esta sí viene por el importe pactado: el filtro queda conforme de una.
+    fila_t.get_by_role("button", name="Verificar monto").click()
+    page.wait_for_timeout(900)
+    dlg_monto = page.get_by_role("dialog")
+    dlg_monto.locator("input[name=agreedAmount]").fill("1180")
+    page.wait_for_timeout(500)
+    check("cuando coincide, la ventana lo dice", "Coincide con lo pactado" in dlg_monto.inner_text(),
+          dlg_monto.inner_text()[:260])
+    dlg_monto.get_by_role("button", name="Guardar la verificación").click()
+    page.wait_for_timeout(2600)
+    check("el monto que coincide queda conforme sin más trámite",
+          psql(f"select amount_status from invoice_emails where id = '{transporte_id}'") == "CONFORME")
+
+    page.goto(f"{BASE}/facturas/correos?estado=POR_APROBAR")
+    page.wait_for_timeout(1700)
     fila_t = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}3")
     fila_t.get_by_role("button", name="Aceptar").click()
     page.wait_for_timeout(1000)
