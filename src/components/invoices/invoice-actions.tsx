@@ -179,10 +179,7 @@ export function AdvanceModal({ invoice, variant = "outline", compact = false }: 
           <Field label="Referencia" name="paymentReference" error={errors.paymentReference} hint="Número de operación o transferencia.">
             <Input name="paymentReference" maxLength={120} placeholder="Transferencia 0012345" />
           </Field>
-          <VoucherField
-            error={errors.voucher}
-            ayuda="La captura o el PDF de la transferencia. Sin esto el adelanto no se registra."
-          />
+          <VoucherField error={errors.voucher} />
           <Field label="Observaciones" name="notes" error={errors.notes}>
             <Textarea name="notes" maxLength={500} rows={2} placeholder="A cuenta del flete de Trujillo." />
           </Field>

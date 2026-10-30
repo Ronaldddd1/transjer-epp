@@ -165,15 +165,8 @@ def main():
         page.wait_for_timeout(400)
         page.fill("input[name=detractionReceipt]", "301536291")
 
-        # Sin la imagen de la constancia no se da por depositada: es el papel que después
-        # permite cuadrar el depósito con el Banco de la Nación.
-        page.click("button:has-text('Guardar')")
-        page.wait_for_timeout(2200)
-        check("sin la imagen de la constancia no se da por depositada",
-              "Falta la imagen de la constancia" in page.content())
-        check("y la detracción sigue pendiente",
-              psql(f"select detraction_status from supplier_invoices where series='{serie}'") == "PENDIENTE")
-
+        # La constancia es opcional: si llega después, se sube después. Aquí se adjunta
+        # para comprobar que queda guardada y enlazada al depósito.
         page.set_input_files("input[name=voucher]", CONSTANCIA)
         enviar(page, "Guardar")
         check("la detracción queda pagada", "Pagada" in page.content() and "301536291" in page.content())

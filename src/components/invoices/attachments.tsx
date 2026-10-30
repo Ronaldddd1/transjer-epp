@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
+import { ImageInput } from "@/components/ui/image-input";
 
 export function UploadAttachmentsModal({ invoiceId, maxMb }: { invoiceId: string; maxMb: number }) {
   return (
@@ -21,14 +22,7 @@ export function UploadAttachmentsModal({ invoiceId, maxMb }: { invoiceId: string
     >
       {() => (
         <Field label="Archivos" name="files" required hint={`PDF, XML, ZIP o imagen. Máximo ${maxMb} MB por archivo.`}>
-          <input
-            id="files"
-            name="files"
-            type="file"
-            multiple
-            accept=".pdf,.xml,.zip,.png,.jpg,.jpeg"
-            className="w-full rounded-md border border-steel-300 bg-white p-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-sm file:text-white hover:file:bg-ink-700"
-          />
+          <ImageInput id="files" name="files" multiple accept=".pdf,.xml,.zip,.png,.jpg,.jpeg" />
         </Field>
       )}
     </FormModal>

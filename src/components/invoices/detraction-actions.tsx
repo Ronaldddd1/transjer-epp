@@ -82,15 +82,14 @@ export function DetractionModal({ invoice, variant = "primary", compact = false 
               <Field label="N.º de operación" name="detractionOperation" error={errors.detractionOperation}>
                 <Input name="detractionOperation" defaultValue={invoice.detractionOperation ?? ""} maxLength={40} />
               </Field>
-              {/* La constancia en papel se pide una sola vez: si ya está guardada, corregir
-                  una nota no obliga a volver a subirla. */}
+              {/* La constancia se guarda si la tienen a mano; si llega después, se sube
+                  después. El depósito se registra igual. */}
               <VoucherField
-                requerido={!invoice.tieneConstancia}
-                etiqueta={invoice.tieneConstancia ? "Cambiar la constancia (opcional)" : "Imagen de la constancia"}
+                etiqueta={invoice.tieneConstancia ? "Cambiar la constancia (opcional)" : "Imagen de la constancia (opcional)"}
                 error={errors.voucher}
                 ayuda={invoice.tieneConstancia
                   ? "Ya hay una constancia guardada. Sube otra solo si reemplaza a la anterior."
-                  : "La captura o el PDF de la constancia del Banco de la Nación. Sin esto no se da por depositada."}
+                  : "La captura o el PDF de la constancia del Banco de la Nación, si ya la tienes."}
               />
             </>
           )}

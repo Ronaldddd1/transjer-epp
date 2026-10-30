@@ -8,18 +8,19 @@ import { saveAttachment, type ReadFile } from "@/server/invoice-service";
 /**
  * El comprobante de un pago: la captura de la transferencia, la constancia del banco.
  *
- * Donde sale plata se exige la imagen y el pago no se registra sin ella: es lo único que
- * permite reconstruir después a quién se le pagó y con qué operación, cuando el banco ya
- * no muestra el movimiento en pantalla y el único rastro era la captura que alguien tenía
- * en su celular. La excepción son las cuotas de préstamos y servicios, que muchas veces se
- * pagan en efectivo o por descuento automático y no tienen nada que adjuntar.
+ * Se guarda siempre que lo suban, pero no frena el registro. Exigirlo salía caro: la
+ * captura suele llegar después —por WhatsApp, o al día siguiente— y el pago se quedaba sin
+ * registrar mientras tanto, de modo que la factura seguía figurando como pendiente cuando
+ * ya estaba pagada. Eso es peor problema que una factura sin imagen, y la imagen se puede
+ * adjuntar luego desde los archivos de la factura.
  *
- * Se revisa con la misma vara que los documentos de los vehículos: un archivo que no se
- * puede abrir no sirve de respaldo, y conviene saberlo al subirlo y no meses después.
+ * Lo que sí se mantiene es la revisión: si suben algo, tiene que poder abrirse. Se mide con
+ * la misma vara que los documentos de los vehículos, y las fotos llegan ya achicadas desde
+ * el navegador, así que una captura de celular entra sin toparse con el tope.
  */
 
 /** Lo que puede ser un voucher: la foto o el PDF que da el banco. */
-const EXTENSIONES = /\.(pdf|png|jpg|jpeg|webp)$/i;
+const EXTENSIONES = /\.(pdf|png|jpg|jpeg|webp|heic|heif)$/i;
 
 /**
  * Lee el voucher del formulario y lo revisa, sin guardarlo todavía.

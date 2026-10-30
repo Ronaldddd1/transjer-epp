@@ -111,7 +111,7 @@ export const ATTACHMENT_KIND_LABEL = {
 } as const;
 
 /** Lo que se acepta como comprobante de un pago, igual en el formulario y en el servidor. */
-export const VOUCHER_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
+export const VOUCHER_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp,.heic,.heif";
 
 /**
  * En qué punto está un correo del buzón.

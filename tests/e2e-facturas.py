@@ -224,26 +224,26 @@ with sync_playwright() as p:
 
     # Más que el saldo no entra: sería pagarle de más al proveedor.
     m.locator("#amount").fill("3000")
-    m.locator("#voucher").set_input_files(VOUCHER)
     m.get_by_role("button", name="Registrar el adelanto").click()
     toast(page, "mayor que el saldo")
     assert psql(f"select count(*) from invoice_advances where invoice_id='{inv_id}'") == "0"
     ok("Un adelanto mayor que el saldo se rechaza")
 
+    # Y se registra sin imagen: el voucher es opcional, porque la captura muchas veces
+    # llega después y dejar el adelanto sin anotar descuadraba el saldo del proveedor.
     m.locator("#amount").fill("832")
     m.locator("#paymentReference").fill("Adelanto 5521")
-    m.locator("#voucher").set_input_files(VOUCHER)
     m.get_by_role("button", name="Registrar el adelanto").click()
     toast(page, "Adelanto de S/ 832.00 registrado")
     adelanto = psql(f"select amount || '|' || payment_reference || '|' || (proof_id is not null)::text from invoice_advances where invoice_id='{inv_id}'")
-    assert adelanto == "832.00|Adelanto 5521|true", adelanto
+    assert adelanto == "832.00|Adelanto 5521|false", adelanto
     assert psql(f"select advances from supplier_invoices where id='{inv_id}'") == "832.00"
-    ok("Adelanto desde la tabla: baja el saldo y guarda su voucher")
+    ok("Adelanto desde la tabla: se registra sin imagen y baja el saldo")
 
     page.goto(BASE + f"/facturas/{inv_id}")
     expect(page.get_by_text("Adelantos a cuenta")).to_be_visible()
     expect(page.get_by_text("Adelanto 5521")).to_be_visible()
-    ok("La ficha muestra el historial de adelantos con su comprobante")
+    ok("La ficha muestra el historial de adelantos")
 
     # --- 7. Registrar el pago
     page.get_by_role("button", name="Pagar", exact=True).first.click()
@@ -251,13 +251,9 @@ with sync_playwright() as p:
     # Lo que de verdad se transfiere: el total menos la detracción y menos el adelanto.
     expect(m.get_by_text("S/ 2,000.00").first).to_be_visible()
     m.locator("#paymentReference").fill("Transferencia 778899")
-    # Sin la imagen de la transferencia el pago no entra: es lo único que queda como
-    # respaldo cuando el banco ya no muestra el movimiento en pantalla.
-    m.get_by_role("button", name="Confirmar pago").click()
-    toast(page, "Falta la imagen de la transferencia")
-    assert psql(f"select status from supplier_invoices where id='{inv_id}'") == "PENDIENTE"
-    ok("Un pago sin el voucher no se registra")
-
+    # El voucher es opcional: la captura suele llegar después, y dejar la factura sin
+    # registrar mientras tanto es peor que registrarla sin imagen. Se adjunta igual aquí
+    # para comprobar que, cuando la suben, queda guardada y enlazada al pago.
     m.locator("#voucher").set_input_files(VOUCHER)
     m.get_by_role("button", name="Confirmar pago").click()
     toast(page, "F050-777 marcada como pagada")
@@ -267,8 +263,8 @@ with sync_playwright() as p:
     # El voucher queda colgado de la factura y marcado como comprobante de pago.
     voucher = psql(f"select kind || '|' || filename from invoice_attachments where id = (select payment_proof_id from supplier_invoices where id='{inv_id}')")
     assert voucher == "VOUCHER|voucher.pdf", voucher
-    # Hay dos: el del adelanto y el del pago, los dos colgados de la factura.
-    expect(page.get_by_text("Comprobante de pago")).to_have_count(2)
+    # El del pago, que sí se adjuntó, cuelga de la factura.
+    expect(page.get_by_text("Comprobante de pago")).to_have_count(1)
     ok("Registro de pago: guarda fecha, referencia, responsable y el voucher")
 
     # --- 8. Una factura pagada no se edita ni se paga otra vez

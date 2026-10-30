@@ -166,11 +166,10 @@ export async function payInvoice(id: string, formData: FormData): Promise<Action
     const data = payInvoiceSchema.parse(formToObject(formData));
     if (data.paidAt > todayLima()) throw new BusinessError("La fecha de pago no puede ser futura.");
     // El voucher se lee y se revisa antes de abrir la transacción: si no sirve, la factura
-    // no tiene por qué haber empezado a marcarse como pagada.
-    const voucher = await leerVoucher(formData, {
-      requerido: true,
-      falta: "Falta la imagen de la transferencia: sin el voucher el pago no se registra.",
-    });
+    // no tiene por qué haber empezado a marcarse como pagada. No es obligatorio: hay pagos
+    // que se registran el mismo día y la captura llega después, y bloquear el registro por
+    // eso dejaba la factura figurando como pendiente, que es peor que no tener la imagen.
+    const voucher = await leerVoucher(formData, { requerido: false });
 
     const after = await db.transaction(async (tx) => {
       // Bloqueo de la fila: si dos personas la pagan a la vez, solo una lo consigue.
@@ -179,7 +178,9 @@ export async function payInvoice(id: string, formData: FormData): Promise<Action
       if (before.status === "PAGADA") throw new BusinessError("Esta factura ya figura como pagada.");
       if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
 
-      const proofId = await guardarVoucher(tx, voucher!, { invoiceId: id, uploadedBy: user.id });
+      const proofId = voucher
+        ? await guardarVoucher(tx, voucher, { invoiceId: id, uploadedBy: user.id })
+        : null;
 
       const [row] = await tx.update(supplierInvoices).set({
         status: "PAGADA",
@@ -222,10 +223,7 @@ export async function payAdvance(id: string, formData: FormData): Promise<Action
     const user = await requireActionUser("invoices.pay");
     const data = advanceSchema.parse(formToObject(formData));
     if (data.paidAt > todayLima()) throw new BusinessError("La fecha del adelanto no puede ser futura.");
-    const voucher = await leerVoucher(formData, {
-      requerido: true,
-      falta: "Falta la imagen de la transferencia: sin el voucher el adelanto no se registra.",
-    });
+    const voucher = await leerVoucher(formData, { requerido: false });
 
     const resultado = await db.transaction(async (tx) => {
       const [before] = await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, id)).for("update");
@@ -250,7 +248,9 @@ export async function payAdvance(id: string, formData: FormData): Promise<Action
         .from(invoiceAdvances).where(eq(invoiceAdvances.invoiceId, id));
       const aMano = Math.max(0, Number(before.advances ?? 0) - Number(previas));
 
-      const proofId = await guardarVoucher(tx, voucher!, { invoiceId: id, uploadedBy: user.id });
+      const proofId = voucher
+        ? await guardarVoucher(tx, voucher, { invoiceId: id, uploadedBy: user.id })
+        : null;
 
       const [adelanto] = await tx.insert(invoiceAdvances).values({
         invoiceId: id,
@@ -737,13 +737,9 @@ export async function setDetraction(id: string, formData: FormData): Promise<Act
       throw new BusinessError("Para dar una detracción por pagada hace falta el número de constancia.");
     }
 
-    // La imagen de la constancia se exige solo al darla por depositada, que es cuando sale
-    // la plata. Si ya había una guardada, no hay que volver a subirla para corregir una nota.
-    const exigeVoucher = data.detractionStatus === "PAGADA" && !before.detractionProofId;
-    const voucher = await leerVoucher(formData, {
-      requerido: exigeVoucher,
-      falta: "Falta la imagen de la constancia del depósito: sin ella la detracción no se da por pagada.",
-    });
+    // La imagen de la constancia se guarda si la suben, pero no frena el registro: el
+    // depósito existe aunque la constancia llegue después.
+    const voucher = await leerVoucher(formData, { requerido: false });
 
     const after = await db.transaction(async (tx) => {
       const proofId = voucher

@@ -15,8 +15,16 @@ import { BusinessError } from "@/lib/action-result";
 export type StorageDriver = "db" | "blob" | "supabase";
 
 export const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024;
-/** En modo "db" los archivos viven dentro de la base: se limita más para no llenarla. */
-export const MAX_DB_ATTACHMENT_BYTES = 3 * 1024 * 1024;
+/**
+ * En modo "db" los archivos viven dentro de la base, así que se limita más para no llenarla.
+ *
+ * Eran 3 MB, y con eso rebotaba casi cualquier foto de celular: hoy una captura sale entre
+ * 4 y 8 MB, y quien subía el sustento de un pago se topaba con que "el archivo supera el
+ * máximo permitido" sin tener forma de achicarlo. Las fotos ahora se achican en el
+ * navegador antes de subirlas, y este tope queda como red para los PDF escaneados, que no
+ * se pueden achicar ahí.
+ */
+export const MAX_DB_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 
 const SUPABASE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || "facturas";
 

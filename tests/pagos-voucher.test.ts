@@ -1,11 +1,10 @@
 /**
  * El comprobante de pago.
  *
- * La regla es corta: donde sale plata —factura, adelanto, detracción— no se registra el
- * pago sin la imagen, y en las cuotas de préstamos y servicios es opcional. Lo que esta
- * prueba cuida es que la imagen que se acepta de verdad se pueda abrir después: un archivo
- * ilegible guardado como respaldo es peor que no tener respaldo, porque nadie lo revisa
- * hasta el día en que hace falta.
+ * La regla es corta: subirlo es opcional en todos los pagos —la captura suele llegar
+ * después y el pago no puede quedarse sin registrar por eso— pero lo que se sube tiene que
+ * poder abrirse. Un archivo ilegible guardado como respaldo es peor que no tener respaldo,
+ * porque nadie lo revisa hasta el día en que hace falta.
  *
  * También cuida la cuenta del adelanto, que es la que el Excel traía mal: un adelanto no
  * puede pasar del saldo, y el saldo es el total menos la detracción y menos lo ya adelantado.
@@ -64,6 +63,18 @@ function pngValido(lado = 1000): Buffer {
   ]);
 }
 
+/** Un JPEG de verdad y del peso de una foto de celular. */
+function fotoGrande(mb = 5): Buffer {
+  // Cabecera JPEG válida con sus medidas en el marcador SOF0, y relleno hasta el peso.
+  const cabecera = Buffer.from([
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00,
+    0x00, 0x01, 0x00, 0x01, 0x00, 0x00,
+    0xFF, 0xC0, 0x00, 0x11, 0x08, 0x0C, 0x00, 0x10, 0x00, 0x03, 0x01, 0x11, 0x00,
+    0x02, 0x11, 0x01, 0x03, 0x11, 0x01,
+  ]);
+  return Buffer.concat([cabecera, Buffer.alloc(mb * 1024 * 1024, 0x7F), Buffer.from([0xFF, 0xD9])]);
+}
+
 function conArchivo(nombre: string, datos: Buffer, tipo: string): FormData {
   const fd = new FormData();
   fd.set("voucher", new File([new Uint8Array(datos)], nombre, { type: tipo }));
@@ -81,28 +92,28 @@ async function motivo(fd: FormData, requerido = true): Promise<string | null> {
 }
 
 async function main() {
-  // ---------- Sin imagen no hay pago ----------
-  const vacio = new FormData();
-  const sinNada = await motivo(vacio);
-  check("sin imagen el pago se rechaza", !!sinNada && /falta la imagen/i.test(sinNada), sinNada);
-
-  check("y en préstamos y servicios, donde es opcional, se deja pasar",
+  // ---------- Sin imagen el pago se registra igual ----------
+  check("sin imagen el pago se registra igual",
     (await leerVoucher(new FormData(), { requerido: false })) === null);
 
   // Un <input type=file> vacío manda un File de cero bytes, no manda nada: cuenta igual
   // que no haber subido nada, y es el caso que de verdad llega del navegador.
   const cero = conArchivo("captura.png", Buffer.alloc(0), "image/png");
-  const conCero = await motivo(cero);
   check("un archivo de cero bytes cuenta como no haber subido nada",
-    !!conCero && /falta la imagen/i.test(conCero), conCero);
+    (await leerVoucher(cero, { requerido: false })) === null);
+
+  // El modo obligatorio sigue existiendo por si algún día hace falta en otro sitio.
+  const exigido = await motivo(new FormData(), true);
+  check("y donde se exija, el motivo lo dice", !!exigido && /falta la imagen/i.test(exigido), exigido);
 
   // ---------- Lo que no se va a poder abrir no se guarda ----------
-  const textoPlano = await motivo(conArchivo("voucher.txt", Buffer.alloc(20 * 1024, 0x41), "text/plain"));
+  const textoPlano = await motivo(conArchivo("voucher.txt", Buffer.alloc(20 * 1024, 0x41), "text/plain"), false);
   check("un archivo que no es imagen ni PDF se rechaza por la extensión",
     !!textoPlano && /no es una imagen ni un pdf/i.test(textoPlano), textoPlano);
 
   const wordDisfrazado = await motivo(
     conArchivo("voucher.pdf", Buffer.concat([Buffer.from("PK\x03\x04"), Buffer.alloc(20 * 1024)]), "application/pdf"),
+    false,
   );
   check("un archivo que por dentro no es un PDF ni una foto se rechaza",
     !!wordDisfrazado && /no es un pdf ni una foto/i.test(wordDisfrazado), wordDisfrazado);
@@ -111,26 +122,32 @@ async function main() {
     Buffer.from("%PDF-1.4\n1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj\n"),
     Buffer.from(`% ${"r".repeat(12 * 1024)}\n% se corto la subida aqui`),
   ]);
-  const incompleto = await motivo(conArchivo("voucher.pdf", cortado, "application/pdf"));
+  const incompleto = await motivo(conArchivo("voucher.pdf", cortado, "application/pdf"), false);
   check("un PDF cortado a mitad de la subida se rechaza",
     !!incompleto && /incompleto/i.test(incompleto), incompleto);
 
-  const diminuto = await motivo(conArchivo("captura.png", pngValido(1000).subarray(0, 300), "image/png"));
+  const diminuto = await motivo(conArchivo("captura.png", pngValido(1000).subarray(0, 300), "image/png"), false);
   check("una captura cortada tampoco pasa", !!diminuto, diminuto);
 
   // ---------- Lo bueno sí ----------
-  const pdf = await leerVoucher(conArchivo("constancia.pdf", pdfValido(), "application/pdf"), { requerido: true });
+  const pdf = await leerVoucher(conArchivo("constancia.pdf", pdfValido(), "application/pdf"), { requerido: false });
   check("un PDF completo se acepta y conserva su nombre",
     pdf?.filename === "constancia.pdf" && pdf.data.byteLength > 8 * 1024, pdf?.filename);
 
-  const png = await leerVoucher(conArchivo("captura.png", pngValido(), "image/png"), { requerido: true });
+  const png = await leerVoucher(conArchivo("captura.png", pngValido(), "image/png"), { requerido: false });
   check("una captura de la transferencia se acepta", png?.contentType === "image/png", png?.contentType);
 
   // El campo se puede llamar distinto; lo que no cambia es la regla.
   const otroCampo = new FormData();
   otroCampo.set("constancia", new File([new Uint8Array(pdfValido())], "c.pdf", { type: "application/pdf" }));
-  const leido = await leerVoucher(otroCampo, { requerido: true, campo: "constancia" });
+  const leido = await leerVoucher(otroCampo, { requerido: false, campo: "constancia" });
   check("se puede leer de otro campo del formulario", leido?.filename === "c.pdf", leido?.filename);
+
+  // Una foto de celular entra: el tope de la base subió a 10 MB y el navegador las achica
+  // antes de subirlas. Antes, con 3 MB, cualquier captura de celular rebotaba.
+  const grande = await leerVoucher(conArchivo("foto.jpg", fotoGrande(), "image/jpeg"), { requerido: false });
+  check("una foto de celular de varios MB se acepta",
+    !!grande && grande.data.byteLength > 4 * 1024 * 1024, grande?.data.byteLength);
 
   // ---------- La cuenta del adelanto ----------
   // Factura de 2,950 con detracción de 118: al proveedor se le transfieren 2,832.

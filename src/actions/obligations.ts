@@ -379,13 +379,19 @@ export async function setInstallmentAmount(id: string, formData: FormData): Prom
         .where(eq(obligationInstallments.id, id)).returning();
       await logAudit({
         user, action: "EDITAR", module: "OBLIGACIONES", recordId: before.obligationId,
-        description: `${user.name} anotó el importe de la cuota ${row.number} de "${obligation.name}": ${formatMoney(row.total, obligation.currency)}.`,
+        description: before.total
+          ? `${user.name} corrigió el importe de la cuota ${row.number} de "${obligation.name}":`
+            + ` ${formatMoney(before.total, obligation.currency)} → ${formatMoney(row.total, obligation.currency)}.`
+          : `${user.name} anotó el importe de la cuota ${row.number} de "${obligation.name}": ${formatMoney(row.total, obligation.currency)}.`,
         oldData: before, newData: row,
       }, tx);
     });
 
     revalidatePath("/", "layout");
-    return { ok: true, message: `Importe anotado: ${formatMoney(data.total, obligation.currency)}.` };
+    return {
+      ok: true,
+      message: `Importe ${before.total ? "corregido" : "anotado"}: ${formatMoney(data.total, obligation.currency)}.`,
+    };
   } catch (e) {
     return toActionError(e);
   }

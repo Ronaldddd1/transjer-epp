@@ -195,7 +195,14 @@ export default async function ObligationDetailPage({ params }: { params: Promise
                       {(canPay || canManage) && (
                         <Td>
                           <div className="flex items-center justify-end gap-1">
-                            {canManage && c.status === "PENDIENTE" && !c.total && <SetAmountModal installment={ref} compact />}
+                            {/* En un servicio el importe cambia cada mes y se corrige cuota por
+                                cuota: antes solo aparecía cuando la cuota venía vacía, y para
+                                cambiar uno ya anotado había que rehacer el cronograma entero.
+                                En un préstamo no: ahí el cronograma es el del banco, y cambiar
+                                una cuota es renegociar, que tiene su propio botón arriba. */}
+                            {canManage && c.status === "PENDIENTE" && (!c.total || !esPrestamo) && (
+                              <SetAmountModal installment={ref} compact />
+                            )}
                             {canPay && c.status === "PENDIENTE" && c.total && <PayInstallmentModal installment={ref} compact />}
                             {canPay && c.status === "PAGADA" && <ReopenInstallmentButton installment={ref} />}
                           </div>

@@ -77,17 +77,28 @@ export function PayInstallmentModal({ installment, compact = false }: { installm
 
 /** Anotar el importe del recibo de un servicio de monto variable. */
 export function SetAmountModal({ installment, compact = false }: { installment: InstallmentRef; compact?: boolean }) {
+  // Una cuota que ya tiene importe se corrige; una vacía se completa. Es la misma ventana,
+  // pero conviene que el botón diga cuál de las dos cosas va a pasar.
+  const yaTiene = !!installment.total;
   return (
     <FormModal
-      title={`Importe de la cuota ${installment.number}`}
-      description="Anota lo que dice el recibo de este mes. Después se registra el pago."
-      submitLabel="Guardar importe"
+      title={yaTiene ? `Corregir el importe de la cuota ${installment.number}` : `Importe de la cuota ${installment.number}`}
+      description={yaTiene
+        ? "Cambia solo esta cuota. El resto del cronograma se queda como está."
+        : "Anota lo que dice el recibo de este mes. Después se registra el pago."}
+      submitLabel={yaTiene ? "Guardar el importe nuevo" : "Guardar importe"}
       size="sm"
       action={(fd) => setInstallmentAmount(installment.id, fd)}
       trigger={(open) => (
-        <Button variant="outline" size={compact ? "sm" : "md"} onClick={open} title="Anotar el importe del recibo">
+        <Button
+          variant="outline"
+          size={compact ? "sm" : "md"}
+          onClick={open}
+          title={yaTiene ? "Corregir el importe de esta cuota" : "Anotar el importe del recibo"}
+          aria-label={compact ? (yaTiene ? "Corregir el importe de esta cuota" : "Anotar el importe del recibo") : undefined}
+        >
           <Coins className="h-4 w-4" />
-          <span className={compact ? "sr-only lg:not-sr-only" : ""}>Importe</span>
+          <span className={compact ? "sr-only lg:not-sr-only" : ""}>{yaTiene ? "Editar" : "Importe"}</span>
         </Button>
       )}
     >
@@ -96,7 +107,13 @@ export function SetAmountModal({ installment, compact = false }: { installment: 
           <p className="rounded-md border border-steel-200 bg-steel-50 p-3 text-sm text-steel-600">
             {installment.obligationName} · vence {formatDate(installment.dueDate)}
           </p>
-          <Field label="Importe del recibo" name="total" required error={errors.total}>
+          <Field
+            label="Importe del recibo"
+            name="total"
+            required
+            error={errors.total}
+            hint={yaTiene ? "Lo que figura ahora se puede reemplazar por lo que diga el recibo." : undefined}
+          >
             <Input name="total" defaultValue={installment.total ?? ""} inputMode="decimal" placeholder="382.50" invalid={!!errors.total} />
           </Field>
           <Field label="Observaciones" name="notes" error={errors.notes}>

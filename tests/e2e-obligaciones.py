@@ -273,6 +273,29 @@ def main():
         enviar(page, "Guardar importe")
         check("el importe del recibo queda anotado", "382.50" in page.content())
 
+        # Y se puede corregir esa sola cuota, sin rehacer el cronograma: es lo que pasa
+        # cuando el recibo llega con otro monto o se anotó mal.
+        cuantas = int(psql(f"select count(*) from obligation_installments i "
+                           f"join obligations o on o.id = i.obligation_id where o.name = '{SERVICIO}'"))
+        # El botón de la cuota, no el de editar la obligación entera que hay arriba.
+        fila_cuota = page.get_by_role("row").filter(has_text="382.50").first
+        fila_cuota.get_by_role("button", name="Corregir el importe").click()
+        page.wait_for_timeout(700)
+        check("la ventana dice que solo cambia esa cuota",
+              "Cambia solo esta cuota" in page.content())
+        page.fill("input[name=total]", "415.90")
+        enviar(page, "Guardar el importe nuevo")
+        check("el importe corregido queda guardado", "415.90" in page.content())
+        # En la base queda solo el nuevo; el anterior sigue en la auditoría, que es donde
+        # tiene que estar para poder explicar el cambio.
+        check("y en la cuota ya no queda el anterior",
+              psql(f"select count(*) from obligation_installments i join obligations o on o.id = i.obligation_id "
+                   f"where o.name = '{SERVICIO}' and i.total = 382.50") == "0")
+        check("el cronograma sigue teniendo las mismas cuotas",
+              int(psql(f"select count(*) from obligation_installments i "
+                       f"join obligations o on o.id = i.obligation_id where o.name = '{SERVICIO}'")) == cuantas)
+        check("y las demás siguen esperando su recibo", "falta el recibo" in page.content())
+
         # --- Servicio que arranca en una fecha concreta ---
         # Antes el calendario siempre empezaba este mes: un servicio que arranca el mes que
         # viene, o uno que viene atrasado, no se podía registrar tal cual.

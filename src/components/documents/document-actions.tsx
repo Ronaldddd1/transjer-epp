@@ -10,6 +10,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
+import { ImageInput } from "@/components/ui/image-input";
 import {
   DOCUMENT_KINDS_THAT_EXPIRE, EMPLOYEE_DOCUMENT_KINDS, VEHICLE_DOCUMENT_KINDS,
 } from "@/lib/utils";
@@ -131,12 +132,11 @@ export function DocumentFormModal({ vehicleId, employeeId, vehiculos = [], traba
             required
             hint="PDF o foto del documento. Lo que sale del escáner o de la cámara del celular."
           >
-            <input
-              type="file"
+            <ImageInput
               name="archivo"
               required
               accept="application/pdf,image/jpeg,image/png,image/webp,image/heic"
-              className="block w-full rounded-md border border-steel-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-steel-100 file:px-3 file:py-1.5 file:text-sm file:font-medium"
+              className={"block w-full rounded-md border border-steel-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-steel-100 file:px-3 file:py-1.5 file:text-sm file:font-medium"}
             />
           </Field>
 
@@ -208,11 +208,10 @@ export function EditDocumentModal({ documento, esVehiculo }: {
               ? `Ahora tiene "${documento.filename}". Si subes otro, ese queda en su lugar. Déjalo vacío para no tocarlo.`
               : "Este documento solo tiene la fecha. Sube el PDF o la foto cuando lo tengas a mano."}
           >
-            <input
-              type="file"
+            <ImageInput
               name="archivo"
               accept="application/pdf,image/jpeg,image/png,image/webp,image/heic"
-              className="block w-full rounded-md border border-steel-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-steel-100 file:px-3 file:py-1.5 file:text-sm file:font-medium"
+              className={"block w-full rounded-md border border-steel-300 bg-white px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-steel-100 file:px-3 file:py-1.5 file:text-sm file:font-medium"}
             />
           </Field>
 

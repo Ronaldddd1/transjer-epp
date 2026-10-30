@@ -1,16 +1,16 @@
 TRANSJER GESTIÓN — ACTUALIZACIÓN
-Comprobante obligatorio en los pagos, adelantos desde la tabla,
-rechazo de correos sin XML y la actividad en la asistencia
+Comprobante de pago, adelantos desde la tabla, rechazo de correos
+sin XML, actividad en la asistencia e importe por cuota
 ===============================================================
 
-Cuatro cambios. Piden migración.
+Cinco cambios. Piden migración.
 
 ANTES DE SUBIRLA:
 
     npm install
     npm run db:migrate     ← obligatorio, crea los adelantos y los campos nuevos
 
-SI CORRES LAS PRUEBAS. Las de lógica (npm test) pasan las 703. La batería de navegador
+SI CORRES LAS PRUEBAS. Las de lógica (npm test) pasan las 704. La batería de navegador
 (npm run test:e2e) pasa las doce suites, pero de vez en cuando se detiene en la última
 comprobación de una suite —"ninguna pantalla lanzó errores de JavaScript"— con el aviso
 #418 de React. Es un aviso de hidratación que ya existía antes de esta actualización,
@@ -20,31 +20,30 @@ a correr la suite, pasa. No he conseguido reproducirlo a voluntad, ni en modo de
 forzando carga, así que lo dejo anotado en vez de silenciarlo en las pruebas.
 
 
-1. SIN IMAGEN NO SE REGISTRA EL PAGO
--------------------------------------
+1. EL COMPROBANTE DEL PAGO: OPCIONAL, Y AHORA ENTRAN LAS FOTOS GRANDES
+-----------------------------------------------------------------------
 
-Donde sale plata, ahora se pide el comprobante: la captura de la transferencia o el PDF
-que devuelve el banco.
+En factura, adelanto, detracción y cuotas de préstamos y servicios hay un campo para subir
+la captura de la transferencia o el PDF del banco. SUBIRLO ES OPCIONAL EN TODOS. Se intentó
+obligatorio y salía caro: la captura casi siempre llega después —por WhatsApp, o al día
+siguiente— y mientras tanto el pago se quedaba sin registrar, así que la factura seguía
+figurando como pendiente cuando ya estaba pagada. Eso es peor problema que una factura sin
+imagen. La imagen se puede adjuntar luego, desde ARCHIVOS en la ficha de la factura.
 
-    FACTURA       obligatorio
-    ADELANTO      obligatorio
-    DETRACCIÓN    obligatorio al darla por depositada
-    PRÉSTAMOS Y SERVICIOS    opcional
+LAS FOTOS DE CELULAR YA ENTRAN. Antes el tope eran 3 MB y una foto de celular pesa entre 4
+y 8: rebotaba con un "el archivo supera el máximo permitido" sin que hubiera forma de
+achicarla. Ahora pasan dos cosas: el navegador achica la foto antes de subirla —la deja en
+2.200 píxeles de lado, que es más que de sobra para leer un voucher o un SOAT— y el tope
+del servidor subió a 10 MB para los PDF escaneados, que no se pueden achicar ahí. Cuando
+achica una foto lo dice debajo del campo, con el peso de antes y el de después. Esto vale
+también para los documentos de los vehículos y para los archivos de una factura.
 
-Es obligatorio en los tres primeros porque son los pagos que después hay que poder
-reconstruir: cuando el banco ya no muestra el movimiento en pantalla, el único rastro era
-la captura que alguien tenía en su celular. En las cuotas de préstamos y servicios queda
-opcional a propósito: muchas se pagan en efectivo o por descuento automático y no hay nada
-que adjuntar.
-
-QUÉ SE ACEPTA. PDF, JPG, PNG o WEBP. El archivo se revisa con la misma vara que los
+QUÉ SE ACEPTA. PDF, JPG, PNG, WEBP y HEIC (el formato del iPhone). El archivo se revisa con la misma vara que los
 documentos de los vehículos: si está vacío, cortado a mitad de la subida, protegido con
 contraseña, o es un Word al que le cambiaron la extensión, no entra y dice por qué. Una
 captura de 300 píxeles donde no se lee el número de operación tampoco sirve de respaldo.
 
-DÓNDE QUEDA. Colgado de la factura, en ARCHIVOS, marcado como COMPROBANTE DE PAGO. En la
-detracción, la constancia se pide una sola vez: corregir una nota después no obliga a
-volver a subirla.
+DÓNDE QUEDA. Colgado de la factura, en ARCHIVOS, marcado como COMPROBANTE DE PAGO.
 
 Si se reabre un pago registrado por error, el comprobante no se borra —el pago existió—
 pero deja de respaldar un pago vigente.
@@ -131,6 +130,22 @@ contar.
 
 DÓNDE SE VE. En la columna ACTIVIDAD O MOTIVO de la lista del día, en la ficha del
 trabajador debajo de cada día, y en el Excel de asistencia, en su propia columna.
+
+
+5. CORREGIR EL IMPORTE DE UNA SOLA CUOTA
+-----------------------------------------
+
+En los servicios —luz, agua, teléfono, alquiler— cada cuota tiene su propio importe, y
+antes el botón de importe solo aparecía mientras la cuota estaba vacía. Para cambiar uno ya
+anotado había que rehacer el cronograma entero.
+
+Ahora cada cuota pendiente de un servicio tiene su botón EDITAR, que cambia esa cuota y
+nada más. La ventana lo dice: "Cambia solo esta cuota. El resto del cronograma se queda
+como está". En la auditoría queda el antes y el después (382.50 → 415.90), que es lo que
+permite explicar el cambio después.
+
+En los préstamos no aparece, y es a propósito: ahí el cronograma es el del banco, y cambiar
+una cuota suelta sería renegociar, que tiene su propio botón arriba y recalcula el resto.
 
 
 LO QUE NO CAMBIÓ
