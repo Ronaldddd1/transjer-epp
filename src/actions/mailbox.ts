@@ -8,7 +8,7 @@ import { BusinessError, formToObject, toActionError, type ActionResult } from "@
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import {
-  compararMonto, formatMoney, invoiceNumber, REJECT_REASON_LABEL, type RejectReasonKey,
+  compararMonto, formatMoney, invoiceNumber, REJECT_REASON_LABEL, valorSinIgv, type RejectReasonKey,
 } from "@/lib/utils";
 import {
   approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema, verifyAmountSchema,
@@ -179,8 +179,11 @@ export async function syncMailboxNow(): Promise<ActionResult> {
 /**
  * El filtro del monto: el paso que va antes de aceptar o rechazar.
  *
- * Quien revisa escribe lo que se pactó por el flete y el sistema lo compara con el total
- * del comprobante. Mientras esto no quede conforme, el comprobante no se puede aceptar.
+ * Quien revisa confirma lo que se pactó por el flete y el sistema lo compara con el valor
+ * de venta del comprobante, sin IGV: es a ese número al que se llega con el proveedor, y el
+ * IGV no se negocia. El campo viene propuesto con lo que dice la factura, para que la
+ * tarea sea confirmar o corregir, no teclear. Mientras esto no quede conforme, el
+ * comprobante no se puede aceptar.
  *
  * Es la comprobación que en el control en Excel se hacía de memoria, y por eso a veces no
  * se hacía: una factura por un importe distinto al acordado entraba en la cola de pagos
@@ -207,7 +210,8 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
       throw new BusinessError("Este correo no trae los datos del comprobante leídos, así que no hay importe que comparar.");
     }
 
-    const { diferencia, coincide, cobraDeMas } = compararMonto(comprobante.total, data.agreedAmount);
+    const facturadoSinIgv = valorSinIgv(comprobante.subtotal, comprobante.total);
+    const { diferencia, coincide, cobraDeMas } = compararMonto(facturadoSinIgv, data.agreedAmount);
     const nota = data.amountNote?.trim() || null;
 
     // Aprobar una diferencia sin decir por qué deja el mismo agujero que había antes.
@@ -231,14 +235,14 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
     await logAudit({
       user, action: "EDITAR", module: "CORREO", recordId: id,
       description: `${user.name} verificó el monto del comprobante ${label}:`
-        + ` facturado ${formatMoney(comprobante.total, comprobante.currency)},`
+        + ` facturado sin IGV ${formatMoney(facturadoSinIgv, comprobante.currency)},`
         + ` pactado ${formatMoney(data.agreedAmount, comprobante.currency)}.`
         + (coincide
           ? " Coincide."
           : ` Diferencia de ${plata(diferencia)} ${cobraDeMas ? "de más" : "de menos"}.`
             + (conforme ? ` Se aprobó: ${nota}` : " Queda observado.")),
       oldData: { monto: email.amountStatus, pactado: email.agreedAmount },
-      newData: { monto: estado, pactado: data.agreedAmount, diferencia },
+      newData: { monto: estado, pactado: data.agreedAmount, facturadoSinIgv, diferencia },
     });
 
     revalidatePath("/", "layout");

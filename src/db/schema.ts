@@ -769,6 +769,38 @@ export const vehicles = pgTable("vehicles", {
  * cambiar la periodicidad habría que reescribir el historial, que es justo lo que no se
  * debe tocar.
  */
+/**
+ * El directorio de clientes de provincia.
+ *
+ * Lo que hace falta saber antes de un viaje a provincia: a quién se entrega, dónde queda,
+ * a qué número se llama, quién hace la estiba allá y cuánto cobra por tonelada. Vivía en
+ * la cabeza de quien coordina, así que un destino al que no se va hace meses empezaba
+ * siempre por preguntar.
+ *
+ * No se une a las facturas ni a los viajes a propósito: es una agenda, y el nombre con el
+ * que figura un cliente en una factura no siempre es el nombre con el que se le conoce.
+ */
+export const provinceClients = pgTable("province_clients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  province: varchar("province", { length: 80 }).notNull(),
+  /** El destinatario: a quién se le entrega la carga allá. Es por donde se busca. */
+  clientName: varchar("client_name", { length: 160 }).notNull(),
+  location: varchar("location", { length: 250 }),
+  clientPhone: varchar("client_phone", { length: 40 }),
+  /** Quién hace la estiba en ese destino, y a qué número se le llama. */
+  stevedoreName: varchar("stevedore_name", { length: 120 }),
+  stevedorePhone: varchar("stevedore_phone", { length: 40 }),
+  /** Lo que cobra la estiba por tonelada. Puede faltar: hay destinos sin precio cerrado. */
+  costPerTon: numeric("cost_per_ton", { precision: 12, scale: 2 }),
+  notes: text("notes"),
+  active: boolean("active").notNull().default(true),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+}, (t) => [
+  index("province_clients_province_idx").on(t.province),
+  check("province_clients_cost_positive", sql`${t.costPerTon} is null or ${t.costPerTon} >= 0`),
+]);
+
 export const maintenancePlans = pgTable("maintenance_plans", {
   id: uuid("id").primaryKey().defaultRandom(),
   vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "cascade" }),

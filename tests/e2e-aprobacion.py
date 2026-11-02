@@ -150,11 +150,19 @@ with sync_playwright() as p:
     check("lo que se ofrece es verificar el monto",
           fila.get_by_role("button", name="Verificar monto").count() == 1, fila.inner_text())
 
-    # Un importe distinto al pactado deja el comprobante observado y lo frena.
+    # El comprobante de prueba es 1,000 + IGV = 1,180, y la comparación es sin IGV. Así que
+    # el campo tiene que venir propuesto con 1,000, y 820 pactados dejan 180 de diferencia.
     fila.get_by_role("button", name="Verificar monto").click()
     page.wait_for_timeout(900)
     dlg_monto = page.get_by_role("dialog")
-    dlg_monto.locator("input[name=agreedAmount]").fill("1000")
+    check("el monto pactado viene propuesto con el valor sin IGV de la factura",
+          dlg_monto.locator("input[name=agreedAmount]").input_value() == "1000.00",
+          dlg_monto.locator("input[name=agreedAmount]").input_value())
+    check("y la ventana muestra el valor sin IGV, no solo el total",
+          "Facturado sin IGV" in dlg_monto.inner_text() and "1,000.00" in dlg_monto.inner_text(),
+          dlg_monto.inner_text()[:260])
+
+    dlg_monto.locator("input[name=agreedAmount]").fill("820")
     page.wait_for_timeout(500)
     check("la ventana calcula la diferencia al escribir el monto pactado",
           "180.00" in dlg_monto.inner_text() and "de más" in dlg_monto.inner_text(),
@@ -179,7 +187,7 @@ with sync_playwright() as p:
     fila.get_by_role("button", name="Revisar monto").click()
     page.wait_for_timeout(900)
     dlg_monto = page.get_by_role("dialog")
-    dlg_monto.locator("input[name=agreedAmount]").fill("1000")
+    dlg_monto.locator("input[name=agreedAmount]").fill("820")
     page.wait_for_timeout(400)
     dlg_monto.locator("input[name=aprobarDiferencia]").check()
     page.wait_for_timeout(300)
@@ -195,7 +203,7 @@ with sync_playwright() as p:
     estado_monto = psql("select amount_status || '|' || agreed_amount || '|' || coalesce(amount_note,'') "
                         f"from invoice_emails where id = '{aceptar_id}'")
     check("con el motivo, el monto queda conforme y guarda lo pactado",
-          estado_monto.startswith("CONFORME|1000.00|Recargo acordado"), estado_monto)
+          estado_monto.startswith("CONFORME|820.00|Recargo acordado"), estado_monto)
     check("y queda registrado quién lo verificó",
           psql(f"select amount_checked_by is not null from invoice_emails where id = '{aceptar_id}'") == "t")
 
@@ -236,7 +244,8 @@ with sync_playwright() as p:
     fila_t.get_by_role("button", name="Verificar monto").click()
     page.wait_for_timeout(900)
     dlg_monto = page.get_by_role("dialog")
-    dlg_monto.locator("input[name=agreedAmount]").fill("1180")
+    # Esta viene por el valor pactado tal cual: 1,000 sin IGV.
+    dlg_monto.locator("input[name=agreedAmount]").fill("1000")
     page.wait_for_timeout(500)
     check("cuando coincide, la ventana lo dice", "Coincide con lo pactado" in dlg_monto.inner_text(),
           dlg_monto.inner_text()[:260])
@@ -360,6 +369,39 @@ with sync_playwright() as p:
     page.wait_for_timeout(1600)
     fila3 = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}2")
     check("la lista avisa que el proveedor quedó sin avisar", "sin avisar" in fila3.inner_text().lower(), fila3.inner_text())
+
+    # --- Una factura que ya está registrada se avisa antes de aceptarla ---
+    # El proveedor que reenvía su factura deja el mismo comprobante dos veces en la bandeja.
+    # Antes eso se descubría al aceptar el segundo; ahora se ve en la lista.
+    repetido = correo("repetida", f"{SELLO}1")   # el mismo número que ya se aceptó arriba
+    # Entra por el primer tramo del camino: el filtro del monto.
+    page.goto(f"{BASE}/facturas/correos?estado=POR_VERIFICAR")
+    page.wait_for_timeout(1700)
+    fila_rep = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}1").first
+    check("la bandeja avisa de que esa factura ya está registrada",
+          "ya está registrada" in fila_rep.inner_text(), fila_rep.inner_text())
+
+    # Para abrir el modal de aceptar hay que pasar el filtro del monto primero.
+    fila_rep.get_by_role("button", name="Verificar monto").click()
+    page.wait_for_timeout(900)
+    dlg_rep = page.get_by_role("dialog")
+    pactado_rep = dlg_rep.locator("input[name=agreedAmount]").input_value()
+    check("el monto pactado viene propuesto con el valor sin IGV de la factura",
+          pactado_rep not in ("", "0.00"), pactado_rep)
+    dlg_rep.get_by_role("button", name="Guardar la verificación").click()
+    page.wait_for_timeout(2300)
+
+    # Con el monto conforme pasa a la pestaña de aprobar, y ahí sí se ofrece aceptar.
+    page.goto(f"{BASE}/facturas/correos?estado=POR_APROBAR")
+    page.wait_for_timeout(1700)
+    fila_rep = page.get_by_role("row").filter(has_text=f"{SERIE}-{SELLO}1").first
+    fila_rep.get_by_role("button", name="Aceptar").click()
+    page.wait_for_timeout(1000)
+    check("y al abrir aceptar lo dice con todas las letras",
+          "Esta factura ya está registrada" in page.content())
+    page.keyboard.press("Escape")
+    page.wait_for_timeout(600)
+    ejecutar(f"delete from invoice_emails where id = '{repetido}'")
 
     # --- Un correo sin XML legible también se devuelve al proveedor ---
     # Antes solo se podía descartar, y descartar no le avisa a nadie: el comprobante se iba

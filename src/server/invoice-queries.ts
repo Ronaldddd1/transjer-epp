@@ -6,7 +6,7 @@ import {
   invoiceAdvances, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
   type DetractionStatus, type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
 } from "@/db/schema";
-import { first, INVOICE_EMAIL_STATUSES, isYmd, type SearchParamsRecord } from "@/lib/utils";
+import { first, INVOICE_EMAIL_STATUSES, invoiceNumber, isYmd, type SearchParamsRecord } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
 
@@ -49,6 +49,8 @@ export type InvoiceFilters = {
   detraction?: DetractionStatus;
   /** Cliente de Transjer para el que se hizo el flete. */
   client?: string;
+  /** Ciudad de destino del flete. */
+  destination?: string;
   /** Solo las anuladas que todavía esperan la nota de crédito del proveedor. */
   awaitingCreditNote?: boolean;
 };
@@ -72,6 +74,7 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
   return {
     detraction: detraction && DETRACTION_STATUSES.includes(detraction) ? detraction : undefined,
     client: first(sp.cliente) || undefined,
+    destination: first(sp.destino) || undefined,
     paymentTerm: paymentTerm === "CONTADO" || paymentTerm === "CREDITO" ? paymentTerm : undefined,
     q: first(sp.q)?.trim() || undefined,
     supplierId: first(sp.proveedor) || undefined,
@@ -93,6 +96,9 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
 function invoiceConditions(f: InvoiceFilters): SQL | undefined {
   return and(
     f.supplierId ? eq(supplierInvoices.supplierId, f.supplierId) : undefined,
+    // El destino se escribe a mano en cada factura, así que se compara sin distinguir
+    // mayúsculas ni acentos de más: "JAEN" y "Jaén" son el mismo viaje.
+    f.destination ? sql`upper(${supplierInvoices.destinationCity}) = upper(${f.destination})` : undefined,
     f.status ? eq(supplierInvoices.status, f.status) : undefined,
     f.docType ? eq(supplierInvoices.docType, f.docType) : undefined,
     f.currency ? eq(supplierInvoices.currency, f.currency) : undefined,
@@ -580,6 +586,51 @@ export async function countEmailsToReview() {
 }
 
 /** Adjuntos de varios correos a la vez, agrupados por correo. */
+/**
+ * Cuáles de estos comprobantes ya están registrados como factura.
+ *
+ * El proveedor que reenvía su factura —porque cree que no llegó, o porque la manda a dos
+ * correos— deja el mismo comprobante dos veces en la bandeja. Aceptar el segundo lo
+ * descubre recién al guardarlo; esto lo dice antes, en la lista, que es cuando sirve.
+ *
+ * Se empareja por proveedor, tipo, serie y número: es la misma regla con la que el sistema
+ * impide registrar una factura repetida.
+ */
+export async function registradasDeCorreos(
+  comprobantes: { emailId: string; ruc: string; docType: string; series: string; number: string }[],
+) {
+  const vacio = new Map<string, { id: string; status: string; label: string }>();
+  if (comprobantes.length === 0) return vacio;
+
+  const claves = comprobantes.map((c) => `${c.ruc}|${c.docType}|${c.series}|${c.number}`);
+  const rows = await db.select({
+    id: supplierInvoices.id,
+    status: supplierInvoices.status,
+    series: supplierInvoices.series,
+    number: supplierInvoices.number,
+    docType: supplierInvoices.docType,
+    ruc: suppliers.ruc,
+  })
+    .from(supplierInvoices)
+    .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
+    .where(inArray(
+      sql`${suppliers.ruc} || '|' || ${supplierInvoices.docType} || '|' || ${supplierInvoices.series} || '|' || ${supplierInvoices.number}`,
+      claves,
+    ));
+
+  const porClave = new Map(rows.map((r) => [
+    `${r.ruc}|${r.docType}|${r.series}|${r.number}`,
+    { id: r.id, status: r.status as string, label: invoiceNumber(r.series, r.number) },
+  ]));
+
+  const salida = vacio;
+  for (const c of comprobantes) {
+    const ya = porClave.get(`${c.ruc}|${c.docType}|${c.series}|${c.number}`);
+    if (ya) salida.set(c.emailId, ya);
+  }
+  return salida;
+}
+
 export async function attachmentsByEmail(emailIds: string[]) {
   if (emailIds.length === 0) return new Map<string, { id: string; filename: string; sizeBytes: number; kind: string }[]>();
   const rows = await db.select({

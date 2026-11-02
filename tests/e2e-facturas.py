@@ -382,6 +382,23 @@ with sync_playwright() as p:
     assert filas(page) == delProveedor, (filas(page), delProveedor)
     ok("Filtros por estado, vencidas y búsqueda por RUC")
 
+    # --- 12b. El filtro por destino
+    # Es por donde se busca un flete: "las facturas de Arequipa". Los filtros de detracción,
+    # condición, moneda y origen salieron de la barra, que es lo que deja sitio para este.
+    page.goto(BASE + "/facturas?estado=")
+    expect(page.get_by_role("combobox", name="Destino")).to_be_visible()
+    for ido in ["detraccion", "condicion", "moneda", "origen"]:
+        assert page.locator(f"select[name={ido}]").count() == 0, f"el filtro {ido} sigue en la pantalla"
+    destino = psql("select upper(destination_city) from supplier_invoices where destination_city is not null limit 1")
+    if destino:
+        esperadas = int(psql(f"select count(*) from supplier_invoices where upper(destination_city) = upper('{destino}')"))
+        page.goto(BASE + f"/facturas?estado=&destino={destino.replace(' ', '+')}")
+        page.wait_for_timeout(1200)
+        assert filas(page) == min(esperadas, 20), (filas(page), esperadas, destino)
+        ok(f"Filtro por destino: {destino} trae solo sus facturas")
+    else:
+        ok("Filtro por destino disponible (sin fletes con destino para contrastar)")
+
     # --- 13. Proveedores
     page.goto(BASE + "/proveedores?q=PRUEBA+E2E")
     expect(page.get_by_role("row").filter(has_text="TRANSPORTES PRUEBA E2E")).to_be_visible()

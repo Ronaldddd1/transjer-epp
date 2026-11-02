@@ -27,6 +27,10 @@ export const PERMISSIONS = [
   // La asistencia diaria. Va aparte de employees.manage porque marcar quién vino es una
   // tarea de todos los días, y editar la ficha de un trabajador no lo es.
   "attendance.view", "attendance.manage",
+  // El directorio de clientes de provincia. Lo consulta y lo mantiene todo el mundo: es
+  // una agenda de trabajo, no un dato reservado, y el que coordina un viaje puede ser
+  // cualquiera de los que están ese día.
+  "provinceClients.view", "provinceClients.manage",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
@@ -38,6 +42,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "deliveries.view", "deliveries.create",
     "employees.view",
     "documents.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   // Jefe de almacén: manda en todo el módulo de EPP, sin usuarios ni facturas.
   JEFE_ALMACEN: [
@@ -49,6 +54,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "documents.view", "documents.manage",
     "attendance.view", "attendance.manage",
     "reports.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   // Administración y Finanzas: gestiona las facturas de proveedores, no el almacén.
   FINANZAS: [
@@ -58,6 +64,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "detractions.view", "detractions.manage",
     "documents.view",
     "reports.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   /**
    * Mantenimiento: cuida que las unidades pasen lo que tienen que pasar.
@@ -68,11 +75,13 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
   MANTENIMIENTO: [
     "maintenance.view", "maintenance.manage",
     "documents.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   /** Documentación: los papeles de la flota y de los trabajadores, nada más. */
   DOCUMENTACION: [
     "documents.view", "documents.manage",
     "employees.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   /** Operación: mantenimiento, documentación y almacén. No ve facturas ni usuarios. */
   OPERACION: [
@@ -85,12 +94,14 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     "categories.manage",
     "attendance.view", "attendance.manage",
     "reports.view",
+    "provinceClients.view", "provinceClients.manage",
   ],
   // Encargada de detracciones: solo deposita y da cuenta del 4 % al Banco de la Nación.
   // Ve las facturas para saber sobre qué está depositando, pero no las registra ni las paga.
   DETRACCIONES: [
     "invoices.view",
     "detractions.view", "detractions.manage",
+    "provinceClients.view", "provinceClients.manage",
   ],
 };
 

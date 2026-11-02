@@ -7,7 +7,7 @@ import {
   DOCUMENT_STATUS_LABEL, documentStatus, exigeRevisionTecnica, FLEET_STATUS_LABEL,
   MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL, todayLima,
   STOCK_STATUS_LABEL, stockStatus,
-  type AmountCheckKey, type RejectReasonKey, type SearchParamsRecord,
+  type AmountCheckKey, type RejectReasonKey, type SearchParamsRecord, valorSinIgv,
 } from "@/lib/utils";
 import type { Permission } from "@/lib/permissions";
 import {
@@ -20,6 +20,7 @@ import {
 import { estadoFlota, listFleet } from "./document-queries";
 import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
 import { attendanceMonth, listAttendanceDay, readAttendanceFilters } from "./attendance-queries";
+import { listProvinceClients, readProvinceFilters } from "./province-queries";
 import { listInstallments, listObligations, listPaymentCalendar, readObligationFilters } from "./obligation-queries";
 import type { Report } from "./reports";
 
@@ -484,6 +485,44 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
   },
 
   // ---------- Trabajadores ----------
+  // ---------- Clientes de provincia ----------
+  "clientes-provincia": {
+    title: "Clientes de provincia",
+    permission: "provinceClients.view",
+    async build(sp) {
+      const { rows } = await listProvinceClients(readProvinceFilters(sp), 5000, 0);
+      return [{
+        title: "Clientes de provincia",
+        columns: [
+          { key: "provincia", header: "Provincia", width: 18 },
+          { key: "cliente", header: "Cliente destinatario", width: 32 },
+          { key: "ubicacion", header: "Ubicación", width: 38 },
+          { key: "telefono", header: "Número del cliente", width: 16 },
+          { key: "estibador", header: "Estibador", width: 24 },
+          { key: "telefonoEstiba", header: "Número del estibador", width: 18 },
+          { key: "costo", header: "Costo por tonelada", width: 16, align: "right" as const },
+          { key: "observaciones", header: "Observaciones", width: 40 },
+          { key: "estado", header: "Estado", width: 14 },
+        ],
+        rows: rows.map((c) => ({
+          provincia: c.province,
+          cliente: c.clientName,
+          ubicacion: texto(c.location),
+          telefono: texto(c.clientPhone),
+          estibador: texto(c.stevedoreName),
+          telefonoEstiba: texto(c.stevedorePhone),
+          costo: c.costPerTon ? `S/ ${c.costPerTon}` : "",
+          observaciones: texto(c.notes),
+          estado: c.active ? "Vigente" : "Dado de baja",
+        })),
+        summary: [
+          { label: "Clientes", value: rows.length },
+          { label: "Provincias", value: new Set(rows.map((c) => c.province.toUpperCase())).size },
+        ],
+      }];
+    },
+  },
+
   trabajadores: {
     title: "Trabajadores",
     permission: "employees.view",
@@ -720,7 +759,10 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "detalle", header: "Qué pasó", width: 46 },
         ],
         rows: rows.map((e) => {
-          const c = e.parsed as { series?: string; number?: string; supplierName?: string; total?: string; currency?: string } | null;
+          const c = e.parsed as {
+            series?: string; number?: string; supplierName?: string;
+            subtotal?: string | null; total?: string; currency?: string;
+          } | null;
           return {
             recibido: formatDateTime(e.receivedAt),
             comprobante: c?.series && c?.number ? invoiceNumber(c.series, c.number) : "",
@@ -729,7 +771,8 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
             // El filtro del monto, que es por donde pasa el comprobante antes de aceptarse.
             pactado: e.agreedAmount ? `${c?.currency === "USD" ? "US$" : "S/"} ${e.agreedAmount}` : "",
             diferencia: c?.total && e.agreedAmount
-              ? `${c.currency === "USD" ? "US$" : "S/"} ${compararMonto(c.total, e.agreedAmount).diferencia.toFixed(2)}`
+              ? `${c.currency === "USD" ? "US$" : "S/"} `
+                + compararMonto(valorSinIgv(c.subtotal, c.total), e.agreedAmount).diferencia.toFixed(2)
               : "",
             filtroMonto: AMOUNT_CHECK_LABEL[(e.amountStatus as AmountCheckKey) ?? "PENDIENTE"]
               + (e.amountNote ? ` — ${e.amountNote}` : ""),

@@ -1,10 +1,10 @@
 import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AdvanceModal, InvoiceReasonModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
+import { AdvanceModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
 import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
-import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
+import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { TabLinks } from "@/components/ui/tab-links";
@@ -16,10 +16,12 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL,
-  INVOICE_STATUS_LABEL, DETRACTION_STATUS_LABEL, invoiceNumber, pageParams, saldoAPagar,
-  PAYMENT_TERM_LABEL, todayLima, type SearchParams,
+  invoiceNumber, pageParams, saldoAPagar, todayLima, type SearchParams,
 } from "@/lib/utils";
-import { countAwaitingCreditNote, countEmailsToReview, countSuppliersWithoutRuc, getClientOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters } from "@/server/invoice-queries";
+import {
+  countAwaitingCreditNote, countEmailsToReview, countSuppliersWithoutRuc, getClientOptions,
+  getDestinationOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters,
+} from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Facturas de proveedores" };
@@ -44,7 +46,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, emailsToReview, sinRuc] = await Promise.all([
+  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, destinos, emailsToReview, sinRuc] = await Promise.all([
     listInvoices(f, pageSize, offset),
     invoiceTotals(f),
     // Los mismos filtros pero sin el estado NI la espera de nota de crédito: así cada
@@ -53,6 +55,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     countAwaitingCreditNote({ ...f, status: undefined }),
     getSupplierOptions(),
     getClientOptions(),
+    getDestinationOptions(),
     countEmailsToReview(),
     canManage ? countSuppliersWithoutRuc() : Promise.resolve(0),
   ]);
@@ -183,10 +186,11 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           { type: "select", name: "proveedor", label: "Proveedor", options: suppliers.map((s) => ({ value: s.id, label: s.name })) },
           { type: "select", name: "tipo", label: "Tipo", allLabel: "Todos", options: Object.entries(INVOICE_DOC_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "cliente", label: "Cliente", options: clients.map((c) => ({ value: c, label: c })) },
-          { type: "select", name: "detraccion", label: "Detracción", allLabel: "Todas", options: Object.entries(DETRACTION_STATUS_LABEL).map(([value, label]) => ({ value, label })) },
-          { type: "select", name: "condicion", label: "Condición", allLabel: "Todas", options: Object.entries(PAYMENT_TERM_LABEL).map(([value, label]) => ({ value, label })) },
-          { type: "select", name: "moneda", label: "Moneda", allLabel: "Todas", options: [{ value: "PEN", label: "Soles" }, { value: "USD", label: "Dólares" }] },
-          { type: "select", name: "origen", label: "Origen", allLabel: "Todos", options: [{ value: "MANUAL", label: "Registro manual" }, { value: "CORREO", label: "Correo" }] },
+          /* El destino es por donde se busca un flete: "las facturas de Jaén". Los filtros
+             de detracción, condición, moneda y origen salieron de aquí porque se usaban
+             poco y ocupaban el ancho de los que sí se usan; la detracción tiene su propia
+             pantalla, y lo demás se ve en la ficha de cada factura. */
+          { type: "select", name: "destino", label: "Destino", options: destinos.map((d) => ({ value: d, label: d })) },
           { type: "date", name: "from", label: "Emitida desde" },
           { type: "date", name: "to", label: "Emitida hasta" },
         ]}

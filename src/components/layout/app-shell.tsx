@@ -3,7 +3,7 @@
 import {
   ArrowLeftRight, BarChart3, Building2, CalendarCheck, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
   FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
-  Tags, Undo2, Users, Wallet, Wrench, X,
+  Tags, Undo2, Users, Wallet, Wrench, X, MapPin,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
@@ -48,6 +48,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: "/documentos", label: "Documentos", icon: FolderOpen, permission: "documents.view" },
       { href: "/mantenimiento", label: "Mantenimiento", icon: Wrench, permission: "maintenance.view" },
+      { href: "/clientes-provincia", label: "Clientes de provincia", icon: MapPin, permission: "provinceClients.view" },
     ],
   },
   {

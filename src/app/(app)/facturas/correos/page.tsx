@@ -1,4 +1,4 @@
-import { ArrowLeft, MailX } from "lucide-react";
+import { AlertTriangle, ArrowLeft, MailX } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import {
@@ -17,7 +17,7 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
-  AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney,
+  AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, valorSinIgv,
   invoiceNumber, pageParams, type AmountCheckKey, type SearchParams,
 } from "@/lib/utils";
 import { leerConceptoTransporte, pareceTransporte } from "@/server/concepto-transporte";
@@ -25,6 +25,7 @@ import { notificationUrl } from "@/server/graph";
 import { missingMailboxSettings, readMailboxConfig } from "@/server/mailbox-config";
 import {
   attachmentsByEmail, emailCounts, getSupplierOptions, listInvoiceEmails, readEmailFilters,
+  registradasDeCorreos,
 } from "@/server/invoice-queries";
 import { getSubscriptionState, getSyncState, minutesToExpiry } from "@/server/mailbox-state";
 
@@ -63,6 +64,16 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
     getSupplierOptions(),
   ]);
   const attachments = await attachmentsByEmail(rows.map((r) => r.id));
+  // Cuáles de estos comprobantes ya están registrados: el proveedor que reenvía su factura
+  // deja el mismo comprobante dos veces en la bandeja, y aceptarlo de nuevo se descubría
+  // recién al guardar.
+  const yaRegistradas = await registradasDeCorreos(
+    rows.flatMap((r) => {
+      const c = r.parsed as ComprobanteLeido | null;
+      if (!c?.supplierRuc || !c.series || !c.number) return [];
+      return [{ emailId: r.id, ruc: c.supplierRuc, docType: c.docType, series: c.series, number: c.number }];
+    }),
+  );
 
   const canApprove = can(user.role, "invoices.approve");
   const canManage = can(user.role, "invoices.manage");
@@ -100,6 +111,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
     detail: e.detail,
     comprobante: (e.parsed as ComprobanteLeido | null) ?? null,
     archivos: (attachments.get(e.id) ?? []).map((a) => ({ id: a.id, filename: a.filename, sizeBytes: a.sizeBytes })),
+    yaRegistrada: yaRegistradas.get(e.id) ?? null,
     monto: {
       estado: (e.amountStatus as AmountCheckKey) ?? "PENDIENTE",
       pactado: e.agreedAmount,
@@ -220,7 +232,18 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                   {c ? (
                     <>
                       <p className="font-medium">{invoiceNumber(c.series, c.number)}</p>
-                      <p className="text-xs text-steel-500">{e.subject ?? "(sin asunto)"}</p>
+                      {/* Si ese comprobante ya existe, se dice aquí: es lo primero que hay
+                          que saber al mirar la fila, antes de abrir nada. */}
+                      {correo.yaRegistrada ? (
+                        <Link
+                          href={`/facturas/${correo.yaRegistrada.id}`}
+                          className="mt-0.5 flex items-center gap-1 text-xs font-semibold text-red-700 hover:underline"
+                        >
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" aria-hidden /> ya está registrada
+                        </Link>
+                      ) : (
+                        <p className="text-xs text-steel-500">{e.subject ?? "(sin asunto)"}</p>
+                      )}
                     </>
                   ) : (
                     <>
@@ -237,7 +260,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                   {c ? formatMoney(c.total, c.currency) : <span className="text-steel-400">—</span>}
                   {/* Lo pactado al lado de lo facturado: la diferencia se ve sin abrir nada. */}
                   {c && e.agreedAmount && (() => {
-                    const { diferencia, coincide, cobraDeMas } = compararMonto(c.total, e.agreedAmount);
+                    // La comparación es contra el valor de venta, sin IGV: es lo que se pacta.
+                    const { diferencia, coincide, cobraDeMas } = compararMonto(valorSinIgv(c.subtotal, c.total), e.agreedAmount);
                     return coincide ? (
                       <p className="text-xs font-normal text-emerald-700">= lo pactado</p>
                     ) : (

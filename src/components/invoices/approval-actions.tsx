@@ -14,7 +14,7 @@ import {
   DEFAULT_TERM_DAYS, formatDate, formatDateTime, formatFileSize, formatMoney,
   INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, invoiceNumber, PIDEN_NOTA_DE_CREDITO,
   REJECT_REASON_LABEL,
-  rejectionEmailBody, TERM_DAYS_BY_SERVICE_TYPE,
+  rejectionEmailBody, TERM_DAYS_BY_SERVICE_TYPE, valorSinIgv,
   type AmountCheckKey, type InvoiceServiceTypeKey, type PaymentTermKey, type RejectReasonKey,
 } from "@/lib/utils";
 
@@ -56,6 +56,13 @@ export type CorreoParaDecidir = {
   detail: string | null;
   comprobante: ComprobanteLeido | null;
   archivos: ArchivoCorreo[];
+  /**
+   * La factura que ya existe con esta serie y número, si la hay.
+   *
+   * Un proveedor que reenvía su factura deja el mismo comprobante dos veces en la bandeja.
+   * Saberlo antes de aceptar evita registrar la deuda dos veces.
+   */
+  yaRegistrada?: { id: string; status: string; label: string } | null;
   /** El filtro del monto, que va antes de aceptar o rechazar. */
   monto: {
     estado: AmountCheckKey;
@@ -232,7 +239,9 @@ export function ResumenMonto({ correo }: { correo: CorreoParaDecidir }) {
     );
   }
 
-  const { diferencia, coincide, cobraDeMas } = compararMonto(c.total, pactado);
+  // Siempre sin IGV, que es como se pactó y como se verificó.
+  const facturado = valorSinIgv(c.subtotal, c.total);
+  const { diferencia, coincide, cobraDeMas } = compararMonto(facturado, pactado);
   const observado = estado === "OBSERVADO";
   return (
     <div className={cn(
@@ -243,7 +252,7 @@ export function ResumenMonto({ correo }: { correo: CorreoParaDecidir }) {
         {AMOUNT_CHECK_LABEL[estado]}
       </p>
       <p className="text-ink-800">
-        Facturado {formatMoney(c.total, c.currency)} · pactado {formatMoney(pactado, c.currency)}
+        Facturado sin IGV {formatMoney(facturado, c.currency)} · pactado {formatMoney(pactado, c.currency)}
         {!coincide && (
           <> · cobra <strong>{formatMoney(Math.abs(diferencia).toFixed(2), c.currency)}</strong>{" "}
             {cobraDeMas ? "de más" : "de menos"}</>
@@ -305,12 +314,16 @@ export function ResumenRechazo({ correo }: { correo: CorreoParaDecidir }) {
  */
 export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
   const c = correo.comprobante;
-  const [pactado, setPactado] = useState(correo.monto.pactado ?? "");
+  // Lo que se compara es el valor de venta, sin IGV: es el número que se acuerda con el
+  // proveedor. Viene propuesto desde la factura para que la tarea sea confirmarlo o
+  // corregirlo, no teclearlo de nuevo.
+  const facturadoSinIgv = c ? valorSinIgv(c.subtotal, c.total) : "0.00";
+  const [pactado, setPactado] = useState(correo.monto.pactado ?? facturadoSinIgv);
   const [nota, setNota] = useState(correo.monto.nota ?? "");
   const [aprobar, setAprobar] = useState(false);
 
   const escrito = pactado.trim() !== "" && !Number.isNaN(Number(pactado));
-  const comparacion = escrito && c ? compararMonto(c.total, pactado) : null;
+  const comparacion = escrito && c ? compararMonto(facturadoSinIgv, pactado) : null;
   const hayDiferencia = !!comparacion && !comparacion.coincide;
   const observado = correo.monto.estado === "OBSERVADO";
 
@@ -342,10 +355,12 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
             <dd className="font-medium">{c ? invoiceNumber(c.series, c.number) : (correo.subject ?? "(sin asunto)")}</dd>
             <dt className="text-steel-500">Proveedor</dt>
             <dd className="font-medium">{c?.supplierName ?? correo.fromName ?? "—"}</dd>
-            <dt className="text-steel-500">Facturado</dt>
+            <dt className="text-steel-500">Facturado sin IGV</dt>
             <dd className="font-display text-base font-bold tabular">
-              {c ? formatMoney(c.total, c.currency) : "—"}
+              {c ? formatMoney(facturadoSinIgv, c.currency) : "—"}
             </dd>
+            <dt className="text-steel-500">Total con IGV</dt>
+            <dd className="tabular text-steel-600">{c ? formatMoney(c.total, c.currency) : "—"}</dd>
           </dl>
 
           {observado && correo.monto.nota && (
@@ -355,18 +370,18 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
           )}
 
           <Field
-            label="Monto pactado por el flete"
+            label="Monto pactado por el flete, sin IGV"
             name="agreedAmount"
             required
             error={errors.agreedAmount}
-            hint="Lo acordado con el proveedor, con IGV, tal como debería venir facturado."
+            hint="Viene puesto lo que dice la factura. Si lo acordado fue otro número, corrígelo."
           >
             <Input
               name="agreedAmount"
               inputMode="decimal"
               value={pactado}
               onChange={(e) => setPactado(e.target.value)}
-              placeholder="2950.00"
+              placeholder={facturadoSinIgv}
               invalid={!!errors.agreedAmount}
               autoFocus
             />
@@ -471,13 +486,34 @@ export function AceptarModal({ correo, condicion }: {
       size="lg"
       action={(fd) => approveEmail(correo.id, fd)}
       trigger={(open) => (
-        <Button size="sm" onClick={open} title="Aceptar el comprobante">
+        <Button
+          size="sm"
+          onClick={open}
+          variant={correo.yaRegistrada ? "outline" : "primary"}
+          title={correo.yaRegistrada
+            ? `${correo.yaRegistrada.label} ya está registrada`
+            : "Aceptar el comprobante"}
+        >
           <Check className="h-4 w-4" /><span className="sr-only 2xl:not-sr-only">Aceptar</span>
         </Button>
       )}
     >
       {({ errors }) => (
         <div className="grid gap-4">
+          {/* Lo primero, porque cambia lo que hay que hacer: si ya está registrada, esto
+              no se acepta, se descarta. */}
+          {correo.yaRegistrada && (
+            <p className="flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+              <span>
+                <strong>Esta factura ya está registrada.</strong> El comprobante{" "}
+                {correo.yaRegistrada.label} ya existe en el sistema
+                {correo.yaRegistrada.status === "ANULADA" && " (anulada)"}. Aceptarlo otra vez
+                duplicaría la deuda: si el proveedor la reenvió, descarta este correo.
+              </span>
+            </p>
+          )}
+
           <DatosComprobante correo={correo} />
 
           <Field

@@ -1,0 +1,124 @@
+TRANSJER GESTIÓN — ACTUALIZACIÓN
+Filtro del monto sin IGV, aviso de factura repetida, filtro por
+destino y el directorio de clientes de provincia
+================================================================
+
+Cuatro cambios. Piden migración.
+
+ANTES DE SUBIRLA:
+
+    npm install
+    npm run db:migrate     ← obligatorio, crea el directorio de clientes de provincia
+
+Las de lógica (npm test) pasan las 750; la batería de navegador, las trece suites.
+
+
+1. EL FILTRO DEL MONTO AHORA COMPARA SIN IGV
+---------------------------------------------
+
+Lo que se acuerda con el proveedor es el valor del flete; el IGV lo pone la ley y no se
+negocia. Hasta ahora el filtro comparaba contra el TOTAL, así que para verificar un flete
+de 2,500 había que escribir 2,950 —sumarle el 18 % de cabeza— y ese cálculo mental es justo
+lo que el filtro venía a quitar.
+
+AHORA SE COMPARA EL VALOR DE VENTA, SIN IGV. Y el campo ya viene puesto con lo que dice la
+factura, así que la tarea es confirmar o corregir, no teclear:
+
+    Facturado sin IGV    S/ 2,500.00     ← viene propuesto en el campo
+    Total con IGV        S/ 2,950.00     ← se muestra, para que cuadre la vista
+    Monto pactado        S/ 2,500.00     ← se corrige si lo acordado fue otro
+
+Si el XML no trae el valor de venta —comprobantes viejos o mal emitidos— se deduce del
+total quitándole el IGV, que es mejor que no poder comparar. Un comprobante exonerado, sin
+IGV, se compara contra su propio importe.
+
+Lo demás del filtro no cambia: un sol de diferencia sigue siendo redondeo, una diferencia
+mayor deja el comprobante observado y lo frena, y aprobarla sigue exigiendo explicar por
+qué. En la ficha de la factura el apartado ahora dice MONTO PACTADO AL VERIFICAR (SIN IGV).
+
+
+2. AVISO SI LA FACTURA YA ESTÁ REGISTRADA
+------------------------------------------
+
+Un proveedor que reenvía su factura —porque cree que no llegó, o porque la manda a dos
+correos— deja el mismo comprobante dos veces en la bandeja. El sistema ya impedía
+registrarla dos veces, pero recién al apretar aceptar.
+
+Ahora se ve antes, en tres sitios:
+
+    EN LA LISTA        debajo del número, en rojo: "ya está registrada", con enlace a la
+                       factura que ya existe
+    AL ACEPTAR         un aviso arriba de la ventana explicando que aceptarla otra vez
+                       duplicaría la deuda, y que si el proveedor la reenvió hay que
+                       descartar el correo
+    AL GUARDAR         la comprobación de siempre, por si alguien la registró a mano entre
+                       medio
+
+Se empareja por proveedor, tipo, serie y número, que es la misma regla con la que el
+sistema impide registrar una factura repetida a mano.
+
+
+3. FILTROS DE FACTURAS: FUERA CUATRO, ENTRA DESTINO
+----------------------------------------------------
+
+En la pantalla de facturas la barra de filtros queda así:
+
+    PROVEEDOR · TIPO · CLIENTE · DESTINO · EMITIDA DESDE · EMITIDA HASTA
+
+Salieron DETRACCIÓN, CONDICIÓN, MONEDA y ORIGEN: se usaban poco y ocupaban el ancho que
+hacía falta para lo que sí se busca. Nada se perdió —la detracción tiene su propia pantalla
+con sus filtros, y la condición, la moneda y el origen siguen viéndose en cada factura— y
+si alguno hace falta de vuelta, devolverlo es un minuto.
+
+EL DESTINO es por donde se busca un flete: "las facturas de Jaén". La lista sale de los
+destinos ya registrados, no de una lista fija, así que un destino nuevo aparece solo. No
+distingue mayúsculas: JAEN y Jaén son el mismo viaje.
+
+
+4. CLIENTES DE PROVINCIA (MÓDULO NUEVO)
+----------------------------------------
+
+En FLOTA → CLIENTES DE PROVINCIA. Lo ve y lo edita cualquier usuario del sistema: es una
+agenda de trabajo, y quien coordina un viaje puede ser cualquiera de los que están ese día.
+
+Guarda, por cliente:
+
+    PROVINCIA · CLIENTE DESTINATARIO · UBICACIÓN · NÚMERO DEL CLIENTE
+    ESTIBADOR · NÚMERO DEL ESTIBADOR · COSTO POR TONELADA · OBSERVACIONES
+
+PARA QUÉ. Sale un viaje a provincia y hay que saber siempre lo mismo: a quién se entrega,
+dónde queda, a qué número se llama, quién descarga allá y cuánto cobra. Hoy eso vive en la
+cabeza de quien coordina y en conversaciones de WhatsApp, así que un destino al que no se
+va hace meses empieza siempre por preguntar.
+
+CÓMO SE BUSCA. Escribiendo el nombre del destinatario, que es como se pregunta —"el viaje
+es para Comercial Jaén"— y sale la ficha completa. También encuentra por provincia, por una
+referencia de la ubicación, por el nombre del estibador o por cualquiera de los dos
+teléfonos: a veces lo único que se tiene es el número desde el que llamaron. No hace falta
+escribir el nombre completo ni respetar mayúsculas.
+
+LOS TELÉFONOS SON ENLACES: desde el celular se llama tocándolos.
+
+SOLO LA PROVINCIA Y EL NOMBRE SON OBLIGATORIOS. El resto se completa con el tiempo —el
+teléfono del estibador aparece recién cuando se hace el primer viaje— y exigirlo todo de
+entrada llevaría a inventar datos o a no registrar nada. Arriba se ve cuántos clientes
+están sin costo por tonelada anotado, para ir cerrándolos.
+
+NO SE REPITE UN CLIENTE EN LA MISMA PROVINCIA. Si se intenta, el sistema avisa y manda a
+corregir la ficha que ya existe: dos fichas del mismo cliente son dos teléfonos distintos y
+ninguno manda.
+
+NO SE BORRA, SE DA DE BAJA. El cliente al que no se le vende hace un año puede volver, y su
+teléfono y su precio siguen sirviendo. Los dados de baja se vuelven a ver con el filtro de
+estado.
+
+SE DESCARGA EN EXCEL, como el resto de las tablas, con los filtros que estén puestos.
+
+
+LO QUE NO CAMBIÓ
+-----------------
+
+El camino del comprobante sigue siendo el mismo —verificar el monto, aceptar o rechazar,
+pasar a facturas por pagar—, y los cálculos de detracción, los plazos y los pagos no se
+tocaron. Lo verificado antes de esta actualización se queda como estaba: su monto pactado
+se comparó contra el total, y en la ficha figura tal como se guardó.

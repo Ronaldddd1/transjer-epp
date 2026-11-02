@@ -149,6 +149,29 @@ export const AMOUNT_CHECK_LABEL = {
 export type AmountCheckKey = keyof typeof AMOUNT_CHECK_LABEL;
 
 /**
+ * El valor de venta del comprobante: lo que se cobra por el flete, sin el IGV.
+ *
+ * Es contra esto que se compara lo pactado, porque es a este número al que se llega con el
+ * proveedor: el IGV no se negocia, lo pone la ley. Comparar contra el total obligaba a
+ * sumarle mentalmente el 18 % al precio acordado, y ese cálculo de cabeza es justo lo que
+ * el filtro viene a quitar.
+ *
+ * El XML trae el valor de venta; cuando no lo trae —comprobantes viejos o mal emitidos— se
+ * deduce del total, que es mejor que no poder comparar nada.
+ */
+export const IGV_RATE = 0.18;
+export function valorSinIgv(
+  subtotal: string | number | null | undefined,
+  total: string | number | null | undefined,
+): string {
+  const s = Number(subtotal ?? 0);
+  if (Number.isFinite(s) && s > 0) return s.toFixed(2);
+  const t = Number(total ?? 0);
+  if (!Number.isFinite(t) || t <= 0) return "0.00";
+  return (t / (1 + IGV_RATE)).toFixed(2);
+}
+
+/**
  * Hasta cuánto se considera que dos importes son el mismo.
  *
  * Un sol de diferencia es redondeo —el proveedor que factura el IGV con otro decimal— y

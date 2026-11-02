@@ -16,7 +16,7 @@ import { can } from "@/lib/permissions";
 import {
   ATTACHMENT_KIND_LABEL, cn, compararMonto, formatDate, formatDateTime, formatFileSize, formatMoney,
   DETRACTION_THRESHOLD, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, INVOICE_SOURCE_LABEL,
-  invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, saldoAPagar,
+  invoiceNumber, netoAPagar, PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, saldoAPagar, valorSinIgv,
   type RejectReasonKey,
 } from "@/lib/utils";
 import {
@@ -470,10 +470,12 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 {/* El filtro que pasó antes de aceptarse: contra qué importe se comparó.
                     Es lo que permite explicar, meses después, por qué se pagó esto. */}
                 {email.agreedAmount && (
-                  <Dato label="Monto pactado al verificar">
+                  <Dato label="Monto pactado al verificar (sin IGV)">
                     {formatMoney(email.agreedAmount, invoice.currency)}
                     {(() => {
-                      const { diferencia, coincide, cobraDeMas } = compararMonto(invoice.total, email.agreedAmount);
+                      // Se compara contra el valor de venta de la factura, que es como se pactó.
+                      const facturado = valorSinIgv(invoice.subtotal, invoice.total);
+                      const { diferencia, coincide, cobraDeMas } = compararMonto(facturado, email.agreedAmount);
                       return coincide ? (
                         <span className="block text-xs text-emerald-700">Coincidía con lo facturado</span>
                       ) : (

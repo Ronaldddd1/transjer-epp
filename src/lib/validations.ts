@@ -169,6 +169,10 @@ export const eppReturnSchema = z.object({
 // --------------------------------------------------------------------------
 
 /** Importe en soles o dólares: acepta "1180", "1180.50" o "1,180.50". */
+/** Teléfono opcional, con la misma regla que ya usan trabajadores y proveedores. */
+const telefono = z.string().trim().regex(/^[\d +()-]{0,40}$/, "Teléfono inválido")
+  .optional().transform((v) => (v ? v : null));
+
 const money = (label: string) =>
   z.string({ required_error: required(label) })
     .trim()
@@ -605,4 +609,22 @@ export const passwordSchema = z.object({ password });
 export const loginSchema = z.object({
   identifier: requiredText("El usuario o correo", 160),
   password: z.string().min(1, "La contraseña es obligatoria"),
+});
+
+/**
+ * Un cliente de provincia: a quién se entrega allá y con qué condiciones.
+ *
+ * Solo la provincia y el nombre son obligatorios. El resto se completa con el tiempo —el
+ * teléfono del estibador aparece recién cuando se hace el primer viaje— y exigirlo todo de
+ * entrada llevaría a inventar datos o a no registrar nada.
+ */
+export const provinceClientSchema = z.object({
+  province: requiredText("La provincia", 80),
+  clientName: requiredText("El cliente destinatario", 160),
+  location: optionalText(250),
+  clientPhone: telefono,
+  stevedoreName: optionalText(120),
+  stevedorePhone: telefono,
+  costPerTon: optionalMoney("El costo por tonelada"),
+  notes: optionalText(1000),
 });
