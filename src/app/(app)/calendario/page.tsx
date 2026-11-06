@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { PageHeader } from "@/components/ui/page-header";
+import { DownloadImageButton } from "@/components/ui/download-image-button";
 import { ExportTable } from "@/components/ui/export-table";
 import { requirePageUser } from "@/lib/auth";
 import {
@@ -81,15 +82,23 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
       <PageHeader
         title="Calendario de pagos"
         description="Las cuotas de préstamos y servicios, en el mes en que vencen. Las facturas de proveedores están en su propia pantalla."
-        actions={<ExportTable tabla="calendario" />}
+        actions={
+          <>
+            <DownloadImageButton targetId="calendario-imagen" filename={`calendario-de-pagos-${mes}.png`} />
+            <ExportTable tabla="calendario" />
+          </>
+        }
       />
 
+      {/* Todo lo que va dentro de este bloque es lo que sale en la imagen descargada. */}
+      <div id="calendario-imagen" className="bg-white">
       {/* --- Cabecera del mes: mover de mes y el total de todo lo que vence en él --- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-lg border border-ink bg-ink px-4 py-3 text-white">
         <div className="flex items-center gap-2">
           <Link
             href={`/calendario?mes=${addMonths(mes, -1)}`}
             aria-label="Mes anterior"
+            data-sin-captura
             className="rounded-md border border-steel-600 p-1.5 text-steel-300 hover:border-brand hover:text-brand"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
@@ -98,12 +107,13 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
           <Link
             href={`/calendario?mes=${addMonths(mes, 1)}`}
             aria-label="Mes siguiente"
+            data-sin-captura
             className="rounded-md border border-steel-600 p-1.5 text-steel-300 hover:border-brand hover:text-brand"
           >
             <ChevronRight className="h-4 w-4" aria-hidden />
           </Link>
           {!esMesActual && (
-            <Link href="/calendario" className="ml-1 text-sm text-steel-300 underline hover:text-brand">
+            <Link href="/calendario" data-sin-captura className="ml-1 text-sm text-steel-300 underline hover:text-brand">
               Volver a este mes
             </Link>
           )}
@@ -132,8 +142,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
             </span>
             <span className="text-sm text-red-800">
               {vencidoAntes.length} pago(s) · <strong>{juntar(totales(vencidoAntes))}</strong>
-              <span className="ml-2 font-medium underline group-open:hidden">ver cuáles</span>
-              <span className="ml-2 hidden font-medium underline group-open:inline">ocultar</span>
+              <span data-sin-captura className="ml-2 font-medium underline group-open:hidden">ver cuáles</span>
+              <span data-sin-captura className="ml-2 hidden font-medium underline group-open:inline">ocultar</span>
             </span>
           </summary>
           <ul className="divide-y divide-red-100 border-t border-red-200">
@@ -168,6 +178,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
             ))}
           </tbody>
         </table>
+      </div>
+
       </div>
 
       <p className="mt-3 text-xs text-steel-500">

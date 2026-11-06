@@ -2,7 +2,9 @@ import "server-only";
 import { and, asc, between, count, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { attendance, employees, users } from "@/db/schema";
-import { first, monthEnd, monthStart, todayLima, type SearchParamsRecord } from "@/lib/utils";
+import {
+  addDays, first, monthEnd, monthStart, todayLima, weekdayOf, type SearchParamsRecord,
+} from "@/lib/utils";
 
 /**
  * La asistencia diaria.
@@ -147,4 +149,80 @@ export async function areaOptions() {
     .from(employees).where(eq(employees.active, true))
     .groupBy(employees.area).orderBy(asc(employees.area));
   return filas.map((f) => f.area);
+}
+
+/** El lunes de la semana de esa fecha. Un domingo pertenece a la semana que termina con él. */
+export function lunesDe(ymd: string): string {
+  return addDays(ymd, -((weekdayOf(ymd) + 6) % 7));
+}
+
+export type DiaSemana = { status: AttendanceStatus; activity: string | null; reason: string | null };
+
+/**
+ * La semana de trabajo completa, de lunes a sábado, una fila por trabajador.
+ *
+ * El día suelto dice quién vino hoy y el mes da totales, pero ninguno de los dos deja ver
+ * la semana de un vistazo: quién faltó el martes, quién no tiene registro el sábado. El
+ * domingo no se muestra porque no se trabaja; si alguien lo registró, igual queda en el
+ * resumen del mes.
+ */
+export async function attendanceWeek(lunes: string, f: { q?: string; area?: string } = {}) {
+  const sabado = addDays(lunes, 5);
+  const dias = Array.from({ length: 6 }, (_, i) => addDays(lunes, i));
+
+  const trabajadores = await db.select({
+    employeeId: employees.id,
+    nombre: sql<string>`concat_ws(' ', ${employees.firstName}, ${employees.lastName})`,
+    dni: employees.dni,
+    area: employees.area,
+  })
+    .from(employees)
+    .where(and(
+      eq(employees.active, true),
+      f.area ? eq(employees.area, f.area) : undefined,
+      f.q
+        ? sql`(${employees.firstName} || ' ' || ${employees.lastName} || ' ' || ${employees.dni})
+            ilike ${`%${f.q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`}`
+        : undefined,
+    ))
+    .orderBy(asc(employees.lastName), asc(employees.firstName));
+
+  const registros = trabajadores.length === 0 ? [] : await db.select({
+    employeeId: attendance.employeeId,
+    day: attendance.day,
+    status: attendance.status,
+    activity: attendance.activity,
+    reason: attendance.reason,
+  })
+    .from(attendance)
+    .where(between(attendance.day, lunes, sabado));
+
+  const porTrabajador = new Map<string, Record<string, DiaSemana>>();
+  for (const r of registros) {
+    const fila = porTrabajador.get(r.employeeId) ?? {};
+    fila[r.day] = { status: r.status as AttendanceStatus, activity: r.activity, reason: r.reason };
+    porTrabajador.set(r.employeeId, fila);
+  }
+
+  // Los días con al menos un registro de alguien: en esos, un trabajador sin marca es un
+  // olvido al pasar lista; en un día que nadie registró, simplemente no se pasó lista.
+  const conLista = new Set(registros.map((r) => r.day));
+
+  return {
+    lunes,
+    sabado,
+    dias,
+    conLista,
+    filas: trabajadores.map((t) => {
+      const semana = porTrabajador.get(t.employeeId) ?? {};
+      const valores = Object.values(semana);
+      return {
+        ...t,
+        semana,
+        presentes: valores.filter((v) => v.status === "PRESENTE").length,
+        faltas: valores.filter((v) => v.status === "FALTA").length,
+        justificados: valores.filter((v) => v.status === "JUSTIFICADO").length,
+      };
+    }),
+  };
 }

@@ -105,8 +105,12 @@ with sync_playwright() as p:
     expect(page.get_by_role("heading", name="Documentos")).to_be_visible()
 
     activa = page.locator("[role=tab][aria-selected=true]").inner_text()
-    check("se entra directo por lo que tiene algo vencido", "vencido" in activa.lower(), activa)
-    check("y avisa arriba cuántas unidades están así", "unidad(es)" in page.content())
+    check("se entra por toda la flota", "Toda la flota" in activa, activa)
+    pestanias = page.locator("[role=tab]").all_inner_texts()
+    check("'Toda la flota' es la primera pestaña y 'Con algo vencido' la segunda",
+          len(pestanias) >= 2 and "Toda la flota" in pestanias[0] and "vencido" in pestanias[1].lower(),
+          pestanias)
+    check("y avisa arriba cuántas unidades tienen algo vencido", "unidad(es)" in page.content())
 
     fila = page.get_by_role("row").filter(has_text=PLACA)
     expect(fila).to_be_visible()
@@ -119,9 +123,13 @@ with sync_playwright() as p:
     check("el MTC cargado sin PDF lo dice", "falta el PDF" in texto, texto)
     check("la tarjeta de propiedad sin fecha no se cuenta como vencida", "Sin fecha" in texto, texto)
     check("sin conductor asignado la fila lo dice", "Sin conductor" in texto, texto)
-    check("hay un botón por cada papel con archivo",
+    check("hay un botón Ver por cada papel con archivo",
           fila.locator("a[href^='/api/documentos/']").count() >= 3,
           fila.locator("a[href^='/api/documentos/']").count())
+    check("cada papel trae su botón Subir", fila.get_by_role("button", name="Subir").count() == 4,
+          fila.get_by_role("button", name="Subir").count())
+    check("el MTC sin PDF tiene el Ver apagado",
+          fila.locator("td").nth(3).locator("[aria-disabled=true]").count() == 1)
 
     ejecutar(f"insert into vehicles (plate) values ('{PLACA2}')")
     page.reload()
@@ -340,6 +348,45 @@ with sync_playwright() as p:
     if emp:
         check("y el conductor queda asignado",
               psql(f"select driver_id from vehicles where id = '{vid}'") == emp)
+
+    # --- Subir desde la tabla de la flota ---
+    # Una unidad sin SOAT: "Subir" lo registra nuevo. Y un MTC que solo tenía la fecha:
+    # "Subir" le pone el archivo a ese mismo, sin dejar dos.
+    pdf_valido(bueno)
+    vid2 = psql(f"select id from vehicles where plate = '{PLACA2}'")
+    ejecutar(f"insert into documents (vehicle_id, kind, title, expires_at) "
+             f"values ('{vid2}', 'MTC', 'MTC2 {SELLO}', ((now() at time zone 'America/Lima')::date) + 40)")
+    page.goto(f"{BASE}/documentos?q={PLACA2}")
+    page.wait_for_timeout(1600)
+    fila2 = page.get_by_role("row").filter(has_text=PLACA2)
+    fila2.locator("td").nth(1).get_by_role("button", name="Subir").click()
+    page.wait_for_timeout(700)
+    check("el modal dice qué papel y de qué placa", "SOAT" in page.locator("[role=dialog]").inner_text()
+          and PLACA2 in page.locator("[role=dialog]").inner_text())
+    page.locator("#expiresAt").fill("15/09/2027")
+    page.set_input_files("input[name=archivo]", bueno)
+    page.get_by_role("button", name="Guardar").click()
+    page.wait_for_timeout(2600)
+    check("Subir en una unidad sin SOAT lo registra con su fecha",
+          psql(f"select expires_at::text || '|' || (filename is not null) from documents where vehicle_id = '{vid2}' and kind = 'SOAT'") == "2027-09-15|true",
+          psql(f"select expires_at::text || '|' || (filename is not null) from documents where vehicle_id = '{vid2}' and kind = 'SOAT'"))
+
+    page.goto(f"{BASE}/documentos?q={PLACA2}")
+    page.wait_for_timeout(1600)
+    fila2 = page.get_by_role("row").filter(has_text=PLACA2)
+    check("y ahora el SOAT tiene su Ver", fila2.locator("td").nth(1).locator("a[href^='/api/documentos/']").count() == 1)
+    fila2.locator("td").nth(3).get_by_role("button", name="Subir").click()
+    page.wait_for_timeout(700)
+    check("en el MTC con solo fecha el modal ofrece adjuntar", "Adjuntar" in page.locator("[role=dialog]").inner_text())
+    page.set_input_files("input[name=archivo]", bueno)
+    page.get_by_role("button", name="Guardar").click()
+    page.wait_for_timeout(2600)
+    check("el archivo entra en el mismo MTC, sin crear otro",
+          psql(f"select count(*) || '|' || bool_and(filename is not null) || '|' || max(title) from documents where vehicle_id = '{vid2}' and kind = 'MTC'") == f"1|true|MTC2 {SELLO}",
+          psql(f"select count(*) || '|' || bool_and(filename is not null) || '|' || max(title) from documents where vehicle_id = '{vid2}' and kind = 'MTC'"))
+    check("y conserva su fecha",
+          psql(f"select expires_at = ((now() at time zone 'America/Lima')::date) + 40 from documents where vehicle_id = '{vid2}' and kind = 'MTC'") == "t")
+    os.path.exists(bueno) and os.remove(bueno)
 
     # --- Permisos ---
     # Un enlace de descarga reenviado por correo no debe servirle a nadie de fuera: el

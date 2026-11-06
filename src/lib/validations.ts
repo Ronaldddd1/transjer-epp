@@ -401,6 +401,14 @@ export const documentSchema = z.object({
   }
 });
 
+/**
+ * Adjuntar el archivo a un documento que ya existe, desde la tabla de la flota. La fecha es
+ * opcional: en blanco se queda la que tenía.
+ */
+export const attachDocumentSchema = z.object({
+  expiresAt: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
+});
+
 /** Un decimal opcional: en blanco es "no se sabe", no cero. */
 const decimalOpcional = (label: string, max: number) =>
   z.preprocess(

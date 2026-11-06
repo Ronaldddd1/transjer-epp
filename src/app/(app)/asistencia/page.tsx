@@ -9,9 +9,10 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { first, formatDate, todayLima, type SearchParams } from "@/lib/utils";
+import { addDays, first, formatDate, todayLima, type SearchParams } from "@/lib/utils";
+import { AttendanceWeek } from "@/components/attendance/attendance-week";
 import {
-  areaOptions, attendanceMonth, listAttendanceDay, readAttendanceFilters,
+  areaOptions, attendanceMonth, attendanceWeek, listAttendanceDay, lunesDe, readAttendanceFilters,
 } from "@/server/attendance-queries";
 
 export const metadata: Metadata = { title: "Asistencia" };
@@ -34,13 +35,30 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
   const dia = f.day ?? todayLima();
   const mes = first(sp.mes) && /^\d{4}-\d{2}$/.test(first(sp.mes)!) ? first(sp.mes)! : dia.slice(0, 7);
 
-  const [filas, areas, resumen] = await Promise.all([
+  // La semana que se mira: la que se pidió, o la del día elegido arriba.
+  const pedida = first(sp.semana);
+  const lunes = lunesDe(pedida && /^\d{4}-\d{2}-\d{2}$/.test(pedida) ? pedida : dia);
+
+  const [filas, areas, resumen, semana] = await Promise.all([
     listAttendanceDay(f),
     areaOptions(),
     attendanceMonth(mes, { q: f.q, area: f.area }),
+    attendanceWeek(lunes, { q: f.q, area: f.area }),
   ]);
 
   const esHoy = dia === todayLima();
+
+  /** Un enlace a otra semana que conserva el día, el mes y los filtros. */
+  const aSemana = (l: string) => {
+    const p = new URLSearchParams();
+    if (f.day) p.set("dia", f.day);
+    if (first(sp.mes)) p.set("mes", mes);
+    if (f.q) p.set("q", f.q);
+    if (f.area) p.set("area", f.area);
+    p.set("semana", l);
+    return `/asistencia?${p.toString()}#titulo-semana`;
+  };
+  const lunesDeHoy = lunesDe(todayLima());
 
   return (
     <>
@@ -74,6 +92,15 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
           <Link href="/asistencia" className="underline">Ir a hoy</Link>
         </p>
       )}
+
+      {/* ---------- La semana, de lunes a sábado ---------- */}
+      <AttendanceWeek
+        semana={semana}
+        hoy={todayLima()}
+        anterior={aSemana(addDays(lunes, -7))}
+        siguiente={aSemana(addDays(lunes, 7))}
+        actual={lunes === lunesDeHoy ? null : aSemana(lunesDeHoy)}
+      />
 
       {/* ---------- El acumulado del mes ---------- */}
       <section className="mt-8">

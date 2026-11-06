@@ -174,6 +174,21 @@ with sync_playwright() as p:
     check("el resumen del mes está en la misma pantalla", "Resumen de" in cuerpo)
     check("y dice cuántos días se pasó lista", "día(s) de este mes" in cuerpo, cuerpo[-400:])
 
+    # --- La semana, de lunes a sábado ---
+    semana = page.locator("section[aria-labelledby=titulo-semana]")
+    cabecera = semana.locator("thead").inner_text()
+    check("la semana trae las seis columnas de lunes a sábado",
+          all(d in cabecera for d in ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"))
+          and "Domingo" not in cabecera, cabecera)
+    # Un domingo no entra en la semana de lunes a sábado: ese día no hay qué buscar.
+    es_domingo = psql("select extract(dow from (now() at time zone 'America/Lima')::date)::int") == "0"
+    check("y en ella se ve lo marcado hoy", es_domingo or "Vino" in semana.locator("tbody").inner_text()
+          or "Faltó" in semana.locator("tbody").inner_text())
+    semana.get_by_role("link", name="← Semana anterior").click()
+    page.wait_for_timeout(1500)
+    check("se puede ir a la semana anterior", "semana=" in page.url
+          and page.get_by_role("link", name="Esta semana").count() == 1, page.url)
+
     # --- La descarga ---
     with page.expect_download(timeout=60000) as dl:
         page.evaluate("""() => { const a = document.createElement('a');

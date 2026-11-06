@@ -34,16 +34,10 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
 
   const cuentas = await fleetCounts();
 
-  // Se abre en lo que urge, si hay algo. Con la flota en orden, abrir en una lista vacía
-  // no diría nada, así que ahí se muestra todo.
-  // "Toda la flota" llega como estado="" y eso es una elección, no la ausencia de una:
-  // solo cuando el parámetro no viene se aplica el filtro de entrada.
-  const sinElegir = first(sp.estado) === undefined;
-  const hayUrgente = cuentas.vencido > 0 || cuentas.falta > 0;
-  const porDefecto = sinElegir && !first(sp.q) && hayUrgente
-    ? (cuentas.vencido > 0 ? "VENCIDO" : "FALTA")
-    : "";
-  const estado = sinElegir ? porDefecto : first(sp.estado)!;
+  // Se abre en toda la flota. Antes entraba directo en lo vencido, pero lo que se busca al
+  // abrir la pantalla es la unidad, y lo vencido igual se anuncia en el aviso rojo de
+  // arriba y en su pestaña, que va justo al lado.
+  const estado = first(sp.estado) ?? "";
   const q = first(sp.q)?.trim() || undefined;
 
   const [rows, docs, vehiculos, trabajadores] = await Promise.all([
@@ -112,18 +106,18 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
         params={sp}
         className="mb-3"
         tabs={[
+          { value: "", label: "Toda la flota", count: cuentas.total },
           { value: "VENCIDO", label: "Con algo vencido", count: cuentas.vencido },
           { value: "FALTA", label: "Falta un papel", count: cuentas.falta },
           { value: "POR_VENCER", label: "Vencen en 30 días", count: cuentas.porVencer },
           { value: "AL_DIA", label: "Pueden salir", count: cuentas.alDia },
-          { value: "", label: "Toda la flota", count: cuentas.total },
         ]}
       />
 
       <FilterBar searchPlaceholder="Buscar por placa, marca, modelo o conductor" filters={[]} />
 
       <LeyendaFlota />
-      <FleetTable rows={rows} />
+      <FleetTable rows={rows} puedeSubir={canManage} />
 
       {rows.length === 0 && cuentas.total > 0 && (
         <p className="mt-3 text-sm text-steel-500">

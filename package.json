@@ -2,7 +2,7 @@
   "name": "transjer-epp",
   "version": "1.0.0",
   "private": true,
-  "description": "Transjer Gesti\u00f3n \u2014 almac\u00e9n de EPP y facturas de proveedores, Transjer Operador Log\u00edstico S.A.C.",
+  "description": "Transjer Gestión — almacén de EPP y facturas de proveedores, Transjer Operador Logístico S.A.C.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -33,6 +33,7 @@
     "exceljs": "^4.4.0",
     "fast-xml-parser": "^5.11.1",
     "fflate": "^0.8.3",
+    "html-to-image": "1.11.11",
     "imapflow": "^1.0.191",
     "jose": "^6.2.12",
     "jspdf": "^4.2.1",

@@ -1,5 +1,6 @@
-import { Car, FileDown, IdCard, MapPin, Minus, UserRound } from "lucide-react";
+import { Car, IdCard, MapPin, Minus, UserRound } from "lucide-react";
 import Link from "next/link";
+import { PaperButtons } from "@/components/documents/paper-buttons";
 import { Badge } from "@/components/ui/badge";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import {
@@ -32,15 +33,16 @@ function EstadoFlotaBadge({ estado }: { estado: ReturnType<typeof estadoFlota> }
   return <Badge tone="green">Puede salir</Badge>;
 }
 
+/** Lo que necesita una celda para sus botones de subir y ver. */
+type Botones = { vehicleId: string; plate: string; kind: string; label: string; puedeSubir: boolean };
+
 /**
- * Una celda de papel: la fecha, el color según cuánto le queda, y el botón al PDF.
- *
- * El botón solo aparece si el archivo está cargado. Un enlace que lleva a un error es peor
- * que no tener enlace: hace perder el viaje a quien lo pulsa creyendo que el papel está.
+ * Una celda de papel: la fecha, el color según cuánto le queda, y debajo los botones para
+ * subir el documento y para verlo.
  */
-export function PapelCell({ papel, nombre, noLeTocaHasta }: {
+export function PapelCell({ papel, noLeTocaHasta, botones }: {
   papel: PapelResumen;
-  nombre: string;
+  botones: Botones;
   /**
    * Año desde el que recién se le exige este papel, si todavía no le toca.
    *
@@ -55,6 +57,7 @@ export function PapelCell({ papel, nombre, noLeTocaHasta }: {
         <Td className="whitespace-nowrap">
           <span className="text-sm text-steel-500">No le toca</span>
           <p className="text-xs text-steel-400">desde {noLeTocaHasta}</p>
+          <PaperButtons {...botones} papel={null} />
         </Td>
       );
     }
@@ -63,6 +66,7 @@ export function PapelCell({ papel, nombre, noLeTocaHasta }: {
         <span className="inline-flex items-center gap-1 text-sm font-semibold text-red-700">
           <Minus className="h-3.5 w-3.5" aria-hidden /> Falta
         </span>
+        <PaperButtons {...botones} papel={null} />
       </Td>
     );
   }
@@ -94,23 +98,13 @@ export function PapelCell({ papel, nombre, noLeTocaHasta }: {
           )}
           {!papel.tieneArchivo && <p className="text-xs text-amber-700">falta el PDF</p>}
         </span>
-        {papel.tieneArchivo && (
-          <Link
-            href={`/api/documentos/${papel.id}`}
-            target="_blank"
-            title={`Abrir el ${nombre}`}
-            className="rounded p-1 text-steel-400 hover:bg-steel-100 hover:text-ink"
-          >
-            <FileDown className="h-4 w-4" aria-hidden />
-            <span className="sr-only">Abrir el {nombre}</span>
-          </Link>
-        )}
       </span>
+      <PaperButtons {...botones} papel={papel} />
     </Td>
   );
 }
 
-export function FleetTable({ rows }: { rows: FleetRow[] }) {
+export function FleetTable({ rows, puedeSubir = false }: { rows: FleetRow[]; puedeSubir?: boolean }) {
   return (
     <TableShell>
       <thead>
@@ -134,6 +128,7 @@ export function FleetTable({ rows }: { rows: FleetRow[] }) {
         )}
         {rows.map((v) => {
           const estado = estadoFlota(v);
+          const base = { vehicleId: v.id, plate: v.plate, puedeSubir };
           return (
             <Tr key={v.id} tone={TONO[estado]}>
               <Td>
@@ -154,14 +149,14 @@ export function FleetTable({ rows }: { rows: FleetRow[] }) {
                   </span>
                 </Link>
               </Td>
-              <PapelCell papel={v.soat} nombre="SOAT" />
+              <PapelCell papel={v.soat} botones={{ ...base, kind: "SOAT", label: "SOAT" }} />
               <PapelCell
                 papel={v.revisionTecnica}
-                nombre="certificado de revisión técnica"
                 noLeTocaHasta={exigeRevisionTecnica(v.year) ? null : anioPrimeraRevision(v.year)}
+                botones={{ ...base, kind: "REVISION_TECNICA", label: "certificado de revisión técnica" }}
               />
-              <PapelCell papel={v.mtc} nombre="certificado de habilitación MTC" />
-              <PapelCell papel={v.tarjetaPropiedad} nombre="tarjeta de propiedad" />
+              <PapelCell papel={v.mtc} botones={{ ...base, kind: "MTC", label: "certificado MTC" }} />
+              <PapelCell papel={v.tarjetaPropiedad} botones={{ ...base, kind: "TARJETA_PROPIEDAD", label: "tarjeta de propiedad" }} />
               <Td className="hidden lg:table-cell">
                 {v.driverId && v.driverName ? (
                   <span className="flex items-start gap-2">
@@ -224,7 +219,7 @@ export function LeyendaFlota() {
       <span className="flex items-center gap-1.5">
         <span className="inline-block h-3 w-3 rounded-sm border border-brand bg-brand-soft" aria-hidden /> Vence dentro de 30 días
       </span>
-      <span>El botón junto a cada fecha abre el PDF del documento.</span>
+      <span>Debajo de cada fecha: <strong className="font-medium">Subir</strong> carga el documento y <strong className="font-medium">Ver</strong> abre el PDF.</span>
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { BusinessError, formToObject, toActionError, type ActionResult } from "@
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { DOCUMENT_KIND_LABEL, formatDate, normalizePlate } from "@/lib/utils";
-import { documentSchema, vehicleSchema } from "@/lib/validations";
+import { attachDocumentSchema, documentSchema, vehicleSchema } from "@/lib/validations";
 import { maxBytesFor, putFile, removeFile, safeName } from "@/server/storage";
 
 /**
@@ -207,6 +207,62 @@ export async function updateDocument(id: string, formData: FormData): Promise<Ac
         ? (antes.filename ? "Documento actualizado y archivo reemplazado." : "Documento actualizado y archivo adjuntado.")
         : "Documento actualizado.",
     };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/**
+ * Le pone el archivo a un documento que ya está registrado, sin tocar el resto.
+ *
+ * Es el botón "Subir" de la tabla de la flota cuando el papel figura solo con su fecha (lo
+ * que entra por el Excel). Va aparte de updateDocument porque desde ahí no se tienen el
+ * título, la emisión ni las notas, y updateDocument los pisaría en blanco.
+ */
+export async function attachDocumentFile(id: string, formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("documents.manage");
+    const data = attachDocumentSchema.parse(formToObject(formData));
+    const [antes] = await db.select().from(documents).where(eq(documents.id, id)).limit(1);
+    if (!antes) throw new BusinessError("Ese documento ya no existe.");
+
+    if (data.expiresAt && antes.issuedAt && data.expiresAt < antes.issuedAt) {
+      throw new BusinessError("No puede vencer antes de haberse emitido.");
+    }
+
+    const archivo = await leerArchivo(formData);
+    const key = `documentos/${new Date().getFullYear()}/${crypto.randomUUID()}-${safeName(archivo.filename)}`;
+    const guardado = await putFile({ key, data: archivo.data, contentType: archivo.contentType });
+
+    const vence = data.expiresAt ?? antes.expiresAt;
+    const [row] = await db.update(documents).set({
+      expiresAt: vence,
+      ...(vence !== antes.expiresAt ? { reminderSentAt: null } : {}),
+      filename: archivo.filename.slice(0, 250),
+      contentType: archivo.contentType.slice(0, 120),
+      sizeBytes: archivo.data.byteLength,
+      storageDriver: guardado.storageDriver,
+      storageKey: guardado.storageKey,
+      content: guardado.content,
+      uploadedBy: user.id,
+      updatedAt: new Date(),
+    }).where(eq(documents.id, id)).returning();
+
+    if (antes.storageDriver) {
+      await removeFile({ ...antes, storageDriver: antes.storageDriver }).catch(() => {});
+    }
+
+    await logAudit({
+      user, action: "EDITAR", module: "DOCUMENTOS", recordId: id,
+      description: `${user.name} ${antes.filename ? "reemplazó el archivo de" : "adjuntó el archivo a"} `
+        + `${DOCUMENT_KIND_LABEL[row.kind] ?? row.kind}: "${archivo.filename}"`
+        + (vence !== antes.expiresAt && vence ? `, ahora vence el ${formatDate(vence)}.` : "."),
+      oldData: { vence: antes.expiresAt, archivo: antes.filename },
+      newData: { vence: row.expiresAt, archivo: row.filename },
+    });
+
+    revalidatePath("/", "layout");
+    return { ok: true, message: "Archivo guardado en el documento." };
   } catch (e) {
     return toActionError(e);
   }
