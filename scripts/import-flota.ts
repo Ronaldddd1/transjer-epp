@@ -261,7 +261,8 @@ async function fijarFecha(vehicleId: string, kind: string, expiresAt: string) {
     // escribirlo encima haría "caducar" un papel que ya se renovó.
     return "mas-nuevo";
   }
-  await db.update(documents).set({ expiresAt, updatedAt: new Date() })
+  // Fecha nueva, vencimiento nuevo: se limpia la marca para que también se avise.
+  await db.update(documents).set({ expiresAt, reminderSentAt: null, updatedAt: new Date() })
     .where(eq(documents.id, existente.id));
   return "actualizado";
 }

@@ -168,6 +168,9 @@ export async function updateDocument(id: string, formData: FormData): Promise<Ac
       title: data.title,
       issuedAt: data.issuedAt,
       expiresAt: data.expiresAt,
+      // Con otra fecha es otro vencimiento: tiene que poder avisarse de nuevo. Con la misma
+      // (corregir el título, adjuntar el PDF) la marca se queda y no se repite el aviso.
+      ...(data.expiresAt !== antes.expiresAt ? { reminderSentAt: null } : {}),
       notes: data.notes,
       ...(archivo && guardado ? {
         filename: archivo.filename.slice(0, 250),

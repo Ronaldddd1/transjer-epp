@@ -1,9 +1,15 @@
 /**
  * Aviso de vencimientos por WhatsApp.
  *
- * Va en el VPS de avisos, no en Vercel. Cada mañana pregunta a Transjer Gestión qué cuotas
- * de préstamos y servicios vencen pronto, manda un WhatsApp y le avisa de vuelta qué se
- * envió, para que ese vencimiento no se repita al día siguiente.
+ * Va en el VPS de avisos, no en Vercel. Cada mañana pregunta a Transjer Gestión qué vence
+ * pronto, manda un WhatsApp y le avisa de vuelta qué se envió, para que ese vencimiento no
+ * se repita al día siguiente. Son dos avisos, en mensajes separados:
+ *
+ *   - cuotas de préstamos y servicios, 2 días antes            (AVISOS_DIAS)
+ *   - documentos de la flota (SOAT, revisión…), 7 días antes   (AVISOS_DIAS_DOCUMENTOS)
+ *
+ * Los documentos pueden ir a otro número con AVISOS_DESTINO_FLOTA (por ejemplo, a quien
+ * lleva la flota); si no se pone, van al mismo AVISOS_DESTINO.
  *
  * Se hace así —el VPS preguntando— para no abrir ningún puerto: el servidor de avisos
  * sigue detrás de Tailscale, sin exponerse a internet.
@@ -21,6 +27,9 @@
  *        AVISOS_PANEL=http://127.0.0.1:3000/api/mensaje
  *        AVISOS_PANEL_USUARIO=...el USUARIO_PANEL del servidor de avisos...
  *        AVISOS_PANEL_CLAVE=...la CLAVE_PANEL del servidor de avisos...
+ *        AVISOS_DIAS=2                       # opcional
+ *        AVISOS_DIAS_DOCUMENTOS=7            # opcional
+ *        AVISOS_DESTINO_FLOTA=51999888777    # opcional
  *      El script lo lee solo: no hace falta cargarlo antes con `set -a; . ./.env.avisos`.
  *   3. Probar sin enviar nada:   node aviso-vencimientos.mjs --simular
  *   4. Programarlo con cron, de lunes a sábado a las 8:00:
@@ -74,7 +83,14 @@ const DESTINO = process.env.AVISOS_DESTINO ?? "";
 const PANEL = process.env.AVISOS_PANEL ?? "http://127.0.0.1:3000/api/mensaje";
 const PANEL_USUARIO = process.env.AVISOS_PANEL_USUARIO ?? "";
 const PANEL_CLAVE = process.env.AVISOS_PANEL_CLAVE ?? "";
-const DIAS = Number(process.env.AVISOS_DIAS ?? 2);
+/** Un número del archivo de variables; vacío o mal escrito, el valor por defecto. */
+const numero = (valor, porDefecto) => {
+  const n = Number(valor);
+  return valor !== undefined && valor !== "" && Number.isFinite(n) && n >= 0 ? n : porDefecto;
+};
+const DIAS = numero(process.env.AVISOS_DIAS, 2);
+const DIAS_DOCUMENTOS = numero(process.env.AVISOS_DIAS_DOCUMENTOS, 7);
+const DESTINO_FLOTA = process.env.AVISOS_DESTINO_FLOTA || DESTINO;
 const SIMULAR = process.argv.includes("--simular");
 
 const ahora = () => new Date().toLocaleString("es-PE", { timeZone: "America/Lima" });
@@ -138,35 +154,60 @@ async function pedir(ruta, opciones = {}) {
   return r.json();
 }
 
+/**
+ * Un aviso completo: preguntar, mandar y marcar.
+ *
+ * Solo después de que el envío salió bien se marca lo avisado. Si WhatsApp falla, el
+ * aviso se vuelve a intentar mañana en vez de perderse en silencio.
+ */
+async function avisar({ ruta, dias, destino, lista, nombre }) {
+  const respuesta = await pedir(`${ruta}?dias=${dias}`);
+  const filas = respuesta[lista] ?? [];
+
+  if (!respuesta.mensaje) {
+    log(`${nombre}: nada vence en los próximos ${dias} día(s). No se envía nada.`);
+    return;
+  }
+
+  log(`${nombre}: ${filas.length} por avisar.`);
+  if (SIMULAR) {
+    console.log(`\n--- SIMULACIÓN (${nombre}), no se envía ni se marca nada ---\n`);
+    console.log(respuesta.mensaje);
+    console.log("");
+    return;
+  }
+
+  await enviarWhatsApp(destino, respuesta.mensaje);
+  log(`${nombre}: mensaje enviado a ${destino}.`);
+
+  const marcado = await pedir(ruta, {
+    method: "POST",
+    body: JSON.stringify({ enviados: filas.map((f) => f.id) }),
+  });
+  log(`${nombre}: ${marcado.marcadas ?? marcado.marcados ?? 0} quedaron marcados como avisados.`);
+}
+
 async function main() {
   for (const [nombre, valor] of [["TRANSJER_URL", URL_BASE], ["AVISOS_SECRET", SECRET], ["AVISOS_DESTINO", DESTINO]]) {
     if (!valor) throw new Error(`Falta la variable ${nombre}.`);
   }
 
-  const { cuotas, mensaje } = await pedir(`/api/avisos/vencimientos?dias=${DIAS}`);
+  const avisos = [
+    { nombre: "Cuotas", ruta: "/api/avisos/vencimientos", dias: DIAS, destino: DESTINO, lista: "cuotas" },
+    { nombre: "Documentos de flota", ruta: "/api/avisos/documentos", dias: DIAS_DOCUMENTOS, destino: DESTINO_FLOTA, lista: "documentos" },
+  ];
 
-  if (!mensaje) {
-    log(`Nada vence en los próximos ${DIAS} día(s). No se envía nada.`);
-    return;
+  // Cada aviso por su lado: que falle uno no deja sin enviar el otro.
+  let fallos = 0;
+  for (const aviso of avisos) {
+    try {
+      await avisar(aviso);
+    } catch (e) {
+      fallos++;
+      log(`${aviso.nombre}: FALLÓ:`, e instanceof Error ? e.message : e);
+    }
   }
-
-  log(`${cuotas.length} cuota(s) por avisar.`);
-  if (SIMULAR) {
-    console.log("\n--- SIMULACIÓN, no se envía ni se marca nada ---\n");
-    console.log(mensaje);
-    return;
-  }
-
-  await enviarWhatsApp(DESTINO, mensaje);
-  log(`Mensaje enviado a ${DESTINO}.`);
-
-  // Solo después de que el envío salió bien se marcan como avisadas. Si WhatsApp falla, el
-  // aviso se vuelve a intentar mañana en vez de perderse en silencio.
-  const { marcadas } = await pedir("/api/avisos/vencimientos", {
-    method: "POST",
-    body: JSON.stringify({ enviados: cuotas.map((c) => c.id) }),
-  });
-  log(`${marcadas} cuota(s) quedaron marcadas como avisadas.`);
+  if (fallos > 0) process.exit(1);
 }
 
 main().catch((e) => {

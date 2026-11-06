@@ -1,9 +1,78 @@
 AVISOS DE VENCIMIENTO POR WHATSAPP — PASO A PASO
 =================================================
 
-Cada mañana el droplet le pregunta a Transjer Gestión qué cuotas de préstamos y servicios
-vencen en los próximos 2 días, manda un WhatsApp al número que elijas, y le avisa de vuelta
-a la web qué mandó para que ese vencimiento no se repita al día siguiente.
+Cada mañana el droplet le pregunta a Transjer Gestión qué vence pronto, manda un WhatsApp
+al número que elijas, y le avisa de vuelta a la web qué mandó para que ese vencimiento no
+se repita al día siguiente. Son dos avisos, en mensajes separados:
+
+    Cuotas de préstamos y servicios        2 días antes   (AVISOS_DIAS)
+    Documentos de la flota                 7 días antes   (AVISOS_DIAS_DOCUMENTOS)
+      SOAT, revisión técnica, póliza, MTC… de las unidades activas
+
+
+==============================================================================
+SI YA TENÍAS EL AVISO DE CUOTAS ANDANDO: CÓMO SUMAR EL DE DOCUMENTOS
+==============================================================================
+
+El orden importa: primero la web, después el droplet.
+
+1. En tu PC, contra producción, ANTES de subir el código:
+
+       npm run db:migrate          (aplica la 0023: la marca de "ya avisado")
+
+2. Sube el código (git push) y espera a que Vercel termine el despliegue. Comprueba que
+   la ruta nueva responde — tiene que decir "No autorizado", no "404":
+
+       https://transjer-epp.vercel.app/api/avisos/documentos
+
+3. Copia el script nuevo al droplet, encima del viejo (pasos 2 de más abajo: scp y chown).
+
+4. Opcional, en ~/transjer-notificaciones/.env.avisos:
+
+       AVISOS_DESTINO_FLOTA=51XXXXXXXXX    el número de quien lleva la flota; si no
+                                           lo pones, va al mismo AVISOS_DESTINO
+       AVISOS_DIAS_DOCUMENTOS=7            si algún día quieres más antelación
+
+5. Prueba sin enviar, y mira cómo viene lo de la flota con más días:
+
+       node aviso-vencimientos.mjs --simular
+       AVISOS_DIAS_DOCUMENTOS=30 node aviso-vencimientos.mjs --simular
+
+El cron no se toca: el mismo script, a la misma hora, ahora manda los dos.
+
+El mensaje de flota se ve así:
+
+    *Transjer Gestión* — documentos de flota por vencer
+
+    2 documento(s) de 2 unidad(es):
+
+    • *BJA-838* — SOAT
+       Vence el *12/11/2026* (en 7 días)
+       Conductor: Mario Quispe
+    • *BYH-716* — Revisión técnica
+       Vence el *12/11/2026* (en 7 días)
+
+    Al renovarlo, carga el nuevo con su fecha en Documentos.
+    https://transjer-epp.vercel.app/documentos/vehiculos
+
+Cómo decide qué avisar:
+  - Lo que vence de hoy a 7 días. Si el droplet estuvo apagado un día, al siguiente
+    recupera lo pendiente en vez de saltárselo.
+  - Una sola vez por documento. Al renovarlo —subiendo el nuevo, o cambiándole la fecha al
+    mismo— el próximo vencimiento se vuelve a avisar.
+  - Si el SOAT nuevo ya está cargado con una fecha posterior, el viejo no se avisa.
+  - No avisa lo que ya está vencido (para eso está la pestaña "Vencido" en Documentos), ni
+    las unidades dadas de baja.
+  - Si falla el WhatsApp de cuotas, el de flota sale igual, y al revés. Lo que falló no
+    se marca y se reintenta al día siguiente.
+
+Para forzar que un documento vuelva a avisarse:
+    update documents set reminder_sent_at = null where id = '...';
+
+
+------------------------------------------------------------------------------
+INSTALACIÓN DESDE CERO
+------------------------------------------------------------------------------
 
 Pregunta el droplet, no al revés, así el servidor de avisos sigue detrás de Tailscale sin
 abrir ningún puerto.
@@ -47,9 +116,10 @@ DATOS DE TU INSTALACIÓN
 PASO 1 — La clave, en Vercel                                        [ YA ESTÁ ]
 ------------------------------------------------------------------------------
 
-    AVISOS_SECRET = 0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+    AVISOS_SECRET = ...la que está en Vercel (no se escribe aquí: este archivo va al repositorio)...
 
-Ya quedó: /api/avisos/vencimientos responde {"ok":true,...} con esa clave.
+Ya quedó: /api/avisos/vencimientos responde {"ok":true,...} con esa clave. La misma sirve
+para /api/avisos/documentos.
 
 
 ------------------------------------------------------------------------------
@@ -92,7 +162,7 @@ Como usuario transjer, en la carpeta del servidor:
 Con esto adentro:
 
     TRANSJER_URL=https://transjer-epp.vercel.app
-    AVISOS_SECRET=0sNLvEwfhnWgHyNPQO56UdgnH8dTlW5YVWA916w7+1I=
+    AVISOS_SECRET=...la misma que está en Vercel...
     AVISOS_DESTINO=51XXXXXXXXX
     AVISOS_PANEL=http://127.0.0.1:3000/api/mensaje
     AVISOS_PANEL_USUARIO=...el USUARIO_PANEL del paso 3...

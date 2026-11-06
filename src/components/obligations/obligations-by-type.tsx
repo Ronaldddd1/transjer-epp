@@ -42,7 +42,14 @@ const delMes = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthAmount
 const totalDelMesCompleto = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthTotal);
 const pagadoDelMes = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthPaid);
 const arrastrado = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.monthOverdue);
+/** Todas las cuotas sin pagar, de este mes y de los que vienen: lo que se debe en total. */
 const pendiente = (filas: ObligationRow[]) => porMoneda(filas, (o) => o.pendingAmount);
+/**
+ * El capital que queda por devolver. Es el saldo tras la última cuota pagada; si todavía no
+ * se pagó ninguna, es el capital entero. Un préstamo ya cancelado no debe nada.
+ */
+const capitalPendiente = (filas: ObligationRow[]) =>
+  porMoneda(filas, (o) => (o.pendingCount === 0 ? null : o.balance ?? o.principal));
 const juntar = (importes: string[]) => (importes.length ? importes.join(" + ") : "—");
 
 /**
@@ -341,6 +348,16 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
                 <strong className="font-display text-base text-ink">{juntar(totalDelMesCompleto(filas))}</strong>
                 <span className="text-steel-400"> · falta pagar {juntar(delMes(filas))}</span>
                 {vencidas > 0 && <span className="ml-2 font-semibold text-red-700">{vencidas} cuota(s) vencida(s)</span>}
+                {/* De un préstamo no solo importa el mes: también cuánto se debe en total.
+                    Solo en préstamos; en un servicio sin fecha de fin, "todo lo pendiente"
+                    depende de hasta dónde se generó el cronograma y no dice nada. */}
+                {type === "PRESTAMO" && (
+                  <span className="mt-0.5 block text-right">
+                    deuda pendiente total{" "}
+                    <strong className="font-display text-base text-red-700">{juntar(pendiente(filas))}</strong>
+                    <span className="text-steel-400"> · de capital {juntar(capitalPendiente(filas))}</span>
+                  </span>
+                )}
               </span>
             }
           >

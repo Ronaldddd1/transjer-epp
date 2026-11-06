@@ -864,6 +864,11 @@ export const documents = pgTable("documents", {
   issuedAt: date("issued_at"),
   /** Sin fecha, el documento no caduca: una tarjeta de propiedad, por ejemplo. */
   expiresAt: date("expires_at"),
+  /**
+   * Cuándo se avisó por WhatsApp que este documento estaba por vencer. Se avisa una vez;
+   * al cambiar `expiresAt` se limpia para que el siguiente vencimiento también se avise.
+   */
+  reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
   notes: text("notes"),
   /**
    * El archivo, cuando lo hay.

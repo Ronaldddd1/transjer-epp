@@ -64,11 +64,11 @@ ejecutar(f"insert into vehicles (plate, description, brand, model, year, capacit
 vid = psql(f"select id from vehicles where plate = '{PLACA}'")
 ejecutar(
     "insert into documents (vehicle_id, kind, title, expires_at, filename, content_type, size_bytes, storage_driver, content) "
-    f"values ('{vid}', 'SOAT', 'SOAT {SELLO}', current_date - 5, 'soat-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
+    f"values ('{vid}', 'SOAT', 'SOAT {SELLO}', ((now() at time zone 'America/Lima')::date) - 5, 'soat-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
 )
 ejecutar(
     "insert into documents (vehicle_id, kind, title, expires_at, filename, content_type, size_bytes, storage_driver, content) "
-    f"values ('{vid}', 'REVISION_TECNICA', 'RT {SELLO}', current_date + 10, 'rt-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
+    f"values ('{vid}', 'REVISION_TECNICA', 'RT {SELLO}', ((now() at time zone 'America/Lima')::date) + 10, 'rt-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
 )
 ejecutar(
     "insert into documents (vehicle_id, kind, title, filename, content_type, size_bytes, storage_driver, content) "
@@ -77,7 +77,7 @@ ejecutar(
 # Un MTC cargado solo con su fecha, como los que deja el Excel de mantenimiento: sin PDF.
 ejecutar(
     "insert into documents (vehicle_id, kind, title, expires_at) "
-    f"values ('{vid}', 'MTC', 'MTC {SELLO}', current_date + 120)"
+    f"values ('{vid}', 'MTC', 'MTC {SELLO}', ((now() at time zone 'America/Lima')::date) + 120)"
 )
 
 with sync_playwright() as p:
@@ -130,12 +130,12 @@ with sync_playwright() as p:
     # Una unidad del año no debe reclamar la revisión técnica: todavía no le toca, y
     # pintarla en rojo junto a lo que sí urge es lo que hace que se dejen de mirar los rojos.
     ejecutar(f"insert into vehicles (plate, year, brand) values ('{PLACA3}', "
-             "extract(year from current_date)::int, 'Volvo')")
+             "extract(year from ((now() at time zone 'America/Lima')::date))::int, 'Volvo')")
     page.goto(f"{BASE}/documentos?estado=")
     page.wait_for_timeout(1600)
     fila_nueva = page.get_by_role("row").filter(has_text=PLACA3)
     texto_nueva = fila_nueva.inner_text()
-    anio_rt = int(psql("select extract(year from current_date)::int + 3"))
+    anio_rt = int(psql("select extract(year from ((now() at time zone 'America/Lima')::date))::int + 3"))
     check("una unidad del año no reclama la revisión técnica",
           "No le toca" in texto_nueva, texto_nueva)
     check("y dice desde qué año se la van a pedir", str(anio_rt) in texto_nueva, texto_nueva)
@@ -216,7 +216,7 @@ with sync_playwright() as p:
     if emp:
         ejecutar(
             "insert into documents (employee_id, kind, title, expires_at, filename, content_type, size_bytes, storage_driver, content) "
-            f"values ('{emp}', 'LICENCIA', 'Licencia {SELLO}', current_date + 300, 'lic-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
+            f"values ('{emp}', 'LICENCIA', 'Licencia {SELLO}', ((now() at time zone 'America/Lima')::date) + 300, 'lic-{SELLO}.pdf', 'application/pdf', 5, 'db', '\\x25504446'::bytea)"
         )
         ejecutar(f"update vehicles set driver_id = '{emp}' where id = '{vid}'")
 
@@ -235,7 +235,7 @@ with sync_playwright() as p:
         check("y avisa que no tiene el DNI cargado", "DNI" in cuerpo)
 
         # La licencia vencida del conductor arrastra a la unidad: sin ella no maneja.
-        ejecutar(f"update documents set expires_at = current_date - 1 where title = 'Licencia {SELLO}'")
+        ejecutar(f"update documents set expires_at = ((now() at time zone 'America/Lima')::date) - 1 where title = 'Licencia {SELLO}'")
         page.goto(f"{BASE}/documentos/vehiculos/{vid}")
         page.wait_for_timeout(1500)
         check("una licencia vencida se avisa en la unidad",
@@ -314,7 +314,7 @@ with sync_playwright() as p:
         check("y ese documento ya tiene archivo",
               psql(f"select filename is not null from documents where title = 'MTC {SELLO}'") == "t")
         check("sin perder su fecha de vencimiento",
-              psql(f"select expires_at = current_date + 120 from documents where title = 'MTC {SELLO}'") == "t")
+              psql(f"select expires_at = ((now() at time zone 'America/Lima')::date) + 120 from documents where title = 'MTC {SELLO}'") == "t")
     finally:
         for f in (bueno, cortado, falso):
             os.path.exists(f) and os.remove(f)

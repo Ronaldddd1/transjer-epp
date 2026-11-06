@@ -162,6 +162,13 @@
       "when": 1793454168656,
       "tag": "0022_clientes_de_provincia",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793930000000,
+      "tag": "0023_aviso_de_documentos",
+      "breakpoints": true
     }
   ]
 }
