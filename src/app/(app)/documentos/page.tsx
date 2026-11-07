@@ -30,7 +30,7 @@ export const metadata: Metadata = { title: "Documentos" };
 export default async function DocumentsPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("documents.view");
   const sp = await searchParams;
-  const canManage = can(user.role, "documents.manage");
+  const canManage = can(user, "documents.manage");
 
   const cuentas = await fleetCounts();
 

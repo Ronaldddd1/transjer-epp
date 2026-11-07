@@ -21,7 +21,7 @@ export default async function ObligationsPage({ searchParams }: { searchParams: 
   const user = await requirePageUser("obligations.view");
   const sp = await searchParams;
   const f = readObligationFilters(sp);
-  const canManage = can(user.role, "obligations.manage");
+  const canManage = can(user, "obligations.manage");
 
   const [rows, resumen, conceptos] = await Promise.all([
     listObligations(f), getObligationSummary(), listObligationCategories(),

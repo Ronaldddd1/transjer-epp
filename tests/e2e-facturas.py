@@ -483,15 +483,17 @@ with sync_playwright() as p:
         expect(page.get_by_role("cell", name=accion, exact=True).first).to_be_visible()
     ok("La auditoría registra pagos, observaciones, reaperturas y anulaciones")
 
-    # --- 19. Rol Finanzas: ve facturas, no el almacén
+    # --- 19. Usuario de finanzas (por módulos): ve facturas, no el almacén
     fin_pass = "Finanzas456!"
     page.goto(BASE + "/usuarios")
     page.get_by_role("button", name="Nuevo usuario").click()
     m.locator("#name").fill("Encargada de Pagos")
     m.locator("#username").fill("pagos")
     m.locator("#email").fill("pagos@transjer.pe")
-    m.locator("#role").select_option("FINANZAS")
+    # Lo que antes daba el rol Finanzas, marcado módulo por módulo.
     m.locator("#password").fill(fin_pass)
+    for modulo in ["Facturas y calendario de pagos", "Detracciones", "Proveedores", "Préstamos y servicios"]:
+        m.get_by_role("radiogroup", name=modulo).get_by_text("Ver y editar", exact=True).click()
     m.get_by_role("button", name="Crear usuario").click()
     toast(page, "Usuario")
 
@@ -509,7 +511,7 @@ with sync_playwright() as p:
     fp.goto(BASE + "/facturas/correos")
     expect(fp.get_by_role("button", name="Activar avisos")).to_have_count(0)
     fctx.close()
-    ok("Rol Finanzas: gestiona facturas y no accede al almacén ni a la configuración del buzón")
+    ok("Usuario de finanzas por módulos: gestiona facturas y no accede al almacén ni a la configuración del buzón")
 
     # --- 20. Móvil sin desbordes
     mctx = b.new_context(viewport={"width": 390, "height": 844}, is_mobile=True, has_touch=True)

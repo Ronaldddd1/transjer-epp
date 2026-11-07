@@ -13,7 +13,7 @@ export const maxDuration = 30;
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  if (!can(user.role, "reports.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  if (!can(user, "reports.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   const sp = Object.fromEntries(req.nextUrl.searchParams.entries());
   const tipo = sp.tipo;

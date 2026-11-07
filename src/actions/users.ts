@@ -8,9 +8,39 @@ import { auditLogs, eppDeliveries, inventoryMovements, users } from "@/db/schema
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
+import { MODULOS, nivelesDe, type ModuleAccess, type Nivel } from "@/lib/permissions";
 import { passwordSchema, userBaseSchema, userCreateSchema } from "@/lib/validations";
 
-const publicFields = { id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, active: users.active };
+const publicFields = {
+  id: users.id, name: users.name, username: users.username, email: users.email, role: users.role,
+  moduleAccess: users.moduleAccess, active: users.active,
+};
+
+/**
+ * Los accesos marcados en la grilla del formulario (acceso_<módulo> = none | view | edit).
+ *
+ * Un administrador entra a todo y no lleva accesos. Cualquier otro necesita al menos un
+ * módulo: un usuario sin ninguno entraría a un sistema vacío.
+ */
+function leerAccesos(formData: FormData, role: string): ModuleAccess | null {
+  if (role === "ADMIN") return null;
+  const accesos: ModuleAccess = {};
+  for (const m of MODULOS) {
+    const valor = String(formData.get(`acceso_${m.key}`) ?? "none") as Nivel;
+    accesos[m.key] = nivelesDe(m).includes(valor) ? valor : "none";
+  }
+  if (!Object.values(accesos).some((n) => n !== "none")) {
+    throw new BusinessError("Marca al menos un módulo al que pueda entrar.");
+  }
+  return accesos;
+}
+
+/** Los accesos en una línea, para la auditoría: "Inventario (editar), Asistencia (ver)". */
+function describirAccesos(accesos: ModuleAccess | null, role: string) {
+  if (role === "ADMIN") return "administrador, entra a todo";
+  return MODULOS.filter((m) => accesos?.[m.key] && accesos[m.key] !== "none")
+    .map((m) => `${m.label} (${accesos![m.key] === "edit" ? "editar" : "ver"})`).join(", ");
+}
 
 async function assertUnique(username: string, email: string, exceptId?: string) {
   const match = or(eq(users.username, username), eq(users.email, email));
@@ -30,10 +60,17 @@ export async function createUser(formData: FormData): Promise<ActionResult> {
   try {
     const actor = await requireActionUser("users.manage");
     const { password, ...data } = userCreateSchema.parse(formToObject(formData));
+    // Ya no se eligen roles armados: o es administrador, o tiene sus módulos marcados.
+    const role = data.role === "ADMIN" ? "ADMIN" : "USUARIO";
+    const moduleAccess = leerAccesos(formData, role);
     await assertUnique(data.username, data.email);
     const passwordHash = await bcrypt.hash(password, 12);
-    const [user] = await db.insert(users).values({ ...data, passwordHash }).returning(publicFields);
-    await logAudit({ user: actor, action: "CREAR", module: "USUARIOS", recordId: user.id, description: `${actor.name} creó el usuario ${user.username}.`, newData: user });
+    const [user] = await db.insert(users).values({ ...data, role, moduleAccess, passwordHash }).returning(publicFields);
+    await logAudit({
+      user: actor, action: "CREAR", module: "USUARIOS", recordId: user.id,
+      description: `${actor.name} creó el usuario ${user.username}: ${describirAccesos(moduleAccess, role)}.`,
+      newData: user,
+    });
     revalidatePath("/usuarios");
     return { ok: true, message: "Usuario creado correctamente." };
   } catch (e) {
@@ -45,12 +82,22 @@ export async function updateUser(id: string, formData: FormData): Promise<Action
   try {
     const actor = await requireActionUser("users.manage");
     const data = userBaseSchema.parse(formToObject(formData));
+    const role = data.role === "ADMIN" ? "ADMIN" : "USUARIO";
+    const moduleAccess = leerAccesos(formData, role);
     const [before] = await db.select(publicFields).from(users).where(eq(users.id, id));
     if (!before) throw new BusinessError("El usuario no existe.");
     await assertUnique(data.username, data.email, id);
-    if (before.role === "ADMIN" && data.role !== "ADMIN") await assertAnotherActiveAdmin(id);
-    const [after] = await db.update(users).set(data).where(eq(users.id, id)).returning(publicFields);
-    await logAudit({ user: actor, action: "EDITAR", module: "USUARIOS", recordId: id, description: `${actor.name} modificó el usuario ${before.username}.`, oldData: before, newData: after });
+    if (before.role === "ADMIN" && role !== "ADMIN") await assertAnotherActiveAdmin(id);
+    if (id === actor.id && role !== "ADMIN" && moduleAccess?.usuarios !== "edit") {
+      // Quitarse a uno mismo el acceso a Usuarios dejaría al que edita fuera de esta pantalla.
+      throw new BusinessError("No puedes quitarte a ti mismo el acceso a Usuarios.");
+    }
+    const [after] = await db.update(users).set({ ...data, role, moduleAccess }).where(eq(users.id, id)).returning(publicFields);
+    await logAudit({
+      user: actor, action: "EDITAR", module: "USUARIOS", recordId: id,
+      description: `${actor.name} modificó el usuario ${before.username}: ${describirAccesos(moduleAccess, role)}.`,
+      oldData: before, newData: after,
+    });
     revalidatePath("/", "layout");
     return { ok: true, message: "Usuario actualizado correctamente." };
   } catch (e) {

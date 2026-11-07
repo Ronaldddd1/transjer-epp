@@ -23,7 +23,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // préstamo no es un papel de facturas: quien lleva las obligaciones tiene que poder
   // abrirlo, y quien solo ve facturas no.
   const permiso = file.installmentId ? "obligations.view" : "invoices.view";
-  if (!can(user.role, permiso)) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  if (!can(user, permiso)) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   try {
     const data = await readFile(file);

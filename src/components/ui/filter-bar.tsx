@@ -158,7 +158,8 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
             setQ("");
             const keep = new URLSearchParams();
             const cur = new URLSearchParams(nav.desired);
-            for (const k of ["sort", "dir"]) { const v = cur.get(k); if (v) keep.set(k, v); }
+            // El orden y la vista elegida (cuadro o periodo, día o semana) no son filtros: se quedan.
+            for (const k of ["sort", "dir", "vista"]) { const v = cur.get(k); if (v) keep.set(k, v); }
             navigate(keep);
           }}
           className="inline-flex h-10 items-center gap-1 self-start rounded-md px-2 text-sm text-steel-600 hover:text-ink lg:self-end"

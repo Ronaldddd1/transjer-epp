@@ -1,16 +1,16 @@
 "use client";
 
 import {
-  ArrowLeftRight, BarChart3, Building2, CalendarCheck, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
+  Building2, CalendarCheck, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
   FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
-  Tags, Undo2, Users, Wallet, Wrench, X, MapPin,
+  Truck, Undo2, Users, Wallet, Wrench, X, MapPin,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { logoutAction } from "@/actions/auth";
 import type { Role } from "@/db/schema";
-import { can, ROLE_LABELS, type Permission } from "@/lib/permissions";
+import { can, ROLE_LABELS, type ModuleAccess, type Permission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { BrandLockup, BrandMark } from "./brand";
 
@@ -28,16 +28,24 @@ const INICIO: NavItem = { href: "/dashboard", label: "Dashboard", icon: LayoutDa
 
 const SECTIONS: NavSection[] = [
   {
+    // Movimientos ya no tiene entrada propia: las entradas, salidas y ajustes se hacen
+    // desde cada producto del inventario, y su historial se abre desde ahí.
     id: "almacen",
     label: "Almacén",
     items: [
       { href: "/inventario", label: "Inventario", icon: PackageSearch, permission: "products.view" },
-      { href: "/movimientos", label: "Movimientos", icon: ArrowLeftRight, permission: "movements.view" },
       { href: "/entregas", label: "Entrega de EPP", icon: HardHat, permission: "deliveries.view" },
       { href: "/entregas/resumen", label: "Resumen de EPP", icon: ClipboardCheck, permission: "deliveries.view" },
       { href: "/devoluciones", label: "Devolución de EPP", icon: Undo2, permission: "deliveries.view" },
-      { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+    ],
+  },
+  {
+    // Las personas, aparte de las cosas: quién trabaja aquí y quién vino cada día.
+    id: "rrhh",
+    label: "Recursos Humanos",
+    items: [
       { href: "/asistencia", label: "Asistencia", icon: CalendarCheck, permission: "attendance.view" },
+      { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
     ],
   },
   {
@@ -46,6 +54,7 @@ const SECTIONS: NavSection[] = [
     id: "flota",
     label: "Flota",
     items: [
+      { href: "/salidas", label: "Salidas y liquidación", icon: Truck, permission: "trips.view" },
       { href: "/documentos", label: "Documentos", icon: FolderOpen, permission: "documents.view" },
       { href: "/mantenimiento", label: "Mantenimiento", icon: Wrench, permission: "maintenance.view" },
       { href: "/clientes-provincia", label: "Clientes de provincia", icon: MapPin, permission: "provinceClients.view" },
@@ -70,17 +79,11 @@ const SECTIONS: NavSection[] = [
     ],
   },
   {
-    id: "reportes",
-    label: "Reportes",
-    items: [
-      { href: "/reportes", label: "Reportes y exportación", icon: BarChart3, permission: "reports.view" },
-    ],
-  },
-  {
+    // Reportes y Categorías salieron del menú: cada pantalla tiene su botón Descargar, y
+    // la categoría de un EPP se elige o se crea al cargar el producto.
     id: "administracion",
     label: "Administración",
     items: [
-      { href: "/categorias", label: "Categorías", icon: Tags, permission: "categories.manage" },
       { href: "/usuarios", label: "Usuarios", icon: ShieldCheck, permission: "users.manage" },
       { href: "/auditoria", label: "Auditoría", icon: ClipboardList, permission: "audit.view" },
     ],
@@ -102,7 +105,7 @@ function NavPending() {
 }
 
 export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetractions = 0, pendingReturns = 0, children }: {
-  user: { name: string; role: Role };
+  user: { name: string; role: Role; moduleAccess: ModuleAccess | null };
   lowStockCount: number;
   pendingInvoices?: number;
   pendingDetractions?: number;
@@ -113,7 +116,7 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [pathname]);
 
-  const visible = (items: NavItem[]) => items.filter((i) => !i.permission || can(user.role, i.permission));
+  const visible = (items: NavItem[]) => items.filter((i) => !i.permission || can(user, i.permission));
 
   // Solo se muestran las secciones donde el rol tiene algo que hacer: así la encargada de
   // detracciones ve un menú de dos entradas en vez de uno lleno de secciones vacías.
@@ -228,7 +231,7 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold text-white">{user.name}</p>
-            <p className="text-xs text-steel-400">{ROLE_LABELS[user.role]}</p>
+            <p className="text-xs text-steel-400">{user.role === "ADMIN" || !user.moduleAccess ? ROLE_LABELS[user.role] : "Accesos por módulo"}</p>
           </div>
           <form action={logoutAction}>
             <button type="submit" className="rounded p-2 text-steel-400 hover:bg-ink-700 hover:text-white" title="Cerrar sesión" aria-label="Cerrar sesión">

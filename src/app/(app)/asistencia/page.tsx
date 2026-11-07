@@ -1,4 +1,4 @@
-import { CalendarCheck } from "lucide-react";
+import { CalendarCheck, CalendarRange, ClipboardCheck } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AttendanceSheet } from "@/components/attendance/attendance-sheet";
@@ -21,11 +21,11 @@ export const metadata: Metadata = { title: "Asistencia" };
 const DIA_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
 
 /**
- * Pasar lista.
+ * Pasar lista, dentro de Recursos Humanos.
  *
- * Dos bloques: arriba el registro del día, donde se marca quién vino y qué hizo; abajo la
- * semana de lunes a domingo, para ver y descargar la semana completa. El acumulado del mes
- * queda plegado al final: se mira a fin de mes, no todos los días.
+ * Dos botones arriba, uno por cada trabajo: registrar la asistencia del día, donde se marca
+ * quién vino y qué hizo, y el cuadro de lunes a domingo, para ver y descargar la semana.
+ * El acumulado del mes va plegado debajo del cuadro: se mira a fin de mes, no todos los días.
  *
  * Solo se registra si se presentó o no. Ni horas, ni tardanzas: eso necesitaría un reloj
  * en la puerta, y lo que hay es una persona con una lista.
@@ -33,9 +33,10 @@ const DIA_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viern
 export default async function AsistenciaPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("attendance.view");
   const sp = await searchParams;
-  const puedeMarcar = can(user.role, "attendance.manage");
+  const puedeMarcar = can(user, "attendance.manage");
 
   const f = readAttendanceFilters(sp);
+  const vista: "dia" | "semana" = first(sp.vista) === "semana" ? "semana" : "dia";
   const dia = f.day ?? todayLima();
   const mes = first(sp.mes) && /^\d{4}-\d{2}$/.test(first(sp.mes)!) ? first(sp.mes)! : dia.slice(0, 7);
 
@@ -43,11 +44,12 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
   const pedida = first(sp.semana);
   const lunes = lunesDe(pedida && /^\d{4}-\d{2}-\d{2}$/.test(pedida) ? pedida : dia);
 
+  // Solo se consulta lo de la vista abierta.
   const [filas, areas, resumen, semana] = await Promise.all([
-    listAttendanceDay(f),
+    vista === "dia" ? listAttendanceDay(f) : Promise.resolve([]),
     areaOptions(),
-    attendanceMonth(mes, { q: f.q, area: f.area }),
-    attendanceWeek(lunes, { q: f.q, area: f.area }),
+    vista === "semana" ? attendanceMonth(mes, { q: f.q, area: f.area }) : Promise.resolve(null),
+    vista === "semana" ? attendanceWeek(lunes, { q: f.q, area: f.area }) : Promise.resolve(null),
   ]);
 
   const esHoy = dia === todayLima();
@@ -59,10 +61,26 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
     if (first(sp.mes)) p.set("mes", mes);
     if (f.q) p.set("q", f.q);
     if (f.area) p.set("area", f.area);
+    p.set("vista", "semana");
     p.set("semana", l);
     return `/asistencia?${p.toString()}#titulo-semana`;
   };
   const lunesDeHoy = lunesDe(todayLima());
+
+  /** Los dos botones de arriba. Conservan la búsqueda y el área elegidas. */
+  const aVista = (v: "dia" | "semana") => {
+    const p = new URLSearchParams();
+    if (f.q) p.set("q", f.q);
+    if (f.area) p.set("area", f.area);
+    if (v === "semana") {
+      p.set("vista", "semana");
+      if (pedida) p.set("semana", lunes);
+    } else if (f.day) {
+      p.set("dia", f.day);
+    }
+    const qs = p.toString();
+    return qs ? `/asistencia?${qs}` : "/asistencia";
+  };
 
   return (
     <>
@@ -70,6 +88,28 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
         title="Asistencia"
         description="Quién vino a trabajar cada día. Solo eso: ni horas ni tardanzas."
       />
+
+      <nav aria-label="Vistas de asistencia" className="mb-5 grid gap-3 sm:grid-cols-2">
+        {([
+          { v: "dia", titulo: "Registrar asistencia del día", texto: "Marcar quién vino y qué hizo.", icono: ClipboardCheck },
+          { v: "semana", titulo: "Cuadro de lunes a domingo", texto: "Ver y descargar la semana completa.", icono: CalendarRange },
+        ] as const).map(({ v, titulo, texto, icono: Icono }) => (
+          <Link
+            key={v}
+            href={aVista(v)}
+            aria-current={vista === v ? "page" : undefined}
+            className={vista === v
+              ? "flex items-center gap-3 rounded-lg border-2 border-ink bg-ink px-4 py-3 text-white"
+              : "flex items-center gap-3 rounded-lg border-2 border-steel-200 bg-white px-4 py-3 text-ink hover:border-ink"}
+          >
+            <Icono className={vista === v ? "h-6 w-6 text-brand" : "h-6 w-6 text-steel-500"} aria-hidden />
+            <span>
+              <span className="block font-display text-base font-semibold">{titulo}</span>
+              <span className={vista === v ? "block text-sm text-steel-300" : "block text-sm text-steel-500"}>{texto}</span>
+            </span>
+          </Link>
+        ))}
+      </nav>
 
       <FilterBar
         searchPlaceholder="Buscar por nombre o DNI"
@@ -79,7 +119,8 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
         }]}
       />
 
-      {/* ---------- Bloque 1: el registro del día ---------- */}
+      {/* ---------- Registrar asistencia del día ---------- */}
+      {vista === "dia" && (
       <section aria-labelledby="titulo-dia" className="min-w-0 rounded-lg border border-steel-200 bg-white">
         <header className="flex flex-wrap items-start justify-between gap-3 border-b border-steel-200 px-4 py-3">
           <div>
@@ -103,9 +144,12 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
           )}
         </div>
       </section>
+      )}
 
-      {/* ---------- Bloque 2: la semana, de lunes a domingo ---------- */}
-      <div className="mt-6">
+      {/* ---------- Cuadro de lunes a domingo, con el mes plegado debajo ---------- */}
+      {vista === "semana" && semana && resumen && (
+      <>
+      <div>
         <AttendanceWeek
           semana={semana}
           hoy={todayLima()}
@@ -132,13 +176,13 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Link
-              href={`/asistencia?dia=${dia}&mes=${mesAnterior(mes)}`}
+              href={`/asistencia?vista=semana&dia=${dia}&mes=${mesAnterior(mes)}`}
               className="rounded-md border border-steel-300 bg-white px-3 py-1.5 text-steel-600 hover:border-ink hover:text-ink"
             >
               ← Mes anterior
             </Link>
             <Link
-              href={`/asistencia?dia=${dia}&mes=${mesSiguiente(mes)}`}
+              href={`/asistencia?vista=semana&dia=${dia}&mes=${mesSiguiente(mes)}`}
               className="rounded-md border border-steel-300 bg-white px-3 py-1.5 text-steel-600 hover:border-ink hover:text-ink"
             >
               Mes siguiente →
@@ -188,6 +232,8 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
         </p>
       </section>
       </details>
+      </>
+      )}
     </>
   );
 }

@@ -39,9 +39,9 @@ export default async function ObligationDetailPage({ params }: { params: Promise
   if (!obligation) notFound();
 
   const installments = await listInstallments(id);
-  const canManage = can(user.role, "obligations.manage");
+  const canManage = can(user, "obligations.manage");
   const conceptos = canManage ? await listObligationCategories() : [];
-  const canPay = can(user.role, "obligations.pay");
+  const canPay = can(user, "obligations.pay");
   const esPrestamo = obligation.type === "PRESTAMO";
   const hoy = todayLima();
 

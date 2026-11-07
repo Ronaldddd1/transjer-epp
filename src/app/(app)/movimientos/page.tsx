@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 import { MovementModal } from "@/components/inventory/movement-modal";
 import { MovementBadge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -11,15 +12,18 @@ import { can } from "@/lib/permissions";
 import { cn, first, formatDate, formatTime, MOVEMENT_LABEL, pageParams, type SearchParams } from "@/lib/utils";
 import { getProductOptions, getUserOptions, listMovements, readFilters } from "@/server/queries";
 
-export const metadata: Metadata = { title: "Movimientos" };
+export const metadata: Metadata = { title: "Historial del producto" };
 
 export default async function MovementsPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("movements.view");
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp, 20);
   const f = readFilters(sp);
-  const canMove = can(user.role, "movements.create");
-  const canAdjust = can(user.role, "movements.adjust");
+  // Ya no es una sección del menú: solo se abre como historial de un producto, desde su
+  // fila del inventario. Sin producto elegido, al inventario.
+  if (!f.productId) redirect("/inventario");
+  const canMove = can(user, "movements.create");
+  const canAdjust = can(user, "movements.adjust");
   const openType = first(sp.nuevo);
 
   const [{ rows, total }, products, users] = await Promise.all([
@@ -32,7 +36,7 @@ export default async function MovementsPage({ searchParams }: { searchParams: Se
   return (
     <>
       <PageHeader
-        title="Movimientos"
+        title="Historial del producto"
         description={filteredProduct
           ? `Historial de ${filteredProduct.code} · ${filteredProduct.name} (stock actual: ${filteredProduct.stock}).`
           : "Historial de entradas, salidas y ajustes. Cada registro guarda el stock antes y después."}

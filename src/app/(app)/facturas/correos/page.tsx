@@ -75,8 +75,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
     }),
   );
 
-  const canApprove = can(user.role, "invoices.approve");
-  const canManage = can(user.role, "invoices.manage");
+  const canApprove = can(user, "invoices.approve");
+  const canManage = can(user, "invoices.manage");
 
   const status = {
     configured: !!config,
@@ -149,7 +149,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         actions={<ExportTable tabla="correos" />}
       />
 
-      <MailboxPanel status={status} canConfigure={can(user.role, "invoices.mailbox")} />
+      <MailboxPanel status={status} canConfigure={can(user, "invoices.mailbox")} />
 
       {/* El camino, en dos avisos: primero cuántos esperan el filtro del monto, después
           cuántos ya pasaron y esperan decisión. */}

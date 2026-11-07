@@ -1,5 +1,6 @@
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
+import { ExportTable } from "@/components/ui/export-table";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { DeliveryModal } from "@/components/deliveries/delivery-modal";
@@ -10,7 +11,6 @@ import { DocumentTable, LeyendaVencimientos } from "@/components/documents/docum
 import { EmployeeFormModal } from "@/components/employees/employee-form-modal";
 import { ReinstateButton, TerminationModal } from "@/components/employees/termination-modal";
 import { EmployeeStateBadge, ReturnConditionBadge, VoidedNote } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
 import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
@@ -30,10 +30,10 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const employee = await getEmployee(id);
   if (!employee) notFound();
 
-  const canDeliver = can(user.role, "deliveries.create") && employee.active;
+  const canDeliver = can(user, "deliveries.create") && employee.active;
   // Quien no tiene acceso a documentos no ve la sección, igual que no ve el menú.
-  const verDocumentos = can(user.role, "documents.view");
-  const verAsistencia = can(user.role, "attendance.view");
+  const verDocumentos = can(user, "documents.view");
+  const verAsistencia = can(user, "attendance.view");
   const [{ rows }, holdings, devoluciones, products, employees, documentos, asistencia] = await Promise.all([
     listDeliveries({ employeeId: id }),
     employeeHoldings(id),
@@ -44,9 +44,9 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
     verAsistencia ? attendanceFor(id, 60) : Promise.resolve([]),
   ]);
   const docsVencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
-  const canVoid = can(user.role, "deliveries.void");
-  const canReturn = can(user.role, "deliveries.create");
-  const canManage = can(user.role, "employees.manage");
+  const canVoid = can(user, "deliveries.void");
+  const canReturn = can(user, "deliveries.create");
+  const canManage = can(user, "employees.manage");
   // Las entregas anuladas se muestran en el historial, pero no cuentan en los totales.
   const valid = rows.filter((r) => !r.voidedAt);
   const totalUnits = valid.reduce((s, r) => s + r.quantity, 0);
@@ -107,7 +107,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
             <ReinstateButton employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }} />
           )}
           {canManage && <EmployeeFormModal employee={employee} />}
-          {can(user.role, "reports.view") && <ButtonLink href={`/reportes?tipo=entregas&employee=${employee.id}`} variant="ghost">Exportar</ButtonLink>}
+          {can(user, "deliveries.view") && <ExportTable tabla="entregas" label="Descargar entregas" extra={{ employee: employee.id }} />}
         </div>
       </div>
 
@@ -356,7 +356,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
                   : `${documentos.length} documento(s)${docsVencidos.length > 0 ? ` · ${docsVencidos.length} vencido(s)` : ""}`}
               </p>
             </div>
-            {can(user.role, "documents.manage") && (
+            {can(user, "documents.manage") && (
               <DocumentFormModal
                 employeeId={employee.id}
                 etiqueta={`${employee.firstName} ${employee.lastName}`}
@@ -372,7 +372,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           )}
 
           <LeyendaVencimientos />
-          <DocumentTable rows={documentos} canManage={can(user.role, "documents.manage")} />
+          <DocumentTable rows={documentos} canManage={can(user, "documents.manage")} />
         </section>
       )}
     </>

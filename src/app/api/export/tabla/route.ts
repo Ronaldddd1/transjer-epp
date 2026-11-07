@@ -24,7 +24,7 @@ export async function GET(req: NextRequest) {
   if (!isTableKey(tabla)) return NextResponse.json({ error: "Tabla desconocida" }, { status: 400 });
 
   const definicion = TABLE_EXPORTS[tabla];
-  if (!can(user.role, definicion.permission)) {
+  if (!can(user, definicion.permission)) {
     return NextResponse.json({ error: "Sin permiso para exportar esta tabla" }, { status: 403 });
   }
 

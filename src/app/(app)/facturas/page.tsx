@@ -41,8 +41,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   // "Todas" llega como estado="" y eso es una elección, no la ausencia de una.
   const porDefecto = first(sp.estado) === undefined && !filtros.q;
   const f = porDefecto ? { ...filtros, status: "PENDIENTE" as const } : filtros;
-  const canManage = can(user.role, "invoices.manage");
-  const canPay = can(user.role, "invoices.pay");
+  const canManage = can(user, "invoices.manage");
+  const canPay = can(user, "invoices.pay");
   const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 

@@ -59,11 +59,11 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
   const sp = await searchParams;
   const periodParam = first(sp.period);
   const period: PeriodKey = periodParam && periodParam in PERIODS ? (periodParam as PeriodKey) : "mes";
-  const showInventory = can(user.role, "products.view");
-  const showInvoices = can(user.role, "invoices.view");
-  const showDetractions = can(user.role, "detractions.view");
-  const showObligations = can(user.role, "obligations.view");
-  const showDeliveries = can(user.role, "deliveries.view");
+  const showInventory = can(user, "products.view");
+  const showInvoices = can(user, "invoices.view");
+  const showDetractions = can(user, "detractions.view");
+  const showObligations = can(user, "obligations.view");
+  const showDeliveries = can(user, "deliveries.view");
   const [d, invoices, pendingInvoices, detracciones, deuda, devoluciones] = await Promise.all([
     showInventory ? getDashboard(periodRange(period)) : null,
     showInvoices ? getInvoiceSummary() : null,
@@ -85,8 +85,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
         }.`}
         actions={
           <>
-            {can(user.role, "deliveries.create") && <ButtonLink href="/entregas?nuevo=1" variant="primary">Registrar entrega</ButtonLink>}
-            {can(user.role, "movements.create") && <ButtonLink href="/movimientos?nuevo=ENTRADA" variant="outline">Registrar entrada</ButtonLink>}
+            {can(user, "deliveries.create") && <ButtonLink href="/entregas?nuevo=1" variant="primary">Registrar entrega</ButtonLink>}
+            {can(user, "movements.create") && <ButtonLink href="/inventario" variant="outline">Registrar entrada</ButtonLink>}
             {!showInventory && showInvoices && <ButtonLink href="/facturas" variant="primary">Ver facturas</ButtonLink>}
           </>
         }
@@ -137,7 +137,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
               label="Correos por revisar" value={invoices.emailsToReview} icon={Mail}
               sub={invoices.emailsToReview > 0 ? "Llegaron y no se registraron solos" : "Buzón al día"}
               tone={invoices.emailsToReview > 0 ? "alert" : "default"}
-              href={can(user.role, "invoices.manage") ? "/facturas/correos?estado=REVISAR" : undefined}
+              href={can(user, "invoices.manage") ? "/facturas/correos?estado=REVISAR" : undefined}
             />
           </div>
 
@@ -267,7 +267,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Se
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <Panel title="Últimos movimientos" action={<Link href="/movimientos" className="text-sm font-medium text-steel-600 hover:text-ink hover:underline">Ver historial</Link>}>
+        <Panel title="Últimos movimientos" action={<Link href="/inventario" className="text-sm font-medium text-steel-600 hover:text-ink hover:underline">Ir al inventario</Link>}>
           {d.recentMovements.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-steel-500">Aún no hay movimientos registrados.</p>
           ) : (

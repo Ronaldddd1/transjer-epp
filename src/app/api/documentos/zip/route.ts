@@ -33,7 +33,7 @@ function nombreSeguro(texto: string): string {
 export async function GET(req: Request) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  if (!can(user.role, "documents.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  if (!can(user, "documents.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   const vehiculo = new URL(req.url).searchParams.get("vehiculo") ?? undefined;
   if (vehiculo && !/^[0-9a-f-]{36}$/i.test(vehiculo)) {

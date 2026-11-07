@@ -105,7 +105,7 @@ def main():
         check("inicia sesión", "/login" not in page.url)
 
         # --- El resumen dice qué EPP tiene cada trabajador, no solo cuántos ---
-        page.goto(f"{BASE}/entregas/resumen"); page.wait_for_timeout(900)
+        page.goto(f"{BASE}/entregas/resumen?vista=periodo"); page.wait_for_timeout(900)
         contenido = page.content()
         check("el resumen nombra el tipo de EPP entregado", nombres[0] in contenido, nombres[0])
         fila = page.locator("tr", has_text="Cesante").first
@@ -205,7 +205,7 @@ def main():
         # Se baja desde el botón de la pantalla, no por la URL: navegar a una descarga
         # directamente hace que Playwright falle con «Download is starting».
         os.makedirs(SALIDA, exist_ok=True)
-        for ruta, tabla in [("/devoluciones", "devoluciones"), ("/entregas/resumen", "resumen-epp")]:
+        for ruta, tabla in [("/devoluciones", "devoluciones"), ("/entregas/resumen?vista=periodo", "resumen-epp")]:
             page.goto(f"{BASE}{ruta}"); page.wait_for_timeout(900)
             page.locator("button:has-text('Exportar')").first.click()
             page.wait_for_timeout(300)

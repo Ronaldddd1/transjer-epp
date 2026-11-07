@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "No autorizado" }, { status: 401 });
-  if (!can(user.role, "documents.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  if (!can(user, "documents.view")) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) return NextResponse.json({ error: "Documento inválido" }, { status: 400 });

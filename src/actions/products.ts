@@ -1,9 +1,9 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
-import { db } from "@/db";
-import { products } from "@/db/schema";
+import { db, type Tx } from "@/db";
+import { categories, products } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
@@ -13,9 +13,10 @@ import { applyMovement } from "@/server/inventory";
 export async function createProduct(formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("products.manage");
-    const { initialStock, ...data } = productCreateSchema.parse(formToObject(formData));
+    const { initialStock, categoryName, categoryId, ...resto } = productCreateSchema.parse(formToObject(formData));
 
     await db.transaction(async (tx) => {
+      const data = { ...resto, categoryId: await resolverCategoria(tx, categoryName, categoryId) };
       const [existing] = await tx.select({ id: products.id }).from(products).where(eq(products.code, data.code));
       if (existing) throw new BusinessError(`El código ${data.code} ya está registrado.`);
 
@@ -42,9 +43,10 @@ export async function createProduct(formData: FormData): Promise<ActionResult> {
 export async function updateProduct(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("products.manage");
-    const { stock, ...data } = productEditSchema.parse(formToObject(formData));
+    const { stock, categoryName, categoryId, ...resto } = productEditSchema.parse(formToObject(formData));
 
     await db.transaction(async (tx) => {
+      const data = { ...resto, categoryId: await resolverCategoria(tx, categoryName, categoryId) };
       const [before] = await tx.select().from(products).where(eq(products.id, id));
       if (!before || !before.active) throw new BusinessError("El producto no existe o fue eliminado.");
 
@@ -111,4 +113,27 @@ export async function deleteProduct(id: string): Promise<ActionResult> {
   } catch (e) {
     return toActionError(e);
   }
+}
+
+/**
+ * La categoría del producto a partir de lo que se escribió o eligió.
+ *
+ * Con nombre: se busca sin distinguir mayúsculas ni espacios de más ("guantes" es
+ * "Guantes"); si no existe, se crea, y si estaba dada de baja, se reactiva. Sin nombre, el
+ * id que venga de la lista.
+ */
+async function resolverCategoria(tx: Tx, nombre: string | null | undefined, id: string | undefined): Promise<string> {
+  const limpio = nombre?.replace(/\s+/g, " ").trim();
+  if (limpio) {
+    const [existe] = await tx.select({ id: categories.id, active: categories.active }).from(categories)
+      .where(sql`lower(${categories.name}) = lower(${limpio})`).limit(1);
+    if (existe) {
+      if (!existe.active) await tx.update(categories).set({ active: true, updatedAt: new Date() }).where(eq(categories.id, existe.id));
+      return existe.id;
+    }
+    const [nueva] = await tx.insert(categories).values({ name: limpio.slice(0, 80) }).returning({ id: categories.id });
+    return nueva.id;
+  }
+  if (id) return id;
+  throw new BusinessError("Escribe o elige la categoría del producto.");
 }

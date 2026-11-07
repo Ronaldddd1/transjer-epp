@@ -580,7 +580,7 @@ export async function listCategories() {
 
 // ---------- Usuarios ----------
 export async function listUsers() {
-  return db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, active: users.active, createdAt: users.createdAt })
+  return db.select({ id: users.id, name: users.name, username: users.username, email: users.email, role: users.role, moduleAccess: users.moduleAccess, active: users.active, createdAt: users.createdAt })
     .from(users).orderBy(asc(users.name));
 }
 
@@ -639,4 +639,79 @@ export async function getDashboard(period: { from: string; to: string }) {
       group by d.day order by d.day`),
   ]);
   return { totals, monthly, delivered, lowStock, recentMovements, recentDeliveries, chart: Array.from(chart) };
+}
+
+// ---------- Cuadro de EPP en poder: trabajadores × EPP ----------
+
+export type CuadroEppFiltros = { q?: string; area?: string; categoryId?: string };
+
+/**
+ * Lo que cada trabajador tiene hoy de cada EPP: entregado (sin las entregas anuladas)
+ * menos devuelto. Es el cuadro tipo Excel del Resumen de EPP.
+ *
+ * Filas: todos los trabajadores activos, tengan algo o no —el que no tiene nada también es
+ * un dato—, más los cesados que todavía deben EPP, que son justo los que hay que ubicar.
+ * Columnas: solo los EPP que alguien tiene, para no llenar el cuadro de columnas vacías.
+ *
+ * La cuenta se hace en una sola consulta agrupada, igual que employeeHoldings pero para
+ * todos a la vez.
+ */
+export async function cuadroEpp(f: CuadroEppFiltros = {}) {
+  const busqueda = f.q?.trim()
+    ? sql`and (e.first_name || ' ' || e.last_name || ' ' || e.dni) ilike ${`%${f.q.trim().replace(/[%_\\]/g, (c) => `\\${c}`)}%`}`
+    : sql``;
+  const area = f.area ? sql`and e.area = ${f.area}` : sql``;
+  const categoria = f.categoryId ? sql`and p.category_id = ${f.categoryId}` : sql``;
+
+  const celdas = await db.execute<{ employee_id: string; product_id: string; tiene: number }>(sql`
+    with ent as (
+      select employee_id, product_id, sum(quantity)::int as q
+      from epp_deliveries where voided_at is null group by 1, 2
+    ), dev as (
+      select employee_id, product_id, sum(quantity)::int as q
+      from epp_returns group by 1, 2
+    )
+    select ent.employee_id, ent.product_id, (ent.q - coalesce(dev.q, 0))::int as tiene
+    from ent
+    left join dev on dev.employee_id = ent.employee_id and dev.product_id = ent.product_id
+    join products p on p.id = ent.product_id
+    join employees e on e.id = ent.employee_id
+    where ent.q - coalesce(dev.q, 0) > 0 ${categoria} ${area} ${busqueda}
+  `);
+  const filasCeldas = [...celdas];
+
+  const conEpp = [...new Set(filasCeldas.map((c) => c.employee_id))];
+  const trabajadores = await db.execute<{
+    id: string; nombre: string; dni: string; area: string; position: string; cesado: boolean;
+  }>(sql`
+    select e.id, e.last_name || ', ' || e.first_name as nombre, e.dni, e.area, e.position,
+           (not e.active or e.terminated_at is not null) as cesado
+    from employees e
+    where ((e.active and e.terminated_at is null)
+           ${conEpp.length ? sql`or e.id in (${sql.join(conEpp.map((id) => sql`${id}::uuid`), sql`, `)})` : sql``})
+      ${area} ${busqueda}
+    order by e.last_name, e.first_name
+  `);
+
+  const idsProductos = [...new Set(filasCeldas.map((c) => c.product_id))];
+  const productosRows = idsProductos.length === 0 ? [] : await db.execute<{
+    id: string; code: string; name: string; size: string | null; categoria: string;
+  }>(sql`
+    select p.id, p.code, p.name, p.size, c.name as categoria
+    from products p join categories c on c.id = p.category_id
+    where p.id in (${sql.join(idsProductos.map((id) => sql`${id}::uuid`), sql`, `)})
+    order by c.name, p.name, p.size nulls first
+  `);
+  const productos = [...productosRows];
+
+  const tiene = new Map<string, number>();
+  for (const c of filasCeldas) tiene.set(`${c.employee_id}|${c.product_id}`, Number(c.tiene));
+
+  const filas = [...trabajadores].map((t) => {
+    const cantidades = Object.fromEntries(productos.map((p) => [p.id, tiene.get(`${t.id}|${p.id}`) ?? 0]));
+    return { ...t, cantidades, total: Object.values(cantidades).reduce((a, b) => a + b, 0) };
+  });
+  const totales = Object.fromEntries(productos.map((p) => [p.id, filas.reduce((a, r) => a + r.cantidades[p.id], 0)]));
+
+  return { productos, filas, totales, total: Object.values(totales).reduce((a, b) => a + b, 0) };
 }

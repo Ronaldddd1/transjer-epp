@@ -208,7 +208,8 @@ with sync_playwright() as p:
     check("se puede pasar lista un domingo",
           psql("select a.status from attendance a join employees e on e.id=a.employee_id "
                f"where e.area='{AREA}' and e.first_name='Ana' and a.day='{domingo}'") == "PRESENTE")
-    page.reload(); page.wait_for_timeout(1700)
+    page.goto(f"{BASE}/asistencia?vista=semana&semana={domingo}&area={AREA.replace(' ', '+')}")
+    page.wait_for_timeout(1700)
     celda = page.locator("section[aria-labelledby=titulo-semana] tbody tr").filter(has_text="Ana").locator("td").nth(7)
     check("y aparece en la columna Domingo de su semana", "Vino" in celda.inner_text(), celda.inner_text())
 
@@ -226,13 +227,21 @@ with sync_playwright() as p:
         check("no deja pasar lista de un día que no llegó",
               psql(f"select count(*) from attendance where day = '{manana}'") == "0")
 
-    # --- El resumen del mes ---
+    # --- Dos botones: registrar el día, o ver el cuadro de la semana ---
     page.goto(f"{BASE}/asistencia?area={AREA.replace(' ', '+')}")
     page.wait_for_timeout(1700)
+    check("abre en el registro del día, con sus dos botones arriba",
+          page.locator("#titulo-dia").count() == 1 and page.locator("#titulo-semana").count() == 0
+          and page.get_by_role("link", name=re.compile("Registrar asistencia del día")).count() == 1
+          and page.get_by_role("link", name=re.compile("Cuadro de lunes a domingo")).count() == 1)
+    page.get_by_role("link", name=re.compile("Cuadro de lunes a domingo")).click()
+    page.wait_for_url(re.compile("vista=semana"), timeout=15000)
+    page.wait_for_timeout(1500)
+    check("el otro botón muestra el cuadro de la semana, conservando el área",
+          page.locator("#titulo-semana").count() == 1 and page.locator("#titulo-dia").count() == 0
+          and "area=" in page.url, page.url)
     cuerpo = page.locator("body").inner_text()
-    check("la pantalla va en dos bloques: el día y la semana",
-          page.locator("#titulo-dia").count() == 1 and page.locator("#titulo-semana").count() == 1)
-    check("el resumen del mes está en la misma pantalla, plegado", "Resumen de" in cuerpo)
+    check("el resumen del mes va debajo del cuadro, plegado", "Resumen de" in cuerpo)
     page.locator("details summary", has_text="Resumen de").click(); page.wait_for_timeout(300)
     cuerpo = page.locator("body").inner_text()
     check("y al abrirlo dice cuántos días se pasó lista", "día(s) de este mes" in cuerpo, cuerpo[-400:])

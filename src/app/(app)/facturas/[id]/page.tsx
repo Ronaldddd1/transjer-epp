@@ -50,13 +50,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     listInvoiceAttachments(id),
     listInvoiceAdvances(id),
     getInvoiceEmail(id),
-    can(user.role, "invoices.manage") ? getSupplierOptions() : Promise.resolve([]),
-    can(user.role, "invoices.manage") ? getClientOptions() : Promise.resolve([]),
+    can(user, "invoices.manage") ? getSupplierOptions() : Promise.resolve([]),
+    can(user, "invoices.manage") ? getClientOptions() : Promise.resolve([]),
   ]);
 
-  const canManage = can(user.role, "invoices.manage");
-  const canPay = can(user.role, "invoices.pay");
-  const canDetraction = can(user.role, "detractions.manage");
+  const canManage = can(user, "invoices.manage");
+  const canPay = can(user, "invoices.pay");
+  const canDetraction = can(user, "detractions.manage");
   const detraccion = {
     id: invoice.id, series: invoice.series, number: invoice.number, currency: invoice.currency,
     total: invoice.total, supplierName: invoice.supplierName,

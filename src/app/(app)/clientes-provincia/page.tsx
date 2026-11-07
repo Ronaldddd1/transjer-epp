@@ -30,7 +30,7 @@ export default async function ProvinceClientsPage({ searchParams }: { searchPara
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp, 25);
   const f = readProvinceFilters(sp);
-  const canManage = can(user.role, "provinceClients.manage");
+  const canManage = can(user, "provinceClients.manage");
 
   const [{ rows, total }, provincias, cuentas] = await Promise.all([
     listProvinceClients(f, pageSize, offset),

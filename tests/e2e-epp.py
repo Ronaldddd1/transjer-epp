@@ -70,10 +70,12 @@ with sync_playwright() as p:
     # 3. Inventario: alta de producto con stock inicial como entrada
     page.goto(BASE + "/inventario")
     page.get_by_role("button", name="Nuevo EPP").click()
-    cat = psql("select id from categories where name='Protección de manos'")
+    categorias_antes = psql("select count(*) from categories")
     m.locator("#code").fill("REG-001")
     m.locator("#name").fill("Guante de prueba de regresión")
-    m.locator("#categoryId").select_option(cat)
+    # La categoría se escribe (o se elige de las sugerencias); escrita distinto en
+    # mayúsculas sigue siendo la misma, no se duplica.
+    m.locator("input[name=categoryName]").fill("protección de MANOS")
     m.locator("#initialStock").fill("12")
     m.locator("#minimumStock").fill("4")
     m.get_by_role("button", name="Registrar EPP").click()
@@ -81,6 +83,8 @@ with sync_playwright() as p:
     assert psql("select stock from products where code='REG-001'") == "12"
     assert psql("select count(*) from inventory_movements mv join products pr on pr.id=mv.product_id "
                 "where pr.code='REG-001' and mv.type='ENTRADA'") == "1"
+    assert psql("select c.name from products p join categories c on c.id = p.category_id where p.code='REG-001'") == "Protección de manos"
+    assert psql("select count(*) from categories") == categorias_antes, "escribir una categoría existente no debe crear otra"
     ok("Inventario: el stock inicial queda registrado como entrada")
 
     # 4. Salida y tope de stock
@@ -167,21 +171,21 @@ with sync_playwright() as p:
     assert psql("select stock from products where code='REG-001'") == "11"
     ok("Anular una entrega devuelve el stock")
 
-    # 7. Categorías y trabajadores siguen operativos
+    # 7. Categorías ya no es una pantalla, y trabajadores sigue operativo
     page.goto(BASE + "/categorias")
-    expect(page.get_by_role("row").filter(has_text="Protección de manos")).to_be_visible()
+    expect(page).to_have_url(re.compile("/inventario"))
     page.goto(BASE + "/trabajadores")
     expect(page.locator("tbody tr").first).to_be_visible()
-    ok("Categorías y trabajadores siguen operativos")
+    ok("Categorías redirige al inventario y trabajadores sigue operativo")
 
-    # 8. Reportes y exportación
-    page.goto(BASE + "/reportes?tipo=inventario")
-    expect(page.get_by_role("columnheader", name="Stock").first).to_be_visible()
-    pdf = page.request.get(BASE + "/api/export?tipo=movimientos&format=pdf")
-    assert pdf.status == 200 and pdf.body()[:5] == b"%PDF-"
-    xlsx = page.request.get(BASE + "/api/export?tipo=entregas&format=xlsx")
+    # 8. Sin pantalla de reportes: cada tabla se descarga desde su propia pantalla
+    page.goto(BASE + "/reportes")
+    expect(page).to_have_url(re.compile("/dashboard"))
+    pdf = page.request.get(BASE + "/api/export/tabla?tabla=inventario&format=pdf")
+    assert pdf.status == 200 and pdf.body()[:5] == b"%PDF-", pdf.status
+    xlsx = page.request.get(BASE + "/api/export/tabla?tabla=entregas&format=xlsx")
     assert xlsx.status == 200 and len(xlsx.body()) > 1000
-    ok("Reportes: se ven y se descargan en PDF y Excel")
+    ok("Reportes redirige al inicio y las tablas se siguen descargando en PDF y Excel")
 
     # 9. Auditoría sin contraseñas
     page.goto(BASE + "/auditoria")
@@ -190,14 +194,19 @@ with sync_playwright() as p:
                 "or new_data::text like '%passwordHash%'") == "0"
     ok("Auditoría registra los cambios y nunca guarda contraseñas")
 
-    # 10. Rol Usuario: permisos del almacén, sin facturas
+    # 10. Usuario de almacén, creado marcando sus módulos: sin facturas
+    def marcar(modulo, nivel):
+        m.get_by_role("radiogroup", name=modulo).get_by_text(nivel, exact=True).click()
+
     page.goto(BASE + "/usuarios")
     page.get_by_role("button", name="Nuevo usuario").click()
     m.locator("#name").fill("Operador Almacén 2")
     m.locator("#username").fill("almacen2")
     m.locator("#email").fill("almacen2@transjer.pe")
-    m.locator("#role").select_option("USUARIO")
     m.locator("#password").fill("Almacen456!")
+    marcar("Inventario", "Ver y editar")
+    marcar("Entrega, resumen y devolución de EPP", "Ver y editar")
+    marcar("Trabajadores", "Solo ver")
     m.get_by_role("button", name="Crear usuario").click()
     toast(page, "Usuario")
 
@@ -217,17 +226,19 @@ with sync_playwright() as p:
     expect(up).to_have_url(re.compile("denied=1"))
     assert up.request.get(BASE + "/api/export?tipo=inventario&format=csv").status == 403
     uctx.close()
-    ok("Rol Usuario: mantiene el almacén y no ve facturas ni proveedores")
+    ok("Usuario de almacén por módulos: mantiene el almacén y no ve facturas ni proveedores")
 
-    # 10b. Rol Jefe de almacén: manda en el almacén, sin usuarios ni facturas
+    # 10b. Jefe de almacén por módulos: manda en el almacén y en RR. HH., sin usuarios ni facturas
     page.goto(BASE + "/usuarios")
     page.get_by_role("button", name="Nuevo usuario").click()
     m.locator("#name").fill("Jefe de Almacén")
     m.locator("#username").fill("jalmacen")
     m.locator("#email").fill("jalmacen@transjer.pe")
-    m.locator("#role").select_option("JEFE_ALMACEN")
-    expect(m.get_by_text("Sin usuarios ni facturas")).to_be_visible()
     m.locator("#password").fill("Almacen789!")
+    marcar("Inventario", "Ver y editar")
+    marcar("Entrega, resumen y devolución de EPP", "Ver y editar")
+    marcar("Trabajadores", "Ver y editar")
+    marcar("Asistencia", "Ver y editar")
     m.get_by_role("button", name="Crear usuario").click()
     toast(page, "Usuario")
 
@@ -242,7 +253,7 @@ with sync_playwright() as p:
         if titulo.get_attribute("aria-expanded") == "false":
             titulo.click()
             jp.wait_for_timeout(120)
-    for visible in ["/inventario", "/movimientos", "/entregas", "/trabajadores", "/reportes", "/categorias"]:
+    for visible in ["/inventario", "/entregas", "/trabajadores", "/asistencia"]:
         assert jnav.locator(f"a[href='{visible}']").count() > 0, f"falta {visible} en el menú"
     for oculto in ["/facturas", "/proveedores", "/usuarios", "/auditoria", "/detracciones", "/mantenimiento"]:
         assert jnav.locator(f"a[href='{oculto}']").count() == 0, f"{oculto} no debería verse"
@@ -257,7 +268,19 @@ with sync_playwright() as p:
         jp.goto(BASE + prohibido)
         expect(jp).to_have_url(re.compile("denied=1"))
     jctx.close()
-    ok("Rol Jefe de almacén: control total del almacén, sin facturas ni usuarios")
+    ok("Jefe de almacén por módulos: control total del almacén, sin facturas ni usuarios")
+
+    # 10c. Los usuarios creados antes, con rol y sin accesos, siguen funcionando con su rol
+    psql("update users set role = 'JEFE_ALMACEN', module_access = null where username = 'jalmacen'")
+    jctx = b.new_context(viewport={"width": 1440, "height": 950})
+    jp = jctx.new_page()
+    login(jp, "jalmacen", "Almacen789!")
+    jp.goto(BASE + "/inventario")
+    expect(jp.get_by_role("button", name="Nuevo EPP")).to_be_visible()
+    jp.goto(BASE + "/facturas")
+    expect(jp).to_have_url(re.compile("denied=1"))
+    jctx.close()
+    ok("Un usuario de antes, con rol y sin accesos, conserva lo que su rol le daba")
 
     # 11. Cerrar sesión
     page.goto(BASE + "/dashboard")

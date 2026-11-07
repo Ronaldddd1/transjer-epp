@@ -38,7 +38,12 @@ const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 
 export const productBaseSchema = z.object({
   name: requiredText("El nombre", 150),
-  categoryId: z.string().uuid("Selecciona una categoría"),
+  /**
+   * La categoría se elige de la lista o se escribe: si el nombre no existe, se crea al
+   * guardar (ya no hay pantalla de Categorías). Llega uno de los dos; el servidor resuelve.
+   */
+  categoryId: z.string().uuid().optional().or(z.literal("")).transform((v) => v || undefined),
+  categoryName: optionalText(80),
   description: optionalText(1000),
   brand: optionalText(80),
   size: optionalText(20),
@@ -636,3 +641,19 @@ export const provinceClientSchema = z.object({
   costPerTon: optionalMoney("El costo por tonelada"),
   notes: optionalText(1000),
 });
+
+/**
+ * Una salida de la flota. El tipo de documento lo decide el servidor cuando el cliente es
+ * Alicorp (siempre FO); para los demás se elige.
+ */
+export const tripSchema = z.object({
+  day: ymd,
+  vehicleId: z.string().uuid("Elige la unidad"),
+  driverId: z.string().uuid().optional().or(z.literal("")).transform((v) => v || null),
+  client: requiredText("El cliente", 120),
+  destination: optionalText(160),
+  docType: z.enum(["FO", "GUIA", "OS", "OTRO"]).optional().or(z.literal("")).transform((v) => v || null),
+  docNumber: requiredText("El número de documento", 40).transform((v) => v.replace(/\s+/g, " ").trim().toUpperCase()),
+  notes: optionalText(500),
+});
+export type TripInput = z.infer<typeof tripSchema>;

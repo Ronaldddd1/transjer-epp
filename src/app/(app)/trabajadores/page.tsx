@@ -22,7 +22,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Se
   const user = await requirePageUser("employees.view");
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp);
-  const canManage = can(user.role, "employees.manage");
+  const canManage = can(user, "employees.manage");
   const [{ rows, total }, areas] = await Promise.all([
     listEmployees({ q: first(sp.q), area: first(sp.area), state: first(sp.state), limit: pageSize, offset }),
     getAreaOptions(),

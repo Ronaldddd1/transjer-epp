@@ -1,0 +1,77 @@
+CAMBIOS DE NOVIEMBRE: MENÚ, SALIDAS, CUADRO DE EPP Y ACCESOS POR MÓDULO
+=======================================================================
+
+ANTES DE SUBIR
+--------------
+Lleva dos migraciones nuevas. En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0024_salidas              la tabla de salidas de la flota
+    0025_accesos_por_modulo   la columna de accesos de cada usuario
+
+Las dos solo agregan: no tocan ni borran datos.
+
+
+EL MENÚ
+-------
+Almacén:            Inventario, Entrega de EPP, Resumen de EPP, Devolución de EPP
+Recursos Humanos:   Asistencia, Trabajadores                                  (nuevo)
+Flota:              Salidas y liquidación (nuevo), Documentos, Mantenimiento,
+                    Clientes de provincia
+Proveedores, Finanzas: igual que antes
+Administración:     Usuarios, Auditoría
+
+Salieron Movimientos, Reportes y Categorías. Sus datos siguen en la base:
+  - Las entradas, salidas y ajustes de stock se hacen desde el Inventario (botones
+    de cada fila y "Registrar ajuste" arriba). El historial de un producto se abre
+    con el botón "Historial" de su fila.
+  - Cada pantalla tiene su propio botón Descargar/Exportar, con los filtros puestos.
+  - La categoría de un EPP se escribe en el mismo formulario del producto. Si ya
+    existe (sin importar mayúsculas), se usa esa; si no, se crea sola.
+  Los enlaces viejos a /movimientos, /reportes y /categorias redirigen.
+
+
+ASISTENCIA (Recursos Humanos)
+-----------------------------
+Dos botones arriba:
+  - Registrar asistencia del día: la lista de siempre.
+  - Cuadro de lunes a domingo: la semana, con su descarga en Excel, y el resumen
+    del mes plegado debajo.
+
+
+RESUMEN DE EPP
+--------------
+Abre en el cuadro tipo Excel: un trabajador por fila, un EPP por columna, y en cada
+casilla lo que tiene hoy (entregado menos devuelto). Salen todos los trabajadores
+activos, más los cesados que todavía deben EPP. Se descarga en Excel.
+Lo de antes (lo entregado en un periodo) sigue en el botón "Entregado por periodo".
+
+
+SALIDAS Y LIQUIDACIÓN (Flota)
+-----------------------------
+- Salidas del día: "Registrar salida" pide fecha, placa, conductor, cliente, destino
+  y el número de documento. Si el cliente es Alicorp, el documento es siempre un FO;
+  para los demás se elige: guía de remisión, orden de servicio, FO u otro.
+- El mismo número de documento no se puede registrar dos veces para un cliente.
+- Control de liquidación: lo que falta liquidar, lo más antiguo primero, con cuántos
+  días lleva. "Liquidar" pide la fecha; una salida liquidada ya no se edita ni se
+  borra (si fue un error, "Deshacer la liquidación"). Todo queda en auditoría.
+
+
+ACCESOS POR MÓDULO (Usuarios)
+-----------------------------
+Al crear o editar un usuario ya no se elige un rol: o se marca "Administrador"
+(entra a todo), o se marca módulo por módulo:
+
+    Sin acceso  ·  Solo ver  ·  Ver y editar
+
+Eso decide lo que ve en el menú, las pantallas a las que entra y lo que puede
+registrar. Los cambios aplican al instante, sin volver a iniciar sesión.
+
+Los usuarios que ya existen siguen funcionando con su rol de antes hasta que alguien
+los edite. Al abrir "Editar", la grilla aparece con lo que su rol le daba; al guardar
+pasa a tener esos accesos. Conviene revisarlos uno por uno.
+
+Un usuario que no es administrador necesita al menos un módulo. Nadie puede quitarse
+a sí mismo el acceso a Usuarios, y siempre tiene que quedar un administrador activo.

@@ -27,7 +27,9 @@ TABLAS = [
     ("proveedores", "/proveedores", "select count(*) from suppliers"),
     ("obligaciones", "/obligaciones", "select count(*) from obligations"),
     ("calendario", "/calendario", None),
-    ("resumen-epp", "/entregas/resumen", None),
+    # El Resumen de EPP abre en el cuadro por trabajador; lo de siempre está en "periodo".
+    ("cuadro-epp", "/entregas/resumen", None),
+    ("resumen-epp", "/entregas/resumen?vista=periodo", None),
     ("entregas", "/entregas", "select count(*) from epp_deliveries"),
     # La primera hoja son los cesados que deben EPP, y lo normal es que esté vacía. Se
     # cuenta aparte, repitiendo la resta a mano: así el Excel se contrasta contra la base
@@ -43,8 +45,8 @@ TABLAS = [
     ("usuarios", "/usuarios", "select count(*) from users"),
     ("auditoria", "/auditoria", None),
     ("inventario", "/inventario", "select count(*) from products where active"),
-    ("movimientos", "/movimientos", None),
-    ("categorias", "/categorias", "select count(*) from categories"),
+    # Movimientos y Categorías ya no son pantallas; las salidas de la flota sí.
+    ("salidas", "/salidas?vista=control&estado=", "select count(*) from vehicle_trips"),
     ("correos", "/facturas/correos", "select count(*) from invoice_emails"),
 ]
 
@@ -72,7 +74,9 @@ def main():
         for tabla, ruta, consulta in TABLAS:
             page.goto(BASE + ruta)
             page.wait_for_timeout(900)
-            boton = page.locator("button:has-text('Exportar')").first
+            # El botón dice "Exportar" o "Descargar…", según la pantalla; se lo reconoce por
+            # abrir el menú de formatos (el calendario tiene además "Descargar imagen").
+            boton = page.locator("button[aria-haspopup=menu]").filter(has_text=re.compile("Exportar|Descargar")).first
             if boton.count() == 0:
                 check(f"{tabla}: la pantalla ofrece exportar", False, ruta)
                 continue
@@ -137,7 +141,8 @@ def main():
         ctx2 = nav.new_context(accept_downloads=True)
         p2 = ctx2.new_page()
         p2.goto(f"{BASE}/login")
-        usuario = psql("select username from users where role='DETRACCIONES' order by created_at desc limit 1")
+        # La crea e2e-detracciones, marcando solo Detracciones (y Facturas para ver).
+        usuario = psql("select username from users where username like 'detra%' and active order by created_at desc limit 1")
         if usuario:
             p2.fill("input[name=identifier]", usuario)
             p2.fill("input[name=password]", "Detrac123!")

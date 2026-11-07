@@ -16,7 +16,7 @@ export const metadata: Metadata = { title: "Auditoría" };
 const MODULE_LABEL: Record<string, string> = {
   PRODUCTOS: "Productos", CATEGORIAS: "Categorías", TRABAJADORES: "Trabajadores", MOVIMIENTOS: "Movimientos",
   ENTREGAS: "Entregas", USUARIOS: "Usuarios", SESION: "Sesión",
-  CLIENTES_PROVINCIA: "Clientes de provincia",
+  CLIENTES_PROVINCIA: "Clientes de provincia", SALIDAS: "Salidas de flota",
 };
 
 export default async function AuditPage({ searchParams }: { searchParams: SearchParams }) {

@@ -78,6 +78,11 @@ export const users = pgTable("users", {
   email: varchar("email", { length: 160 }).notNull().unique(),
   passwordHash: text("password_hash").notNull(),
   role: roleEnum("role").notNull().default("USUARIO"),
+  /**
+   * Accesos por módulo: {"inventario":"edit","asistencia":"view",...}. NULL = todavía con
+   * rol (usuarios creados antes); el administrador entra a todo y no lo usa.
+   */
+  moduleAccess: jsonb("module_access").$type<Partial<Record<string, "none" | "view" | "edit">>>(),
   active: boolean("active").notNull().default(true),
   ...timestamps,
 });
@@ -799,6 +804,37 @@ export const provinceClients = pgTable("province_clients", {
 }, (t) => [
   index("province_clients_province_idx").on(t.province),
   check("province_clients_cost_positive", sql`${t.costPerTon} is null or ${t.costPerTon} >= 0`),
+]);
+
+/**
+ * Las salidas diarias de la flota: qué unidad fue, con quién, para qué cliente y con qué
+ * documento (FO en Alicorp, guía u orden de servicio en los demás). Cada una queda
+ * PENDIENTE hasta que ese documento se liquida con el cliente.
+ */
+export const vehicleTrips = pgTable("vehicle_trips", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  day: date("day").notNull(),
+  vehicleId: uuid("vehicle_id").notNull().references(() => vehicles.id, { onDelete: "restrict" }),
+  driverId: uuid("driver_id").references(() => employees.id, { onDelete: "set null" }),
+  client: varchar("client", { length: 120 }).notNull(),
+  destination: varchar("destination", { length: 160 }),
+  /** FO | GUIA | OS | OTRO. En Alicorp siempre es FO. */
+  docType: varchar("doc_type", { length: 12 }).notNull(),
+  docNumber: varchar("doc_number", { length: 40 }).notNull(),
+  /** PENDIENTE | LIQUIDADO */
+  status: varchar("status", { length: 12 }).notNull().default("PENDIENTE"),
+  settledAt: date("settled_at"),
+  settledBy: uuid("settled_by").references(() => users.id, { onDelete: "set null" }),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+}, (t) => [
+  index("vehicle_trips_day_idx").on(t.day),
+  index("vehicle_trips_status_idx").on(t.status),
+  uniqueIndex("vehicle_trips_doc_unique").on(sql`lower(btrim(${t.client}))`, t.docType, sql`upper(btrim(${t.docNumber}))`),
+  check("vehicle_trips_status_valid", sql`${t.status} in ('PENDIENTE','LIQUIDADO')`),
+  check("vehicle_trips_doc_type_valid", sql`${t.docType} in ('FO','GUIA','OS','OTRO')`),
+  check("vehicle_trips_settled_consistent", sql`(${t.status} = 'LIQUIDADO') = (${t.settledAt} is not null)`),
 ]);
 
 export const maintenancePlans = pgTable("maintenance_plans", {

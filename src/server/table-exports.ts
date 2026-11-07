@@ -6,12 +6,12 @@ import {
   PAYMENT_TERM_LABEL, REJECT_REASON_LABEL, RETURN_CONDITION_LABEL, ROLE_EXPORT_LABEL,
   DOCUMENT_STATUS_LABEL, documentStatus, exigeRevisionTecnica, FLEET_STATUS_LABEL,
   MAINTENANCE_KIND_LABEL, MAINTENANCE_STATUS_LABEL, todayLima,
-  STOCK_STATUS_LABEL, stockStatus,
+  STOCK_STATUS_LABEL, stockStatus, TRIP_DOC_LABEL,
   type AmountCheckKey, type RejectReasonKey, type SearchParamsRecord, valorSinIgv,
 } from "@/lib/utils";
 import type { Permission } from "@/lib/permissions";
 import {
-  deliverySummary, listAudit, listCategories, listDeliveries, listEmployees, listMovements,
+  cuadroEpp, deliverySummary, listAudit, listCategories, listDeliveries, listEmployees, listMovements,
   listPendingReturns, listProducts, listReturns, listUsers, readFilters,
 } from "./queries";
 import {
@@ -21,6 +21,8 @@ import { estadoFlota, listFleet } from "./document-queries";
 import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
 import { attendanceMonth, attendanceWeek, listAttendanceDay, lunesDe, readAttendanceFilters } from "./attendance-queries";
 import { listProvinceClients, readProvinceFilters } from "./province-queries";
+import { listTripsControl, listTripsDay, readTripFilters } from "./trip-queries";
+import { MODULOS } from "@/lib/permissions";
 import { listInstallments, listObligations, listPaymentCalendar, readObligationFilters } from "./obligation-queries";
 import type { Report } from "./reports";
 
@@ -486,6 +488,101 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
 
   // ---------- Trabajadores ----------
   // ---------- Clientes de provincia ----------
+  /**
+   * El cuadro tipo Excel del Resumen de EPP: un trabajador por fila y un EPP por columna,
+   * con lo que cada uno tiene hoy (entregado menos devuelto).
+   */
+  "cuadro-epp": {
+    title: "EPP en poder del personal",
+    permission: "deliveries.view",
+    async build(sp) {
+      const datos = await cuadroEpp({
+        q: typeof sp.q === "string" ? sp.q : undefined,
+        area: typeof sp.area === "string" ? sp.area : undefined,
+        categoryId: typeof sp.category === "string" ? sp.category : undefined,
+      });
+      return [{
+        title: "EPP en poder del personal",
+        columns: [
+          { key: "trabajador", header: "Trabajador", width: 30 },
+          { key: "dni", header: "DNI", width: 11 },
+          { key: "area", header: "Área", width: 16 },
+          { key: "estado", header: "Estado", width: 9 },
+          ...datos.productos.map((p) => ({
+            key: `p_${p.id}`,
+            header: `${p.name}${p.size ? ` (${p.size})` : ""}`,
+            width: 12,
+            align: "right" as const,
+          })),
+          { key: "total", header: "Total", width: 9, align: "right" as const },
+        ],
+        rows: [
+          ...datos.filas.map((r) => ({
+            trabajador: r.nombre,
+            dni: r.dni,
+            area: r.area,
+            estado: r.cesado ? "Cesado" : "Activo",
+            ...Object.fromEntries(datos.productos.map((p) => [`p_${p.id}`, r.cantidades[p.id] || ""])),
+            total: r.total,
+          })),
+          {
+            trabajador: "TOTAL EN PODER", dni: "", area: "", estado: "",
+            ...Object.fromEntries(datos.productos.map((p) => [`p_${p.id}`, datos.totales[p.id]])),
+            total: datos.total,
+          },
+        ],
+        summary: [
+          { label: "Trabajadores", value: datos.filas.length },
+          { label: "Unidades en poder", value: datos.total },
+        ],
+      }];
+    },
+  },
+
+  /** Las salidas de la flota: las de un día, o el control de liquidación con sus filtros. */
+  salidas: {
+    title: "Salidas de la flota",
+    permission: "trips.view",
+    async build(sp) {
+      const f = readTripFilters(sp);
+      const filas = f.vista === "dia" ? await listTripsDay(f.dia, f.q) : await listTripsControl(f, 5000);
+      const titulo = f.vista === "dia" ? `Salidas del ${fecha(f.dia)}` : "Control de liquidación";
+      return [{
+        title: titulo,
+        columns: [
+          { key: "fecha", header: "Fecha de salida", width: 13 },
+          { key: "placa", header: "Placa", width: 10 },
+          { key: "conductor", header: "Conductor", width: 26 },
+          { key: "cliente", header: "Cliente", width: 24 },
+          { key: "destino", header: "Destino", width: 20 },
+          { key: "tipo", header: "Documento", width: 17 },
+          { key: "numero", header: "N°", width: 16 },
+          { key: "estado", header: "Estado", width: 12 },
+          { key: "liquidado", header: "Liquidado el", width: 13 },
+          { key: "dias", header: "Días desde la salida", width: 12, align: "right" },
+          { key: "observaciones", header: "Observaciones", width: 30 },
+        ],
+        rows: filas.map((r) => ({
+          fecha: fecha(r.day),
+          placa: r.plate,
+          conductor: texto(r.driverName),
+          cliente: r.client,
+          destino: texto(r.destination),
+          tipo: TRIP_DOC_LABEL[r.docType] ?? r.docType,
+          numero: r.docNumber,
+          estado: r.status === "LIQUIDADO" ? "Liquidado" : "Por liquidar",
+          liquidado: r.settledAt ? fecha(r.settledAt) : "",
+          dias: r.status === "PENDIENTE" ? r.dias : "",
+          observaciones: texto(r.notes),
+        })),
+        summary: [
+          { label: "Salidas", value: filas.length },
+          { label: "Por liquidar", value: filas.filter((r) => r.status === "PENDIENTE").length },
+        ],
+      }];
+    },
+  },
+
   "clientes-provincia": {
     title: "Clientes de provincia",
     permission: "provinceClients.view",
@@ -579,14 +676,19 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "nombre", header: "Nombre", width: 28 },
           { key: "usuario", header: "Usuario", width: 18 },
           { key: "correo", header: "Correo", width: 30 },
-          { key: "rol", header: "Rol", width: 18 },
+          { key: "rol", header: "Acceso", width: 18 },
+          { key: "modulos", header: "Módulos", width: 60 },
           { key: "estado", header: "Estado", width: 10 },
           { key: "alta", header: "Dado de alta", width: 18 },
         ],
         // Las contraseñas no salen en ningún lado, tampoco aquí.
         rows: rows.map((u) => ({
           nombre: u.name, usuario: u.username, correo: u.email,
-          rol: ROLE_EXPORT_LABEL[u.role] ?? u.role,
+          rol: u.role === "ADMIN" ? "Administrador" : u.moduleAccess ? "Por módulo" : (ROLE_EXPORT_LABEL[u.role] ?? u.role),
+          modulos: u.role === "ADMIN" ? "Todos" : u.moduleAccess
+            ? MODULOS.filter((m) => (u.moduleAccess?.[m.key] ?? "none") !== "none")
+              .map((m) => `${m.label} (${u.moduleAccess![m.key] === "edit" ? "editar" : "ver"})`).join(", ")
+            : "Según su rol",
           estado: u.active ? "Activo" : "Inactivo",
           alta: formatDateTime(u.createdAt),
         })),

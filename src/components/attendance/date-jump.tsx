@@ -11,16 +11,22 @@ import { addDays, formatDate } from "@/lib/utils";
  * Con flechas y no solo con un calendario porque lo normal es corregir el día anterior:
  * "ayer no marqué a nadie". Dos clics, no cinco.
  */
-export function DateJump({ dia, hoy }: { dia: string; hoy: string }) {
+export function DateJump({ dia, hoy, ruta = "/asistencia", leyenda = "Pasando lista del" }: {
+  dia: string;
+  hoy: string;
+  leyenda?: string;
+  /** La pantalla donde se usa: asistencia o salidas de la flota. */
+  ruta?: string;
+}) {
   const router = useRouter();
   const sp = useSearchParams();
 
   const ir = (nuevo: string) => {
     const p = new URLSearchParams(sp?.toString() ?? "");
     p.set("dia", nuevo);
-    // El resumen sigue al día: si se salta a otro mes, se mira ese mes.
-    p.set("mes", nuevo.slice(0, 7));
-    router.replace(`/asistencia?${p.toString()}`, { scroll: false });
+    // En asistencia, el resumen sigue al día: si se salta a otro mes, se mira ese mes.
+    if (ruta === "/asistencia") p.set("mes", nuevo.slice(0, 7));
+    router.replace(`${ruta}?${p.toString()}`, { scroll: false });
   };
 
   const siguiente = addDays(dia, 1);
@@ -66,7 +72,7 @@ export function DateJump({ dia, hoy }: { dia: string; hoy: string }) {
       )}
 
       <span className="ml-auto text-sm text-steel-500">
-        Pasando lista del <strong className="text-ink">{formatDate(dia)}</strong>
+        {leyenda} <strong className="text-ink">{formatDate(dia)}</strong>
       </span>
     </div>
   );

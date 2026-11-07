@@ -28,7 +28,7 @@ export const metadata: Metadata = { title: "Todos los documentos" };
 export default async function TodosLosDocumentosPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("documents.view");
   const sp = await searchParams;
-  const canManage = can(user.role, "documents.manage");
+  const canManage = can(user, "documents.manage");
 
   const filtros = readDocumentFilters(sp);
   const cuentas = await documentCounts();

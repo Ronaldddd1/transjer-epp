@@ -1,6 +1,5 @@
 import { History, Trash2 } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { deleteProduct } from "@/actions/products";
 import { MovementModal } from "@/components/inventory/movement-modal";
 import { ProductFormModal } from "@/components/inventory/product-form-modal";
@@ -26,9 +25,9 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp);
   const f = readFilters(sp);
-  const canManage = can(user.role, "products.manage");
-  const canMove = can(user.role, "movements.create");
-  const canAdjust = can(user.role, "movements.adjust");
+  const canManage = can(user, "products.manage");
+  const canMove = can(user, "movements.create");
+  const canAdjust = can(user, "movements.adjust");
 
   const [{ rows, total }, categories, sizes, productOptions] = await Promise.all([
     listProducts({ q: f.q, categoryId: f.categoryId, status: f.status, size: first(sp.size), sort: first(sp.sort), dir: first(sp.dir), limit: pageSize, offset }),
@@ -165,7 +164,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
       <Pagination basePath="/inventario" searchParams={sp} page={page} pageSize={pageSize} total={total} />
       {!canManage && (
         <p className="mt-4 text-sm text-steel-500">
-          Para crear o editar productos, solicita acceso a un administrador. <Link href="/movimientos" className="underline">Ver movimientos</Link>
+          Para crear o editar productos, solicita acceso a un administrador.
         </p>
       )}
     </>

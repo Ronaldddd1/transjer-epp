@@ -22,8 +22,8 @@ export default async function DeliveriesPage({ searchParams }: { searchParams: S
   const sp = await searchParams;
   const { page, pageSize, offset } = pageParams(sp, 20);
   const f = readFilters(sp);
-  const canCreate = can(user.role, "deliveries.create");
-  const canVoid = can(user.role, "deliveries.void");
+  const canCreate = can(user, "deliveries.create");
+  const canVoid = can(user, "deliveries.void");
   const cols = canVoid ? 10 : 9;
 
   const [{ rows, total }, employees, products, categories] = await Promise.all([

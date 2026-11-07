@@ -43,11 +43,24 @@ export function ProductFormModal({ categories, product }: { categories: Option[]
           <Field label="Nombre del producto" name="name" required error={errors.name}>
             <Input name="name" defaultValue={product?.name} invalid={!!errors.name} maxLength={150} />
           </Field>
-          <Field label="Categoría" name="categoryId" required error={errors.categoryId}>
-            <Select name="categoryId" defaultValue={product?.categoryId ?? ""} invalid={!!errors.categoryId}>
-              <option value="" disabled>Selecciona…</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
+          <Field
+            label="Categoría"
+            name="categoryName"
+            required
+            error={errors.categoryName ?? errors.categoryId}
+            hint="Elige una o escribe una nueva: se crea al guardar."
+          >
+            <Input
+              name="categoryName"
+              list="category-options"
+              required
+              defaultValue={categories.find((c) => c.id === product?.categoryId)?.name ?? ""}
+              invalid={!!(errors.categoryName ?? errors.categoryId)}
+              maxLength={80}
+              autoComplete="off"
+              placeholder="Guantes, Calzado, Protección auditiva…"
+            />
+            <datalist id="category-options">{categories.map((c) => <option key={c.id} value={c.name} />)}</datalist>
           </Field>
           <Field label="Marca" name="brand" error={errors.brand}>
             <Input name="brand" defaultValue={product?.brand ?? ""} maxLength={80} />

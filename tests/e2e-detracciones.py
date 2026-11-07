@@ -191,8 +191,8 @@ def main():
         # --- Resumen de EPP ---
         page.goto(f"{BASE}/entregas"); page.wait_for_timeout(800)
         check("el listado ofrece el resumen", page.locator("a[href='/entregas/resumen']").count() > 0)
-        page.goto(f"{BASE}/entregas/resumen"); page.wait_for_timeout(1200)
-        check("el resumen carga", "Resumen de EPP entregados" in page.content())
+        page.goto(f"{BASE}/entregas/resumen?vista=periodo"); page.wait_for_timeout(1200)
+        check("el resumen carga en la vista por periodo", "Resumen de EPP" in page.content() and "Entregado por periodo" in page.content())
         for bloque in ["EPP entregados", "Trabajadores con entregas", "Por tipo de EPP", "Por trabajador"]:
             check(f"el resumen muestra «{bloque}»", bloque in page.content())
         unidades = psql("select coalesce(sum(quantity),0) from epp_deliveries where voided_at is null")
@@ -207,15 +207,18 @@ def main():
         check("cada tipo dice cuánto falta pagar", "falta pagar" in cuerpo)
         check("la deuda sembrada aparece sumada", "S/ 450.00" in cuerpo, cuerpo[:0])
 
-        # --- Rol de detracciones ---
+        # --- Usuario de detracciones, por módulos ---
         page.goto(f"{BASE}/usuarios"); page.wait_for_timeout(800)
         page.click("text=Nuevo usuario"); page.wait_for_timeout(500)
         page.fill("input[name=name]", "Encargada de detracciones")
         page.fill("input[name=username]", f"detra{SELLO}")
         page.fill("input[name=email]", f"detra{SELLO}@transjer.pe")
-        page.select_option("select[name=role]", "DETRACCIONES")
+        # Lo que antes daba el rol de detracciones, marcado módulo por módulo.
+        dialogo = page.locator("[role=dialog]")
+        dialogo.get_by_role("radiogroup", name="Detracciones").get_by_text("Ver y editar", exact=True).click()
+        dialogo.get_by_role("radiogroup", name="Facturas y calendario de pagos").get_by_text("Solo ver", exact=True).click()
         page.wait_for_timeout(300)
-        check("el formulario explica el rol nuevo", "Solo detracciones" in page.content())
+        check("el formulario ofrece marcar los módulos", "Módulos a los que entra" in dialogo.inner_text())
         page.fill("input[name=password]", "Detrac123!")
         enviar(page, "Crear usuario")
         check("el usuario de detracciones se crea", "Encargada de detracciones" in page.content())

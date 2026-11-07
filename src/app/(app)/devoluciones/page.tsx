@@ -45,7 +45,7 @@ export default async function ReturnsPage({ searchParams }: { searchParams: Sear
     getCategoryOptions(),
   ]);
 
-  const canReturn = can(user.role, "deliveries.create");
+  const canReturn = can(user, "deliveries.create");
   const cesados = pendientes.filter((p) => p.terminatedAt);
   const unidadesCesados = cesados.reduce((s, p) => s + p.unidades, 0);
   const atrasados = cesados.filter((p) => p.dias > 7);

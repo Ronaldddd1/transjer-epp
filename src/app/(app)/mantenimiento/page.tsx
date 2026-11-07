@@ -54,7 +54,7 @@ function Falta({ dias, kms }: { dias: number | null; kms: number | null }) {
 export default async function MantenimientoPage({ searchParams }: { searchParams: SearchParams }) {
   const user = await requirePageUser("maintenance.view");
   const sp = await searchParams;
-  const canManage = can(user.role, "maintenance.manage");
+  const canManage = can(user, "maintenance.manage");
 
   const filtros = readMaintenanceFilters(sp);
   const cuentas = await maintenanceCounts({ q: filtros.q, kind: filtros.kind });

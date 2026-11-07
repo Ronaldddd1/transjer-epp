@@ -864,3 +864,10 @@ export const CONFIRMAR_ELIMINAR = "ELIMINAR";
  * Lo que nunca se registró sí se puede registrar en cualquier momento.
  */
 export const HORAS_PARA_CORREGIR_ASISTENCIA = 24;
+
+/** Tipos de documento de una salida de la flota. */
+export const TRIP_DOC_LABEL: Record<string, string> = {
+  FO: "FO", GUIA: "Guía de remisión", OS: "Orden de servicio", OTRO: "Otro",
+};
+/** Alicorp trabaja con FO: si el cliente es Alicorp, el documento siempre es un FO. */
+export const esAlicorp = (cliente: string | null | undefined) => /alicorp/i.test(cliente ?? "");

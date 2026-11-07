@@ -1,21 +1,28 @@
-import { ArrowLeft, HardHat, Package, Users } from "lucide-react";
+import { ArrowLeft, CalendarRange, HardHat, Package, Sheet, Users } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CuadroEpp } from "@/components/deliveries/cuadro-epp";
 import { StockBadge } from "@/components/ui/badge";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader, Panel } from "@/components/ui/page-header";
 import { ExportTable } from "@/components/ui/export-table";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
-import { cn, formatDate, formatNumber, stockStatus, type SearchParams } from "@/lib/utils";
+import { cn, first, formatDate, formatNumber, stockStatus, type SearchParams } from "@/lib/utils";
 import {
-  deliverySummary, getCategoryOptions, getEmployeeOptions, getProductOptions, readFilters,
+  cuadroEpp, deliverySummary, getAreaOptions, getCategoryOptions, getEmployeeOptions, getProductOptions, readFilters,
 } from "@/server/queries";
 
-export const metadata: Metadata = { title: "Resumen de EPP entregados" };
+export const metadata: Metadata = { title: "Resumen de EPP" };
 
 /**
- * Qué EPP salió del almacén y a quién, sumado.
+ * El Resumen de EPP tiene dos vistas, cada una con su botón.
+ *
+ * La que abre es el cuadro tipo Excel: todos los trabajadores contra todos los EPP, con lo
+ * que cada uno tiene hoy en su poder. Es lo que se pide para saber qué tiene cada quien sin
+ * abrir ficha por ficha.
+ *
+ * La otra es la de siempre: qué EPP salió del almacén y a quién, sumado en un periodo.
  *
  * El listado de entregas sigue existiendo para ver fila por fila, y la ficha de cada
  * trabajador sigue teniendo su historial. Esta pantalla es para la pregunta que antes
@@ -24,6 +31,41 @@ export const metadata: Metadata = { title: "Resumen de EPP entregados" };
 export default async function DeliverySummaryPage({ searchParams }: { searchParams: SearchParams }) {
   await requirePageUser("deliveries.view");
   const sp = await searchParams;
+  const vista: "cuadro" | "periodo" = first(sp.vista) === "periodo" ? "periodo" : "cuadro";
+
+  if (vista === "cuadro") {
+    const filtros = { q: first(sp.q), area: first(sp.area), categoryId: first(sp.category) };
+    const [datos, areas, categorias] = await Promise.all([
+      cuadroEpp(filtros), getAreaOptions(), getCategoryOptions(),
+    ]);
+    return (
+      <>
+        <Link href="/entregas" className="mb-4 inline-flex items-center gap-1.5 text-sm text-steel-500 hover:text-ink">
+          <ArrowLeft className="h-4 w-4" /> Volver al listado de entregas
+        </Link>
+        <PageHeader
+          title="Resumen de EPP"
+          description="Cuántos de cada EPP tiene hoy cada trabajador: lo entregado menos lo devuelto."
+          actions={<ExportTable tabla="cuadro-epp" label="Descargar cuadro" />}
+        />
+        <VistasResumen vista="cuadro" />
+        <FilterBar
+          searchPlaceholder="Buscar trabajador o DNI"
+          filters={[
+            { type: "select", name: "area", label: "Área", allLabel: "Todas", options: areas.map((a) => ({ value: a, label: a })) },
+            { type: "select", name: "category", label: "Categoría", options: categorias.map((c) => ({ value: c.id, label: c.name })) },
+          ]}
+        />
+        <p className="mb-3 text-sm text-steel-500">
+          {datos.filas.length} trabajador(es) · {datos.productos.length} EPP distinto(s) ·{" "}
+          <strong className="text-ink">{formatNumber(datos.total)}</strong> unidad(es) en poder del personal.
+          Las entregas anuladas no cuentan; las devoluciones, de cualquier tipo, descuentan.
+        </p>
+        <CuadroEpp datos={datos} />
+      </>
+    );
+  }
+
   const f = readFilters(sp);
 
   const [resumen, employees, products, categories] = await Promise.all([
@@ -55,10 +97,11 @@ export default async function DeliverySummaryPage({ searchParams }: { searchPara
       </Link>
 
       <PageHeader
-        title="Resumen de EPP entregados"
+        title="Resumen de EPP"
         description="Cuánto salió de cada EPP y quién lo recibió, sin entrar trabajador por trabajador."
         actions={<ExportTable tabla="resumen-epp" label="Exportar resumen" />}
       />
+      <VistasResumen vista="periodo" />
 
       <FilterBar
         searchPlaceholder="Buscar trabajador, DNI o EPP"
@@ -174,5 +217,33 @@ export default async function DeliverySummaryPage({ searchParams }: { searchPara
         <Link href={`/entregas?${paramsActuales}`} className="underline">abre el listado con estos mismos filtros</Link>.
       </p>
     </>
+  );
+}
+
+/** Los dos botones de arriba: el cuadro de lo que tiene cada uno, o lo entregado en un periodo. */
+function VistasResumen({ vista }: { vista: "cuadro" | "periodo" }) {
+  const opciones = [
+    { v: "cuadro", href: "/entregas/resumen", titulo: "Cuadro por trabajador", texto: "Lo que cada uno tiene hoy de cada EPP.", icono: Sheet },
+    { v: "periodo", href: "/entregas/resumen?vista=periodo", titulo: "Entregado por periodo", texto: "Cuánto salió de cada EPP entre dos fechas.", icono: CalendarRange },
+  ] as const;
+  return (
+    <nav aria-label="Vistas del resumen" className="mb-5 grid gap-3 sm:grid-cols-2">
+      {opciones.map(({ v, href, titulo, texto, icono: Icono }) => (
+        <Link
+          key={v}
+          href={href}
+          aria-current={vista === v ? "page" : undefined}
+          className={vista === v
+            ? "flex items-center gap-3 rounded-lg border-2 border-ink bg-ink px-4 py-3 text-white"
+            : "flex items-center gap-3 rounded-lg border-2 border-steel-200 bg-white px-4 py-3 text-ink hover:border-ink"}
+        >
+          <Icono className={vista === v ? "h-6 w-6 text-brand" : "h-6 w-6 text-steel-500"} aria-hidden />
+          <span>
+            <span className="block font-display text-base font-semibold">{titulo}</span>
+            <span className={vista === v ? "block text-sm text-steel-300" : "block text-sm text-steel-500"}>{texto}</span>
+          </span>
+        </Link>
+      ))}
+    </nav>
   );
 }

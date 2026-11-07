@@ -39,7 +39,7 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
     ...readInvoiceFilters(sp),
     ...(filtroEstado ? {} : { detraction: "PENDIENTE" as const }),
   };
-  const canManage = can(user.role, "detractions.manage");
+  const canManage = can(user, "detractions.manage");
 
   const [{ rows, total }, resumen, suppliers, clients] = await Promise.all([
     listInvoices(f, pageSize, offset),

@@ -11,24 +11,24 @@ export const dynamic = "force-dynamic";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requirePageUser();
   const [[low], [pending], [detracciones], devoluciones] = await Promise.all([
-    can(user.role, "products.view")
+    can(user, "products.view")
       ? db.select({ total: count() }).from(products)
           .where(and(eq(products.active, true), sql`${products.stock} <= ${products.minimumStock}`))
       : Promise.resolve([{ total: 0 }]),
-    can(user.role, "invoices.view")
+    can(user, "invoices.view")
       ? db.select({ total: count() }).from(supplierInvoices).where(eq(supplierInvoices.status, "PENDIENTE"))
       : Promise.resolve([{ total: 0 }]),
-    can(user.role, "detractions.view")
+    can(user, "detractions.view")
       ? db.select({ total: count() }).from(supplierInvoices)
           .where(and(inArray(supplierInvoices.detractionStatus, ["PENDIENTE", "EN_PROCESO"]), ne(supplierInvoices.status, "ANULADA")))
       : Promise.resolve([{ total: 0 }]),
-    can(user.role, "deliveries.view")
+    can(user, "deliveries.view")
       ? pendingReturnsCount()
       : Promise.resolve({ trabajadores: 0, unidades: 0 }),
   ]);
   return (
     <AppShell
-      user={{ name: user.name, role: user.role }}
+      user={{ name: user.name, role: user.role, moduleAccess: user.moduleAccess }}
       lowStockCount={low?.total ?? 0}
       pendingInvoices={pending?.total ?? 0}
       pendingDetractions={detracciones?.total ?? 0}

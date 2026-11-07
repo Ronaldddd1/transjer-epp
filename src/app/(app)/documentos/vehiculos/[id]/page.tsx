@@ -53,8 +53,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
   const vehiculo = await getVehicle(id);
   if (!vehiculo) notFound();
 
-  const canManage = can(user.role, "documents.manage");
-  const canMaintain = can(user.role, "maintenance.view");
+  const canManage = can(user, "documents.manage");
+  const canMaintain = can(user, "maintenance.view");
   const [documentos, conductores, mantenimientos, historial] = await Promise.all([
     listDocumentsFor({ vehicleId: id }),
     canManage ? employeeOptions() : Promise.resolve([]),
@@ -289,8 +289,8 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
               <Link href="/mantenimiento" className="text-sm text-steel-500 hover:text-ink hover:underline">
                 Ver toda la flota
               </Link>
-              {can(user.role, "maintenance.manage") && <OdometerModal unidad={unidadRef} />}
-              {can(user.role, "maintenance.manage") && <MaintenanceModal unidad={unidadRef} />}
+              {can(user, "maintenance.manage") && <OdometerModal unidad={unidadRef} />}
+              {can(user, "maintenance.manage") && <MaintenanceModal unidad={unidadRef} />}
             </div>
           }
         >
@@ -356,7 +356,7 @@ export default async function VehicleDetailPage({ params }: { params: Promise<{ 
                         {h.cost && ` · ${formatMoney(h.cost, h.currency)}`}
                       </span>
                     </span>
-                    {can(user.role, "maintenance.manage") && (
+                    {can(user, "maintenance.manage") && (
                       <DeleteMaintenanceButton
                         id={h.id}
                         etiqueta={`${MAINTENANCE_KIND_LABEL[h.kind as MaintenanceKind] ?? h.kind} del ${formatDate(h.servicedAt)}`}

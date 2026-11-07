@@ -8,7 +8,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { ExportTable } from "@/components/ui/export-table";
 import { TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
-import { ROLE_LABELS } from "@/lib/permissions";
+import { MODULOS, ROLE_LABELS, type ModuleAccess } from "@/lib/permissions";
 import { formatDate } from "@/lib/utils";
 import { listUsers } from "@/server/queries";
 
@@ -21,12 +21,12 @@ export default async function UsersPage() {
     <>
       <PageHeader
         title="Usuarios"
-        description="Personas con acceso al sistema. Administrador gestiona todo; Usuario consulta y registra movimientos y entregas."
+        description="Personas con acceso al sistema. El administrador entra a todo; a los demás se les marca módulo por módulo si no entran, si solo miran o si también editan."
         actions={<><ExportTable tabla="usuarios" /><UserFormModal /></>}
       />
       <TableShell>
         <thead>
-          <tr><Th>Nombre</Th><Th>Usuario</Th><Th>Correo</Th><Th>Rol</Th><Th>Estado</Th><Th>Creado</Th><Th className="text-right">Acciones</Th></tr>
+          <tr><Th>Nombre</Th><Th>Usuario</Th><Th>Correo</Th><Th>Accesos</Th><Th>Estado</Th><Th>Creado</Th><Th className="text-right">Acciones</Th></tr>
         </thead>
         <tbody>
           {rows.map((u) => {
@@ -36,7 +36,20 @@ export default async function UsersPage() {
                 <Td className="font-semibold">{u.name}{self && <span className="ml-2 text-xs font-normal text-steel-500">(tú)</span>}</Td>
                 <Td className="tabular">{u.username}</Td>
                 <Td className="text-steel-600">{u.email}</Td>
-                <Td><Badge tone={u.role === "ADMIN" ? "dark" : "neutral"}>{ROLE_LABELS[u.role]}</Badge></Td>
+                <Td>
+                  {u.role === "ADMIN" ? (
+                    <Badge tone="dark">Administrador</Badge>
+                  ) : u.moduleAccess ? (
+                    <span className="text-sm text-steel-600" title={resumenAccesos(u.moduleAccess)}>
+                      {MODULOS.filter((m) => (u.moduleAccess?.[m.key] ?? "none") !== "none").length} módulo(s)
+                      <span className="block max-w-[16rem] truncate text-xs text-steel-500">{resumenAccesos(u.moduleAccess)}</span>
+                    </span>
+                  ) : (
+                    <span title="Creado con rol: al editarlo pasa a accesos por módulo">
+                      <Badge tone="neutral">{ROLE_LABELS[u.role]}</Badge>
+                    </span>
+                  )}
+                </Td>
                 <Td>{u.active ? <Badge tone="green">Activo</Badge> : <Badge tone="red">Inactivo</Badge>}</Td>
                 <Td className="whitespace-nowrap text-steel-500">{formatDate(u.createdAt)}</Td>
                 <Td>
@@ -72,4 +85,10 @@ export default async function UsersPage() {
       </TableShell>
     </>
   );
+}
+
+/** "Inventario (editar), Asistencia (ver)…" para la columna de accesos. */
+function resumenAccesos(accesos: ModuleAccess) {
+  return MODULOS.filter((m) => (accesos[m.key] ?? "none") !== "none")
+    .map((m) => `${m.label} (${accesos[m.key] === "edit" ? "editar" : "ver"})`).join(", ");
 }
