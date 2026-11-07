@@ -10,7 +10,7 @@ import { requireActionUser } from "@/lib/auth";
 import { computePayDueDate, detractionFor, DETRACTION_STATUS_LABEL, DETRACTION_THRESHOLD, formatDate, formatMoney, invoiceNumber, limaDayStart, saldoAPagar, todayLima } from "@/lib/utils";
 import { advanceSchema, creditNoteSchema, detractionSchema, guideReceivedSchema, invoiceSchema, observeInvoiceSchema, payInvoiceSchema } from "@/lib/validations";
 import {
-  assertNoDuplicate, customerWarning, deleteAttachment, detractionFields, findDuplicate,
+  assertNoDuplicate, customerWarning, deleteAttachment, destinoCanonico, detractionFields, findDuplicate,
   findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
 } from "@/server/invoice-service";
 import { guardarVoucher, leerVoucher } from "@/server/payment-proof";
@@ -136,6 +136,7 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Act
       const [row] = await tx.update(supplierInvoices)
         .set({
           ...data,
+          destinationCity: await destinoCanonico(tx, data.destinationCity),
           ...(recalcular ? detractionFields(data.total, data.currency, data.serviceType) : {}),
           ...(receivedDate ? { receivedAt: limaDayStart(receivedDate) } : {}),
           payDueDate: computePayDueDate({

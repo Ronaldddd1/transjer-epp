@@ -295,6 +295,8 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
   const yaPagado = pagadoDelMes(rows);
   const totalArrastrado = arrastrado(rows);
   const totalSinImporte = rows.reduce((s, o) => s + o.monthMissing, 0);
+  const deudaTotal = pendiente(rows);
+  const cuotasSinMonto = rows.reduce((s, o) => s + o.pendingMissing, 0);
 
   return (
     <div className="grid gap-6">
@@ -316,6 +318,16 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
             ? `Incluye ${totalArrastrado.join(" + ")} que viene de meses anteriores y sigue sin pagarse.`
             : "Nada arrastrado de meses anteriores."}
           {totalSinImporte > 0 && ` ${totalSinImporte} cuota(s) de monto variable todavía no suman: falta su recibo.`}
+        </p>
+        {/* Más allá del mes: todo lo que queda por pagar, de préstamos y de servicios. */}
+        <div className="mt-2 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 border-t border-ink-700 pt-1.5">
+          <span className="text-sm text-steel-300">Deuda pendiente total, de todo Finanzas</span>
+          <span className="font-display text-lg font-semibold text-white">{juntar(deudaTotal)}</span>
+        </div>
+        <p className="mt-0.5 text-xs text-steel-400">
+          {tipos.map(({ type, filas }) => `${OBLIGATION_TYPE_PLURAL[type]} ${juntar(pendiente(filas))}`).join(" · ")}.
+          {" "}Suma todas las cuotas sin pagar, hasta donde llega el cronograma de cada una.
+          {cuotasSinMonto > 0 && ` ${cuotasSinMonto} cuota(s) sin importe todavía no suman.`}
         </p>
       </div>
 
@@ -348,16 +360,17 @@ export function ObligationsByType({ rows, canManage }: { rows: ObligationRow[]; 
                 <strong className="font-display text-base text-ink">{juntar(totalDelMesCompleto(filas))}</strong>
                 <span className="text-steel-400"> · falta pagar {juntar(delMes(filas))}</span>
                 {vencidas > 0 && <span className="ml-2 font-semibold text-red-700">{vencidas} cuota(s) vencida(s)</span>}
-                {/* De un préstamo no solo importa el mes: también cuánto se debe en total.
-                    Solo en préstamos; en un servicio sin fecha de fin, "todo lo pendiente"
-                    depende de hasta dónde se generó el cronograma y no dice nada. */}
-                {type === "PRESTAMO" && (
-                  <span className="mt-0.5 block text-right">
-                    deuda pendiente total{" "}
-                    <strong className="font-display text-base text-red-700">{juntar(pendiente(filas))}</strong>
-                    <span className="text-steel-400"> · de capital {juntar(capitalPendiente(filas))}</span>
-                  </span>
-                )}
+                {/* No solo importa el mes: también cuánto se debe en total, sumando todas
+                    las cuotas sin pagar. En un servicio sin fecha de fin llega hasta donde
+                    se generó su cronograma; el capital solo tiene sentido en los préstamos. */}
+                <span className="mt-0.5 block text-right">
+                  deuda pendiente total{" "}
+                  <strong className="font-display text-base text-red-700">{juntar(pendiente(filas))}</strong>
+                  {type === "PRESTAMO" && <span className="text-steel-400"> · de capital {juntar(capitalPendiente(filas))}</span>}
+                  {type !== "PRESTAMO" && filas.some((o) => o.pendingMissing > 0) && (
+                    <span className="text-steel-400"> · sin contar {filas.reduce((s, o) => s + o.pendingMissing, 0)} cuota(s) sin importe</span>
+                  )}
+                </span>
               </span>
             }
           >

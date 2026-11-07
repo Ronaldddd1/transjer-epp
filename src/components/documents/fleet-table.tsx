@@ -28,9 +28,9 @@ const TONO: Record<ReturnType<typeof estadoFlota>, string> = {
 function EstadoFlotaBadge({ estado }: { estado: ReturnType<typeof estadoFlota> }) {
   if (estado === "BAJA") return <Badge tone="neutral">De baja</Badge>;
   if (estado === "VENCIDO") return <Badge tone="red">Vencido</Badge>;
-  if (estado === "FALTA") return <Badge tone="red">Falta un papel</Badge>;
-  if (estado === "POR_VENCER") return <Badge tone="yellow">Por vencer</Badge>;
-  return <Badge tone="green">Puede salir</Badge>;
+  if (estado === "FALTA") return <Badge tone="red">Faltante</Badge>;
+  if (estado === "POR_VENCER") return <Badge tone="yellow">Vence en 30 días</Badge>;
+  return <Badge tone="green">Completo</Badge>;
 }
 
 /** Lo que necesita una celda para sus botones de subir y ver. */

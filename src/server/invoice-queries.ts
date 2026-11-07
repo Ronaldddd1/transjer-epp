@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
@@ -98,7 +98,7 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
     f.supplierId ? eq(supplierInvoices.supplierId, f.supplierId) : undefined,
     // El destino se escribe a mano en cada factura, así que se compara sin distinguir
     // mayúsculas ni acentos de más: "JAEN" y "Jaén" son el mismo viaje.
-    f.destination ? sql`upper(${supplierInvoices.destinationCity}) = upper(${f.destination})` : undefined,
+    f.destination ? sql`${claveDestino(supplierInvoices.destinationCity)} = ${claveDestino(f.destination)}` : undefined,
     f.status ? eq(supplierInvoices.status, f.status) : undefined,
     f.docType ? eq(supplierInvoices.docType, f.docType) : undefined,
     f.currency ? eq(supplierInvoices.currency, f.currency) : undefined,
@@ -346,7 +346,7 @@ function facturasDelProveedor(f: SupplierFilters, columna = elProveedor) {
   const condiciones = [sql`i.supplier_id = ${columna}`, sql`i.status <> 'ANULADA'`];
   if (f.from) condiciones.push(sql`i.issue_date >= ${f.from}::date`);
   if (f.to) condiciones.push(sql`i.issue_date <= ${f.to}::date`);
-  if (f.destino) condiciones.push(sql`i.destination_city = ${f.destino}`);
+  if (f.destino) condiciones.push(sql`${claveDestino(sql`i.destination_city`)} = ${claveDestino(f.destino)}`);
   return sql.join(condiciones, sql` and `);
 }
 
@@ -401,7 +401,7 @@ export async function supplierTotals(f: SupplierFilters = {}) {
   const condiciones: SQL[] = [sql`${supplierInvoices.status} <> 'ANULADA'`];
   if (f.from) condiciones.push(sql`${supplierInvoices.issueDate} >= ${f.from}::date`);
   if (f.to) condiciones.push(sql`${supplierInvoices.issueDate} <= ${f.to}::date`);
-  if (f.destino) condiciones.push(sql`${supplierInvoices.destinationCity} = ${f.destino}`);
+  if (f.destino) condiciones.push(sql`${claveDestino(supplierInvoices.destinationCity)} = ${claveDestino(f.destino)}`);
   if (f.active !== undefined) condiciones.push(sql`${suppliers.active} = ${f.active}`);
   if (f.q) {
     condiciones.push(sql`(${ilike(suppliers.businessName, like(f.q))} or ${ilike(suppliers.ruc, like(f.q))})`);
@@ -436,13 +436,50 @@ export async function supplierTotals(f: SupplierFilters = {}) {
   };
 }
 
-/** Los destinos ya usados, para el filtro. */
+/**
+ * Cómo se compara un destino: sin mayúsculas, sin tildes y sin espacios de más.
+ * "BARRANCA", "barranca" y " Barranca " son el mismo destino, y "Jaén" y "JAEN" también.
+ */
+export function claveDestino(valor: SQL | AnyColumn | string) {
+  return sql`upper(translate(regexp_replace(btrim(${valor}), '\\s+', ' ', 'g'), 'áéíóúÁÉÍÓÚüÜ', 'aeiouAEIOUuU'))`;
+}
+
+/**
+ * Los destinos ya usados, para el filtro: uno por destino aunque esté escrito de varias
+ * maneras ("BARRANCA", "barranca"), con la escritura más usada.
+ */
 export async function getDestinationOptions() {
-  const rows = await db.selectDistinct({ name: supplierInvoices.destinationCity })
-    .from(supplierInvoices)
-    .where(sql`${supplierInvoices.destinationCity} is not null and ${supplierInvoices.destinationCity} <> ''`)
-    .orderBy(asc(supplierInvoices.destinationCity));
-  return rows.map((r) => r.name!).filter(Boolean);
+  const rows = await db.execute<{ name: string }>(sql`
+    select distinct on (clave) name from (
+      select ${claveDestino(supplierInvoices.destinationCity)} as clave,
+             ${supplierInvoices.destinationCity} as name, count(*) as n
+      from ${supplierInvoices}
+      where btrim(coalesce(${supplierInvoices.destinationCity}, '')) <> ''
+      group by 1, 2
+    ) t
+    order by clave, n desc, name
+  `);
+  return [...rows].map((r) => r.name).sort((a, b) => a.localeCompare(b, "es"));
+}
+
+/**
+ * Los destinos agrupados por cómo se leen, con cada escritura y cuántas facturas la usan.
+ * Es lo que muestra la pantalla para limpiar destinos.
+ */
+export async function destinationVariants() {
+  const rows = await db.execute<{ clave: string; name: string; facturas: number }>(sql`
+    select ${claveDestino(supplierInvoices.destinationCity)} as clave,
+           ${supplierInvoices.destinationCity} as name, count(*)::int as facturas
+    from ${supplierInvoices}
+    where btrim(coalesce(${supplierInvoices.destinationCity}, '')) <> ''
+    group by 1, 2
+    order by 1, 3 desc, 2
+  `);
+  const grupos = new Map<string, { name: string; facturas: number }[]>();
+  for (const r of rows) grupos.set(r.clave, [...(grupos.get(r.clave) ?? []), { name: r.name, facturas: Number(r.facturas) }]);
+  return [...grupos.entries()]
+    .map(([clave, variantes]) => ({ clave, variantes, facturas: variantes.reduce((n, v) => n + v.facturas, 0) }))
+    .sort((a, b) => a.variantes[0].name.localeCompare(b.variantes[0].name, "es"));
 }
 
 export async function getSupplierOptions() {
@@ -802,4 +839,50 @@ export async function countSuppliersWithoutRuc() {
   const [row] = await db.select({ total: count() }).from(suppliers)
     .where(and(eq(suppliers.active, true), sql`${suppliers.ruc} is null`));
   return row?.total ?? 0;
+}
+
+/**
+ * El nombre de un proveedor reducido a lo que importa para compararlo: sin tildes, sin
+ * mayúsculas, sin puntos ni espacios y sin la forma societaria del final. Así
+ * "Transportes Pérez S.A.C." y "TRANSPORTES PEREZ SAC" dan lo mismo.
+ */
+const nombreComparable = sql`replace(
+  regexp_replace(
+    regexp_replace(translate(lower(${suppliers.businessName}), 'áéíóúüñ', 'aeiouun'), '[^a-z0-9 ]', '', 'g'),
+    '\\s+(sac|saa|sa|eirl|srl|scrl|sociedad anonima cerrada)\\s*$', ''),
+  ' ', '')`;
+
+/**
+ * Proveedores que parecen el mismo escrito de dos maneras, para sugerir unirlos.
+ *
+ * Dentro de cada grupo, el primero es el que conviene conservar: el que tiene RUC y,
+ * entre esos, el que tiene más facturas. Si en un grupo hay dos RUC distintos, no es un
+ * duplicado sino dos empresas de nombre parecido, y no se sugiere.
+ */
+export async function posiblesDuplicados() {
+  const filas = await db.select({
+    clave: sql<string>`${nombreComparable}`,
+    id: suppliers.id,
+    name: suppliers.businessName,
+    ruc: suppliers.ruc,
+    // Se escribe "suppliers"."id" a mano: interpolado, drizzle lo deja sin tabla y dentro
+    // de la subconsulta se leía como el id de la factura, así que contaba siempre cero.
+    facturas: sql<number>`(select count(*)::int from ${supplierInvoices} i where i.supplier_id = "suppliers"."id")`,
+  }).from(suppliers)
+    .where(sql`${nombreComparable} in (
+      select ${nombreComparable} from ${suppliers} group by 1 having count(*) > 1
+    )`);
+
+  const grupos = new Map<string, typeof filas>();
+  for (const f of filas) grupos.set(f.clave, [...(grupos.get(f.clave) ?? []), f]);
+  return [...grupos.values()]
+    .filter((g) => new Set(g.map((s) => s.ruc).filter(Boolean)).size <= 1)
+    .map((g) => g.sort((a, b) => Number(!!b.ruc) - Number(!!a.ruc) || b.facturas - a.facturas))
+    .sort((a, b) => a[0].name.localeCompare(b[0].name, "es"));
+}
+
+/** Todos los proveedores, activos o no, para elegir con cuál unir uno. */
+export async function supplierMergeOptions() {
+  return db.select({ id: suppliers.id, name: suppliers.businessName, ruc: suppliers.ruc })
+    .from(suppliers).orderBy(asc(suppliers.businessName));
 }

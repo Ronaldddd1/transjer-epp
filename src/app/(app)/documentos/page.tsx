@@ -107,10 +107,10 @@ export default async function DocumentsPage({ searchParams }: { searchParams: Se
         className="mb-3"
         tabs={[
           { value: "", label: "Toda la flota", count: cuentas.total },
-          { value: "VENCIDO", label: "Con algo vencido", count: cuentas.vencido },
-          { value: "FALTA", label: "Falta un papel", count: cuentas.falta },
-          { value: "POR_VENCER", label: "Vencen en 30 días", count: cuentas.porVencer },
-          { value: "AL_DIA", label: "Pueden salir", count: cuentas.alDia },
+          { value: "VENCIDO", label: "Vencido", count: cuentas.vencido },
+          { value: "FALTA", label: "Faltante", count: cuentas.falta },
+          { value: "POR_VENCER", label: "Vence 30 días", count: cuentas.porVencer },
+          { value: "AL_DIA", label: "Completo", count: cuentas.alDia },
         ]}
       />
 

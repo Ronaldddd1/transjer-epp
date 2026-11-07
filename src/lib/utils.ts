@@ -714,10 +714,10 @@ export function estadoMantenimiento(entrada: {
 
 /** En qué situación está una unidad de la flota, en palabras. */
 export const FLEET_STATUS_LABEL: Record<string, string> = {
-  AL_DIA: "Puede salir",
-  POR_VENCER: "Algo vence pronto",
-  FALTA: "Le falta un papel",
-  VENCIDO: "Con algo vencido",
+  AL_DIA: "Completo",
+  POR_VENCER: "Vence en 30 días",
+  FALTA: "Faltante",
+  VENCIDO: "Vencido",
   BAJA: "Dada de baja",
 };
 

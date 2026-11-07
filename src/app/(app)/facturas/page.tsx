@@ -1,4 +1,4 @@
-import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, Eye } from "lucide-react";
+import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, MapPin, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AdvanceModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
@@ -93,6 +93,9 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             <ExportTable tabla="facturas" />
             {canManage && (
               <>
+                <ButtonLink href="/facturas/destinos" variant="ghost" title="Juntar destinos escritos de varias maneras">
+                  <MapPin className="h-4 w-4" /> Limpiar destinos
+                </ButtonLink>
                 <ButtonLink href="/facturas/correos" variant="ghost">
                   <Mail className="h-4 w-4" /> Correos
                   {emailsToReview > 0 && <span className="ml-1 rounded bg-brand px-1.5 text-xs font-bold text-ink">{emailsToReview}</span>}

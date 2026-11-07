@@ -107,8 +107,8 @@ with sync_playwright() as p:
     activa = page.locator("[role=tab][aria-selected=true]").inner_text()
     check("se entra por toda la flota", "Toda la flota" in activa, activa)
     pestanias = page.locator("[role=tab]").all_inner_texts()
-    check("'Toda la flota' es la primera pestaña y 'Con algo vencido' la segunda",
-          len(pestanias) >= 2 and "Toda la flota" in pestanias[0] and "vencido" in pestanias[1].lower(),
+    check("las pestañas son Toda la flota, Vencido, Faltante, Vence 30 días y Completo, en ese orden",
+          [re.sub(r"\s*\d+$", "", t.strip()) for t in pestanias[:5]] == ["Toda la flota", "Vencido", "Faltante", "Vence 30 días", "Completo"],
           pestanias)
     check("y avisa arriba cuántas unidades tienen algo vencido", "unidad(es)" in page.content())
 

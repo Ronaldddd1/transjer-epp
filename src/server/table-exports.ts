@@ -1028,7 +1028,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         }),
         summary: [
           { label: "Unidades", value: filas.length },
-          { label: "Pueden salir", value: filas.filter((v) => estadoFlota(v) === "AL_DIA").length },
+          { label: "Completas", value: filas.filter((v) => estadoFlota(v) === "AL_DIA").length },
           { label: "Con algo vencido", value: filas.filter((v) => estadoFlota(v) === "VENCIDO").length },
           { label: "Les falta un papel", value: filas.filter((v) => estadoFlota(v) === "FALTA").length },
         ],

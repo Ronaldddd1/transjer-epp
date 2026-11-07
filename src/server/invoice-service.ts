@@ -1,5 +1,5 @@
 import "server-only";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, type Tx } from "@/db";
 import {
   invoiceAttachments, supplierInvoices, suppliers,
@@ -153,6 +153,26 @@ export async function findOrCreateSupplier(
   return { supplier: created, created: true };
 }
 
+/**
+ * El destino escrito, con la forma que ya tiene en el sistema.
+ *
+ * El destino se escribe a mano en cada factura, y "BARRANCA", "barranca" y "Barranca "
+ * terminaban siendo tres destinos distintos en los filtros y en los totales. Si ya existe
+ * con otras mayúsculas o espacios, se guarda como está escrito en la mayoría de facturas;
+ * si es nuevo, se guarda limpio (sin espacios de más).
+ */
+export async function destinoCanonico(tx: Tx | typeof db, texto: string | null | undefined): Promise<string | null> {
+  const limpio = texto?.replace(/\s+/g, " ").trim();
+  if (!limpio) return null;
+  const filas = await tx.execute<{ d: string }>(sql`
+    select destination_city as d from supplier_invoices
+    where upper(translate(regexp_replace(btrim(destination_city), '\\s+', ' ', 'g'), 'áéíóúÁÉÍÓÚüÜ', 'aeiouAEIOUuU'))
+      = upper(translate(${limpio}, 'áéíóúÁÉÍÓÚüÜ', 'aeiouAEIOUuU'))
+    group by destination_city order by count(*) desc, destination_city limit 1
+  `);
+  return [...filas][0]?.d ?? limpio.slice(0, 120);
+}
+
 export async function insertInvoice(
   tx: Tx,
   input: InvoiceInput,
@@ -187,7 +207,7 @@ export async function insertInvoice(
     plate: input.plate ?? null,
     clientName: input.clientName ?? null,
     originCity: input.originCity ?? null,
-    destinationCity: input.destinationCity ?? null,
+    destinationCity: await destinoCanonico(tx, input.destinationCity),
     volumeM3: input.volumeM3 ?? null,
     weightTn: input.weightTn ?? null,
     advances: input.advances ?? null,

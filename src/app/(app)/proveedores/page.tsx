@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { toggleSupplier } from "@/actions/suppliers";
 import { SupplierFormModal } from "@/components/suppliers/supplier-form-modal";
+import { SupplierMergeModal } from "@/components/suppliers/supplier-merge-modal";
 import { Badge, DemoBadge } from "@/components/ui/badge";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -12,7 +13,9 @@ import { Pagination } from "@/components/ui/pagination";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { first, formatMoney, isYmd, pageParams, type SearchParams } from "@/lib/utils";
-import { getDestinationOptions, listSuppliers, supplierTotals } from "@/server/invoice-queries";
+import {
+  getDestinationOptions, listSuppliers, posiblesDuplicados, supplierMergeOptions, supplierTotals,
+} from "@/server/invoice-queries";
 
 export const metadata: Metadata = { title: "Proveedores" };
 
@@ -28,10 +31,12 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Se
     to: isYmd(first(sp.to)) ? first(sp.to) : undefined,
     destino: first(sp.destino) || undefined,
   };
-  const [{ rows, total }, totales, destinos] = await Promise.all([
+  const [{ rows, total }, totales, destinos, duplicados, opcionesUnir] = await Promise.all([
     listSuppliers(filtros, pageSize, offset),
     supplierTotals(filtros),
     getDestinationOptions(),
+    posiblesDuplicados(),
+    supplierMergeOptions(),
   ]);
 
   /** Dos monedas en una línea, y solo las que tienen algo. */
@@ -70,6 +75,43 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Se
           </p>
         </div>
       </dl>
+
+      {/* Lo que vino del Excel trae al mismo proveedor escrito de varias maneras. */}
+      {duplicados.length > 0 && (
+        <details className="mb-4 rounded-lg border border-amber-300 bg-amber-50" open={duplicados.length <= 5}>
+          <summary className="cursor-pointer px-4 py-3 text-sm font-semibold text-amber-900">
+            {duplicados.length} proveedor(es) parecen estar registrados dos veces
+            <span className="ml-1 font-normal text-amber-800">— mismo nombre escrito distinto. Únelos para que sus facturas y su deuda queden juntas.</span>
+          </summary>
+          <ul className="divide-y divide-amber-200 border-t border-amber-200">
+            {duplicados.map((grupo) => {
+              const [conservar, ...sobran] = grupo;
+              return (
+                <li key={conservar.id} className="px-4 py-2.5 text-sm">
+                  <p className="text-ink">
+                    Se queda <strong>{conservar.name}</strong>
+                    <span className="text-steel-500"> · {conservar.ruc ? `RUC ${conservar.ruc}` : "sin RUC"} · {conservar.facturas} factura(s)</span>
+                  </p>
+                  {sobran.map((s) => (
+                    <div key={s.id} className="mt-1 flex flex-wrap items-center justify-between gap-2 pl-4">
+                      <span className="text-steel-700">
+                        ↳ {s.name}
+                        <span className="text-steel-500"> · {s.ruc ? `RUC ${s.ruc}` : "sin RUC"} · {s.facturas} factura(s)</span>
+                      </span>
+                      <SupplierMergeModal
+                        origen={{ id: s.id, name: s.name, ruc: s.ruc, facturas: s.facturas }}
+                        opciones={opcionesUnir}
+                        destinoSugerido={conservar.id}
+                        variante="boton"
+                      />
+                    </div>
+                  ))}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
+      )}
 
       <FilterBar
         searchPlaceholder="Buscar razón social o RUC"
@@ -135,6 +177,10 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Se
               <Td>
                 <div className="flex items-center justify-end gap-1">
                   <SupplierFormModal supplier={s} />
+                  <SupplierMergeModal
+                    origen={{ id: s.id, name: s.businessName, ruc: s.ruc, facturas: s.invoiceCount }}
+                    opciones={opcionesUnir}
+                  />
                   <ConfirmButton
                     action={toggleSupplier.bind(null, s.id)}
                     title={s.active ? "Desactivar proveedor" : "Activar proveedor"}

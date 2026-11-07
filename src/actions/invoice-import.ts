@@ -8,6 +8,7 @@ import { BusinessError, toActionError, type ActionResult } from "@/lib/action-re
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { computePayDueDate, detractionFor, normalizeSupplierName } from "@/lib/utils";
+import { destinoCanonico } from "@/server/invoice-service";
 import {
   estadoDePago, estadoDeDetraccion, notaDeCreditoEn, readInvoiceSheet, type SheetInvoice,
 } from "@/server/invoice-sheet";
@@ -253,7 +254,7 @@ export async function importarFacturasDeExcel(formData: FormData): Promise<Actio
           plate: f.placa?.slice(0, 24) ?? null,
           clientName: f.cliente?.slice(0, 120) ?? null,
           originCity: f.origen?.slice(0, 80) ?? null,
-          destinationCity: f.destino?.slice(0, 120) ?? null,
+          destinationCity: await destinoCanonico(tx, f.destino),
           volumeM3: f.m3?.toFixed(2) ?? null,
           weightTn: f.tn?.toFixed(2) ?? null,
           advances: f.adelantos?.toFixed(2) ?? null,

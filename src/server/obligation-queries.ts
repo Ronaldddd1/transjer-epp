@@ -89,6 +89,8 @@ const obligationColumns = {
   pendingCount: sql<number>`(select count(*)::int from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending})`,
   paidCount: sql<number>`(select count(*)::int from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and i.status = 'PAGADA')`,
   pendingAmount: sql<string>`(select coalesce(sum(i.total), 0)::text from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending})`,
+  /** Cuotas por pagar que todavía no tienen importe (servicios de monto variable sin recibo). */
+  pendingMissing: sql<number>`(select count(*)::int from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending} and i.total is null)`,
   /** Cuotas vencidas sin pagar: lo primero que hay que ver. */
   overdueCount: sql<number>`(select count(*)::int from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending} and i.due_date < ${today})`,
   nextDueDate: sql<string | null>`(select min(i.due_date)::text from ${obligationInstallments} i where i.obligation_id = ${laObligacion} and ${pending})`,
