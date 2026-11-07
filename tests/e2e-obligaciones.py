@@ -378,13 +378,25 @@ def main():
         check("queda constancia en auditoría",
               int(psql("select count(*) from audit_logs where module = 'OBLIGACIONES' and action = 'ELIMINAR'")) > 0)
 
-        # --- Con pagos registrados no se borra: se anula ---
+        # --- Con pagos registrados: anular, o eliminar escribiendo ELIMINAR ---
         page.goto(f"{BASE}/obligaciones")
         page.click(f"a:has-text('{PRESTAMO}')")
         page.wait_for_timeout(1200)
-        check("un préstamo con cuotas pagadas no ofrece eliminar",
-              page.locator("button:has-text('Eliminar')").count() == 0)
-        check("en su lugar ofrece anular", page.locator("button:has-text('Anular')").count() > 0)
+        check("un préstamo con cuotas pagadas ofrece anular", page.locator("button:has-text('Anular')").count() > 0)
+        check("y también eliminar", page.locator("button:has-text('Eliminar')").count() > 0)
+        page.locator("button:has-text('Eliminar')").first.click()
+        page.wait_for_timeout(600)
+        dialogo = page.locator("[role=dialog]").inner_text()
+        check("el aviso dice cuántos pagos se van y por cuánto",
+              "pago(s) registrado(s)" in dialogo and "S/" in dialogo, dialogo[:300])
+        page.fill("#confirmacion", "borrar")
+        page.locator("[role=dialog]").get_by_role("button", name="Eliminar con sus pagos").click()
+        page.wait_for_timeout(1800)
+        check("con otra palabra no elimina nada",
+              psql(f"select count(*) from obligations where name = '{PRESTAMO}'") == "1")
+        check("y explica qué escribir", "escribe ELIMINAR" in page.locator("body").inner_text())
+        page.locator("[role=dialog]").get_by_role("button", name="Cancelar").click()
+        page.wait_for_timeout(600)
 
         # --- El listado va partido por tipo ---
         page.goto(f"{BASE}/obligaciones"); page.wait_for_timeout(1500)
@@ -514,6 +526,39 @@ def main():
               page.locator("h2").first.inner_text() != mes_actual and "mes=" in page.url, page.url)
         page.click("a[aria-label='Mes anterior']"); page.wait_for_timeout(1200)
         check("y volver al anterior", page.locator("h2").first.inner_text() == mes_actual)
+
+        # --- Eliminar de verdad un préstamo con pagos ---
+        # Al final, porque lo de arriba usa este préstamo.
+        prestamo_id = psql(f"select id from obligations where name = '{PRESTAMO}'")
+        # Más arriba se reabrió su cuota pagada: se le deja un pago con su comprobante, que
+        # es justo el caso que se quiere probar.
+        ejecutar(f"update obligation_installments set status = 'PAGADA', paid_amount = total, "
+                 f"paid_at = ((now() at time zone 'America/Lima')::date) "
+                 f"where id = (select id from obligation_installments where obligation_id = '{prestamo_id}' order by number limit 1)")
+        ejecutar(f"insert into invoice_attachments (installment_id, kind, filename, content_type, size_bytes, storage_driver, content) "
+                 f"select id, 'VOUCHER', 'voucher.png', 'image/png', 4, 'db', '\\x89504e47'::bytea "
+                 f"from obligation_installments where obligation_id = '{prestamo_id}' and status = 'PAGADA' limit 1")
+        cuotas_antes = psql(f"select count(*) from obligation_installments where obligation_id = '{prestamo_id}'")
+        pagadas = psql(f"select count(*) from obligation_installments where obligation_id = '{prestamo_id}' and status = 'PAGADA'")
+        page.goto(f"{BASE}/obligaciones/{prestamo_id}"); page.wait_for_timeout(1200)
+        page.locator("button:has-text('Eliminar')").first.click(); page.wait_for_timeout(600)
+        page.fill("#confirmacion", "eliminar")   # en minúsculas también vale
+        page.locator("[role=dialog]").get_by_role("button", name="Eliminar con sus pagos").click()
+        page.wait_for_timeout(2500)
+        check("escribiendo ELIMINAR, el préstamo con pagos se elimina",
+              psql(f"select count(*) from obligations where id = '{prestamo_id}'") == "0")
+        check("con todas sus cuotas",
+              psql(f"select count(*) from obligation_installments where obligation_id = '{prestamo_id}'") == "0",
+              cuotas_antes)
+        check("y su comprobante de pago",
+              psql("select count(*) from invoice_attachments where filename = 'voucher.png'") == "0")
+        check("y sin dejar comprobantes sueltos",
+              psql("select count(*) from invoice_attachments a left join obligation_installments i "
+                   "on i.id = a.installment_id where a.installment_id is not null and i.id is null") == "0")
+        auditoria = psql(f"select description from audit_logs where module = 'OBLIGACIONES' and action = 'ELIMINAR' "
+                         f"and record_id = '{prestamo_id}'")
+        check("la auditoría dice que se fueron pagos y cuántos",
+              f"{pagadas} pago(s)" in auditoria, auditoria)
 
         # --- Permisos: finanzas ve el módulo, almacén no ---
         check("sin errores de JavaScript en toda la sesión",

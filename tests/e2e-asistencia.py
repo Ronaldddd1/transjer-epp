@@ -41,7 +41,7 @@ def limpiar():
 limpiar()
 for i, nombre in enumerate(["Ana", "Beto", "Carla"]):
     ejecutar("insert into employees (dni, first_name, last_name, position, area, hire_date) values "
-             f"('{SELLO}{i}0', '{nombre}', 'Prueba {SELLO}', 'Operario de almacén', '{AREA}', current_date)")
+             f"('{SELLO}{i}0', '{nombre}', 'Prueba {SELLO}', 'Operario de almacén', '{AREA}', ((now() at time zone 'America/Lima')::date))")
 
 hoy = psql("select (now() at time zone 'America/Lima')::date::text")
 ayer = psql("select ((now() at time zone 'America/Lima')::date - 1)::text")
@@ -112,23 +112,23 @@ with sync_playwright() as p:
     page.wait_for_timeout(2600)
 
     guardados = psql("select count(*) from attendance a join employees e on e.id=a.employee_id "
-                     f"where e.area='{AREA}' and a.day = current_date")
+                     f"where e.area='{AREA}' and a.day = ((now() at time zone 'America/Lima')::date)")
     check("al guardar se escriben los tres de una vez", guardados == "3", guardados)
     check("el presente quedó como presente",
           psql("select a.status from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Ana' and a.day=current_date") == "PRESENTE")
+               f"where e.area='{AREA}' and e.first_name='Ana' and a.day=((now() at time zone 'America/Lima')::date)") == "PRESENTE")
     check("el motivo se guardó en el justificado",
           psql("select a.reason from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Carla' and a.day=current_date") == "Descanso médico")
+               f"where e.area='{AREA}' and e.first_name='Carla' and a.day=((now() at time zone 'America/Lima')::date)") == "Descanso médico")
     check("y NO se guardó motivo en los otros",
           psql("select coalesce(a.reason,'-') from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "-")
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=((now() at time zone 'America/Lima')::date)") == "-")
     check("la actividad se guardó en el que vino",
           psql("select a.activity from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Ana' and a.day=current_date") == "Descarga de mercadería")
+               f"where e.area='{AREA}' and e.first_name='Ana' and a.day=((now() at time zone 'America/Lima')::date)") == "Descarga de mercadería")
     check("y la falta quedó sin actividad",
           psql("select coalesce(a.activity,'-') from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "-")
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=((now() at time zone 'America/Lima')::date)") == "-")
 
     # --- Corregir: volver a marcar pisa, no duplica ---
     page.reload(); page.wait_for_timeout(1700)
@@ -140,10 +140,10 @@ with sync_playwright() as p:
     page.wait_for_timeout(2600)
     check("corregir una marca no deja dos filas del mismo día",
           psql("select count(*) from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "1")
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=((now() at time zone 'America/Lima')::date)") == "1")
     check("y queda la corrección",
           psql("select a.status from attendance a join employees e on e.id=a.employee_id "
-               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=current_date") == "PRESENTE")
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day=((now() at time zone 'America/Lima')::date)") == "PRESENTE")
 
     # --- Un día anterior ---
     page.goto(f"{BASE}/asistencia?dia={ayer}&area={AREA.replace(' ', '+')}")
@@ -152,6 +152,23 @@ with sync_playwright() as p:
     check("se puede ir a un día anterior y está sin registrar",
           "3 sin marcar" in cuerpo, cuerpo[:300])
     check("y avisa de que no se está mirando hoy", "Ir a hoy" in cuerpo)
+
+    # --- El domingo también se pasa lista, y sale en la semana ---
+    domingo = psql("select (date_trunc('week', (now() at time zone 'America/Lima')::date)::date - 1)::text")
+    page.goto(f"{BASE}/asistencia?dia={domingo}&area={AREA.replace(' ', '+')}")
+    page.wait_for_timeout(1700)
+    fila_ana = page.get_by_role("row").filter(has_text="Ana").filter(has=page.get_by_role("button", name="Vino"))
+    fila_ana.get_by_role("button", name="Vino").click()
+    page.wait_for_timeout(300)
+    fila_ana.locator("input[placeholder*='Descarga']").fill("Guardia de domingo")
+    page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
+    page.wait_for_timeout(2600)
+    check("se puede pasar lista un domingo",
+          psql("select a.status from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and e.first_name='Ana' and a.day='{domingo}'") == "PRESENTE")
+    page.reload(); page.wait_for_timeout(1700)
+    celda = page.locator("section[aria-labelledby=titulo-semana] tbody tr").filter(has_text="Ana").locator("td").nth(7)
+    check("y aparece en la columna Domingo de su semana", "Vino" in celda.inner_text(), celda.inner_text())
 
     # --- No se puede pasar lista de un día futuro ---
     manana = psql("select ((now() at time zone 'America/Lima')::date + 1)::text")
@@ -171,20 +188,35 @@ with sync_playwright() as p:
     page.goto(f"{BASE}/asistencia?area={AREA.replace(' ', '+')}")
     page.wait_for_timeout(1700)
     cuerpo = page.locator("body").inner_text()
-    check("el resumen del mes está en la misma pantalla", "Resumen de" in cuerpo)
-    check("y dice cuántos días se pasó lista", "día(s) de este mes" in cuerpo, cuerpo[-400:])
+    check("la pantalla va en dos bloques: el día y la semana",
+          page.locator("#titulo-dia").count() == 1 and page.locator("#titulo-semana").count() == 1)
+    check("el resumen del mes está en la misma pantalla, plegado", "Resumen de" in cuerpo)
+    page.locator("details summary", has_text="Resumen de").click(); page.wait_for_timeout(300)
+    cuerpo = page.locator("body").inner_text()
+    check("y al abrirlo dice cuántos días se pasó lista", "día(s) de este mes" in cuerpo, cuerpo[-400:])
 
     # --- La semana, de lunes a sábado ---
     semana = page.locator("section[aria-labelledby=titulo-semana]")
     cabecera = semana.locator("thead").inner_text()
     check("la semana trae las seis columnas de lunes a sábado",
-          all(d in cabecera for d in ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"))
-          and "Domingo" not in cabecera, cabecera)
-    # Un domingo no entra en la semana de lunes a sábado: ese día no hay qué buscar.
-    es_domingo = psql("select extract(dow from (now() at time zone 'America/Lima')::date)::int") == "0"
-    check("y en ella se ve lo marcado hoy", es_domingo or "Vino" in semana.locator("tbody").inner_text()
+          all(d in cabecera for d in ("Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo")),
+          cabecera)
+    check("y en ella se ve lo marcado hoy", "Vino" in semana.locator("tbody").inner_text()
           or "Faltó" in semana.locator("tbody").inner_text())
-    semana.get_by_role("link", name="← Semana anterior").click()
+
+    # La semana se descarga en Excel, con la tabla y el detalle por día.
+    with page.expect_download(timeout=60000) as dl:
+        page.evaluate("""() => { const a = document.createElement('a');
+            a.href = '/api/export/tabla?tabla=asistencia-semana&format=xlsx'; a.download = '';
+            document.body.appendChild(a); a.click(); }""")
+    from openpyxl import load_workbook
+    import io
+    libro = load_workbook(io.BytesIO(open(dl.value.path(), "rb").read()))
+    check("la semana se descarga en Excel con sus dos hojas", len(libro.sheetnames) == 2, libro.sheetnames)
+    encabezados = " ".join(str(c.value) for fila in libro.worksheets[0].iter_rows(max_row=8) for c in fila if c.value)
+    check("y trae de lunes a domingo", "Lunes" in encabezados and "Domingo" in encabezados, encabezados[:300])
+
+    semana.get_by_role("link", name="← Anterior").click()
     page.wait_for_timeout(1500)
     check("se puede ir a la semana anterior", "semana=" in page.url
           and page.get_by_role("link", name="Esta semana").count() == 1, page.url)

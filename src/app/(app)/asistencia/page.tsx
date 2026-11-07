@@ -9,7 +9,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { addDays, first, formatDate, todayLima, type SearchParams } from "@/lib/utils";
+import { addDays, first, formatDate, todayLima, weekdayOf, type SearchParams } from "@/lib/utils";
 import { AttendanceWeek } from "@/components/attendance/attendance-week";
 import {
   areaOptions, attendanceMonth, attendanceWeek, listAttendanceDay, lunesDe, readAttendanceFilters,
@@ -17,11 +17,15 @@ import {
 
 export const metadata: Metadata = { title: "Asistencia" };
 
+/** weekdayOf: 0 es domingo. */
+const DIA_SEMANA = ["Domingo", "Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado"];
+
 /**
  * Pasar lista.
  *
- * Arriba, el día: quién vino y quién no. Abajo, el acumulado del mes, que es lo que se
- * mira a fin de mes y lo que nadie quiere volver a contar a mano.
+ * Dos bloques: arriba el registro del día, donde se marca quién vino y qué hizo; abajo la
+ * semana de lunes a domingo, para ver y descargar la semana completa. El acumulado del mes
+ * queda plegado al final: se mira a fin de mes, no todos los días.
  *
  * Solo se registra si se presentó o no. Ni horas, ni tardanzas: eso necesitaría un reloj
  * en la puerta, y lo que hay es una persona con una lista.
@@ -65,10 +69,7 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
       <PageHeader
         title="Asistencia"
         description="Quién vino a trabajar cada día. Solo eso: ni horas ni tardanzas."
-        actions={<ExportTable tabla="asistencia" label="Descargar" extra={{ dia, mes }} />}
       />
-
-      <DateJump dia={dia} hoy={todayLima()} />
 
       <FilterBar
         searchPlaceholder="Buscar por nombre o DNI"
@@ -78,37 +79,50 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
         }]}
       />
 
-      {filas.length === 0 ? (
-        <p className="rounded-lg border border-steel-200 bg-white px-4 py-6 text-center text-sm text-steel-500">
-          No hay trabajadores activos con esos filtros.
-        </p>
-      ) : (
-        <AttendanceSheet dia={dia} filas={filas} puedeMarcar={puedeMarcar} />
-      )}
+      {/* ---------- Bloque 1: el registro del día ---------- */}
+      <section aria-labelledby="titulo-dia" className="min-w-0 rounded-lg border border-steel-200 bg-white">
+        <header className="flex flex-wrap items-start justify-between gap-3 border-b border-steel-200 px-4 py-3">
+          <div>
+            <h2 id="titulo-dia" className="font-display text-lg font-semibold text-ink">Registro diario</h2>
+            <p className="text-sm text-steel-500">
+              {esHoy ? "Hoy" : DIA_SEMANA[weekdayOf(dia)]}, {formatDate(dia)}.
+              {!esHoy && <> <Link href="/asistencia" className="underline">Ir a hoy</Link></>}
+            </p>
+          </div>
+          <ExportTable tabla="asistencia" label="Descargar día" extra={{ dia, mes }} />
+        </header>
+        <div className="p-4">
+          <DateJump dia={dia} hoy={todayLima()} />
+          {filas.length === 0 ? (
+            <p className="rounded-lg border border-steel-200 bg-white px-4 py-6 text-center text-sm text-steel-500">
+              No hay trabajadores activos con esos filtros.
+            </p>
+          ) : (
+            <AttendanceSheet dia={dia} filas={filas} puedeMarcar={puedeMarcar} />
+          )}
+        </div>
+      </section>
 
-      {!esHoy && (
-        <p className="mt-3 text-sm text-steel-500">
-          Estás viendo el {formatDate(dia)}.{" "}
-          <Link href="/asistencia" className="underline">Ir a hoy</Link>
-        </p>
-      )}
+      {/* ---------- Bloque 2: la semana, de lunes a domingo ---------- */}
+      <div className="mt-6">
+        <AttendanceWeek
+          semana={semana}
+          hoy={todayLima()}
+          anterior={aSemana(addDays(lunes, -7))}
+          siguiente={aSemana(addDays(lunes, 7))}
+          actual={lunes === lunesDeHoy ? null : aSemana(lunesDeHoy)}
+        />
+      </div>
 
-      {/* ---------- La semana, de lunes a sábado ---------- */}
-      <AttendanceWeek
-        semana={semana}
-        hoy={todayLima()}
-        anterior={aSemana(addDays(lunes, -7))}
-        siguiente={aSemana(addDays(lunes, 7))}
-        actual={lunes === lunesDeHoy ? null : aSemana(lunesDeHoy)}
-      />
-
-      {/* ---------- El acumulado del mes ---------- */}
-      <section className="mt-8">
+      {/* ---------- El acumulado del mes, plegado ---------- */}
+      <details className="group mt-6 rounded-lg border border-steel-200 bg-white" open={!!first(sp.mes)}>
+        <summary className="cursor-pointer list-none px-4 py-3 font-display text-base font-semibold text-ink">
+          Resumen de {formatDate(resumen.desde).slice(3)}
+          <span className="ml-2 text-sm font-normal text-steel-500 group-open:hidden">ver totales del mes</span>
+        </summary>
+      <section className="border-t border-steel-200 p-4">
         <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="font-display text-lg font-semibold text-ink">
-              Resumen de {formatDate(resumen.desde).slice(3)}
-            </h2>
             <p className="text-sm text-steel-500">
               {resumen.diasRegistrados === 0
                 ? "Todavía no se pasó lista ningún día de este mes."
@@ -172,6 +186,7 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
           mismo que uno con cero faltas en un mes entero: por eso está la última columna.
         </p>
       </section>
+      </details>
     </>
   );
 }

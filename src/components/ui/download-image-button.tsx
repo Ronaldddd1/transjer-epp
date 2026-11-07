@@ -35,7 +35,9 @@ export function DownloadImageButton({ targetId, filename, label = "Descargar ima
     // donde se descargue. En el celular la tabla vive en un contenedor con scroll y la
     // cabecera tiene el ancho del teléfono: la foto salía cortada, o descuadrada. Mientras
     // se toma, el bloque se ensancha y los contenedores con scroll se abren.
-    const scrolls = Array.from(el.querySelectorAll<HTMLElement>(".overflow-x-auto"));
+    // El propio bloque puede ser el que tiene el scroll (la cuadrícula del calendario).
+    const scrolls = [el, ...Array.from(el.querySelectorAll<HTMLElement>("*"))]
+      .filter((n) => n.classList.contains("overflow-x-auto"));
     const antes = scrolls.map((s) => s.style.overflow);
     const anchoAntes = el.style.width;
     el.style.width = `${Math.max(anchoMinimo, el.offsetWidth)}px`;

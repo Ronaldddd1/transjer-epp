@@ -1,18 +1,19 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { obligationInstallments, obligations } from "@/db/schema";
+import { invoiceAttachments, obligationInstallments, obligations } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import { monthlyDueDates } from "@/lib/amortization";
-import { formatMoney, OBLIGATION_TYPE_LABEL, todayLima } from "@/lib/utils";
+import { CONFIRMAR_ELIMINAR, formatMoney, OBLIGATION_TYPE_LABEL, todayLima } from "@/lib/utils";
 import {
   installmentAmountSchema, obligationSchema, payInstallmentSchema, renegotiationSchema, scheduleSchema,
 } from "@/lib/validations";
 import { guardarVoucher, leerVoucher } from "@/server/payment-proof";
+import { removeFile } from "@/server/storage";
 
 /**
  * Préstamos, servicios y demás pagos que se repiten.
@@ -506,39 +507,83 @@ export async function reopenInstallment(id: string): Promise<ActionResult> {
  * Lo borrado queda íntegro en auditoría, así que siempre se puede ver qué se eliminó,
  * quién lo hizo y volver a cargarlo si hizo falta.
  */
-export async function deleteObligation(id: string): Promise<ActionResult> {
+/**
+ * Elimina una obligación con todo su cronograma.
+ *
+ * Sin pagos, basta confirmar. Con pagos registrados también se puede —un servicio cargado
+ * dos veces, o uno que nunca fue de la empresa—, pero entonces se pide escribir ELIMINAR:
+ * se van los pagos y sus comprobantes, y eso no se deshace. Para dar de baja algo que sí
+ * existió, lo que corresponde es anularlo, que conserva el historial.
+ *
+ * En los dos casos la auditoría guarda la obligación, cada cuota con lo pagado y los datos
+ * de cada comprobante, para poder reconstruir qué se borró.
+ */
+export async function deleteObligation(id: string, confirmacion?: string): Promise<ActionResult> {
   try {
     const user = await requireActionUser("obligations.manage");
     const before = await loadObligation(id);
 
-    const [{ pagadas }] = await db
-      .select({ pagadas: sql<number>`count(*) filter (where ${obligationInstallments.status} = 'PAGADA')::int` })
+    const [{ pagadas, pagado }] = await db
+      .select({
+        pagadas: sql<number>`count(*) filter (where ${obligationInstallments.status} = 'PAGADA')::int`,
+        pagado: sql<string>`coalesce(sum(coalesce(${obligationInstallments.paidAmount}, ${obligationInstallments.total}))
+          filter (where ${obligationInstallments.status} = 'PAGADA'), 0)::text`,
+      })
       .from(obligationInstallments)
       .where(eq(obligationInstallments.obligationId, id));
 
-    if (pagadas > 0) {
+    if (pagadas > 0 && confirmacion?.trim().toUpperCase() !== CONFIRMAR_ELIMINAR) {
       throw new BusinessError(
-        `"${before.name}" tiene ${pagadas} cuota(s) pagada(s), así que no se puede eliminar. ` +
-        "Anúlala: deja de contar en el calendario y conserva el historial de pagos.",
+        `"${before.name}" tiene ${pagadas} pago(s) registrado(s). Para eliminarla igual, escribe ${CONFIRMAR_ELIMINAR}.`,
       );
     }
 
-    await db.transaction(async (tx) => {
+    const archivos = await db.transaction(async (tx) => {
       const cuotas = await tx.select().from(obligationInstallments)
         .where(eq(obligationInstallments.obligationId, id));
+      // Los comprobantes se van con sus cuotas (on delete cascade). Antes se anotan sus
+      // datos —sin el archivo— para la auditoría y para borrarlos del almacenamiento.
+      const comprobantes = cuotas.length === 0 ? [] : await tx.select({
+        id: invoiceAttachments.id,
+        installmentId: invoiceAttachments.installmentId,
+        filename: invoiceAttachments.filename,
+        sizeBytes: invoiceAttachments.sizeBytes,
+        storageDriver: invoiceAttachments.storageDriver,
+        storageKey: invoiceAttachments.storageKey,
+      })
+        .from(invoiceAttachments)
+        .where(inArray(invoiceAttachments.installmentId, cuotas.map((c) => c.id)));
+
       await tx.delete(obligationInstallments).where(eq(obligationInstallments.obligationId, id));
       await tx.delete(obligations).where(eq(obligations.id, id));
 
+      const que = `${OBLIGATION_TYPE_LABEL[before.type].toLowerCase()} "${before.name}" de ${before.creditor}`;
       await logAudit({
         user, action: "ELIMINAR", module: "OBLIGACIONES", recordId: id,
-        description: `${user.name} eliminó ${OBLIGATION_TYPE_LABEL[before.type].toLowerCase()} "${before.name}"`
-          + ` de ${before.creditor}${cuotas.length ? ` con sus ${cuotas.length} cuota(s)` : ""}, sin pagos registrados.`,
-        oldData: { ...before, cuotas },
+        description: pagadas > 0
+          ? `${user.name} eliminó ${que} con sus ${cuotas.length} cuota(s), incluidos ${pagadas} pago(s) `
+            + `registrado(s) por ${formatMoney(pagado, before.currency)}`
+            + (comprobantes.length ? ` y ${comprobantes.length} comprobante(s).` : ".")
+          : `${user.name} eliminó ${que}${cuotas.length ? ` con sus ${cuotas.length} cuota(s)` : ""}, sin pagos registrados.`,
+        oldData: { ...before, cuotas, comprobantes },
       }, tx);
+
+      return comprobantes;
     });
 
+    // Fuera de la transacción: si el almacenamiento externo falla, lo borrado en la base
+    // ya está confirmado y solo queda un archivo huérfano, no un pago a medias.
+    for (const f of archivos) {
+      if (f.storageDriver !== "db") await removeFile(f).catch(() => {});
+    }
+
     revalidatePath("/", "layout");
-    return { ok: true, message: `"${before.name}" fue eliminada.` };
+    return {
+      ok: true,
+      message: pagadas > 0
+        ? `"${before.name}" fue eliminada junto con sus ${pagadas} pago(s).`
+        : `"${before.name}" fue eliminada.`,
+    };
   } catch (e) {
     return toActionError(e);
   }

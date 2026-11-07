@@ -90,8 +90,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
         }
       />
 
-      {/* Todo lo que va dentro de este bloque es lo que sale en la imagen descargada. */}
-      <div id="calendario-imagen" className="bg-white">
       {/* --- Cabecera del mes: mover de mes y el total de todo lo que vence en él --- */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-3 rounded-lg border border-ink bg-ink px-4 py-3 text-white">
         <div className="flex items-center gap-2">
@@ -152,8 +150,8 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
         </details>
       )}
 
-      {/* --- La cuadrícula del mes --- */}
-      <div className="overflow-x-auto rounded-lg border border-steel-200 bg-white">
+      {/* --- La cuadrícula del mes. Es lo único que sale en la imagen descargada. --- */}
+      <div id="calendario-imagen" className="overflow-x-auto rounded-lg border border-steel-200 bg-white">
         <table className="w-full min-w-[56rem] table-fixed border-collapse">
           <thead>
             <tr>
@@ -180,7 +178,6 @@ export default async function CalendarPage({ searchParams }: { searchParams: Sea
         </table>
       </div>
 
-      </div>
 
       <p className="mt-3 text-xs text-steel-500">
         En rojo, lo que ya venció y sigue sin pagarse. Haz clic en cualquier pago para abrirlo.

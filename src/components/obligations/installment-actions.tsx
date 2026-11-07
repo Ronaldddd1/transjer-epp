@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarPlus, CheckCircle2, Coins, Handshake, Trash2, Undo2 } from "lucide-react";
+import { Ban, CalendarPlus, CheckCircle2, Coins, Handshake, Trash2, Undo2 } from "lucide-react";
 import {
   deleteObligation, extendSchedule, payInstallment, renegotiateAmount, reopenInstallment,
   setInstallmentAmount, setObligationStatus,
@@ -11,7 +11,7 @@ import { Field, Input, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import { VoucherField } from "@/components/ui/voucher-field";
-import { formatDate, formatMoney, todayLima } from "@/lib/utils";
+import { CONFIRMAR_ELIMINAR, formatDate, formatMoney, todayLima } from "@/lib/utils";
 
 export type InstallmentRef = {
   id: string;
@@ -234,34 +234,85 @@ export function ObligationStatusButton({ id, status, name }: { id: string; statu
 /**
  * Elimina una obligación registrada por error.
  *
- * Solo aparece mientras no haya ni una cuota pagada. Con pagos registrados el botón se
- * cambia por el de anular: borrar dejaría un hueco en la caja que nadie podría explicar.
+ * Sin pagos, una confirmación basta. Con pagos registrados se ofrecen las dos salidas:
+ * anular, que la saca del calendario y de los totales pero conserva el historial, y
+ * eliminar, que borra también los pagos y sus comprobantes. Para lo segundo hay que
+ * escribir ELIMINAR: es lo único de la pantalla que no se puede deshacer.
  */
-export function DeleteObligationButton({ id, name, paidCount }: { id: string; name: string; paidCount: number }) {
-  if (paidCount > 0) {
+export function DeleteObligationButton({ id, name, paidCount, paidAmount, currency, status }: {
+  id: string;
+  name: string;
+  paidCount: number;
+  /** Lo pagado en total, para que quien elimina sepa cuánto historial se lleva. */
+  paidAmount?: number;
+  currency?: string;
+  status?: string;
+}) {
+  if (paidCount === 0) {
     return (
       <ConfirmButton
-        action={() => setObligationStatus(id, "ANULADA")}
-        title={`Anular "${name}"`}
-        message={`Tiene ${paidCount} cuota(s) pagada(s), así que no se puede eliminar sin perder ese historial de pagos. Al anularla deja de contar en el calendario y en los totales de deuda, pero queda consultable.`}
-        confirmLabel="Anular"
+        action={() => deleteObligation(id)}
+        title={`Eliminar "${name}"`}
+        message={`Se borra junto con su cronograma y no se puede deshacer. No tiene ninguna cuota pagada, así que no se pierde historial de pagos; lo eliminado queda registrado en auditoría. Hazlo solo si la registraste por error.`}
+        confirmLabel="Eliminar"
         triggerVariant="ghost"
         size="md"
-        triggerLabel={<><Trash2 className="h-4 w-4 text-red-600" /> Anular</>}
-        triggerTitle="Anular esta obligación"
+        triggerLabel={<><Trash2 className="h-4 w-4 text-red-600" /> Eliminar</>}
+        triggerTitle="Eliminar esta obligación"
       />
     );
   }
+
+  const monto = paidAmount !== undefined ? ` por ${formatMoney(paidAmount, currency ?? "PEN")}` : "";
+
   return (
-    <ConfirmButton
-      action={() => deleteObligation(id)}
-      title={`Eliminar "${name}"`}
-      message={`Se borra junto con su cronograma y no se puede deshacer. No tiene ninguna cuota pagada, así que no se pierde historial de pagos; lo eliminado queda registrado en auditoría. Hazlo solo si la registraste por error.`}
-      confirmLabel="Eliminar"
-      triggerVariant="ghost"
-      size="md"
-      triggerLabel={<><Trash2 className="h-4 w-4 text-red-600" /> Eliminar</>}
-      triggerTitle="Eliminar esta obligación"
-    />
+    <>
+      {status !== "ANULADA" && (
+        <ConfirmButton
+          action={() => setObligationStatus(id, "ANULADA")}
+          title={`Anular "${name}"`}
+          message={`Deja de contar en el calendario y en los totales de deuda, pero sus ${paidCount} pago(s) quedan consultables. Es lo indicado si el servicio existió y se dio de baja.`}
+          confirmLabel="Anular"
+          triggerVariant="ghost"
+          size="md"
+          triggerLabel={<><Ban className="h-4 w-4 text-steel-500" /> Anular</>}
+          triggerTitle="Anular esta obligación, conservando sus pagos"
+        />
+      )}
+      <FormModal
+        title={`Eliminar "${name}"`}
+        description="Esto no se puede deshacer."
+        submitLabel="Eliminar con sus pagos"
+        submitVariant="danger"
+        size="md"
+        action={(fd) => deleteObligation(id, String(fd.get("confirmacion") ?? ""))}
+        trigger={(open) => (
+          <Button variant="ghost" onClick={open} title="Eliminar esta obligación junto con sus pagos">
+            <Trash2 className="h-4 w-4 text-red-600" /> Eliminar
+          </Button>
+        )}
+      >
+        {({ errors }) => (
+          <div className="grid gap-4">
+            <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-sm text-red-800">
+              Tiene <strong>{paidCount} pago(s) registrado(s){monto}</strong>. Se borran junto con el
+              cronograma y los comprobantes adjuntos. El detalle queda en auditoría, pero dejará de
+              figurar en los reportes de lo pagado.
+            </p>
+            <p className="text-sm text-steel-600">
+              Si el servicio sí existió y solo se dio de baja, mejor <strong>anúlalo</strong>: conserva el historial.
+            </p>
+            <Field
+              label={`Escribe ${CONFIRMAR_ELIMINAR} para confirmar`}
+              name="confirmacion"
+              required
+              error={errors.confirmacion}
+            >
+              <Input id="confirmacion" name="confirmacion" autoComplete="off" required placeholder={CONFIRMAR_ELIMINAR} />
+            </Field>
+          </div>
+        )}
+      </FormModal>
+    </>
   );
 }

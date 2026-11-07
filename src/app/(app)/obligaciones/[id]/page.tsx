@@ -96,7 +96,10 @@ export default async function ObligationDetailPage({ params }: { params: Promise
               <ObligationStatusButton id={obligation.id} status={obligation.status} name={obligation.name} />
             )}
             {canManage && (
-              <DeleteObligationButton id={obligation.id} name={obligation.name} paidCount={obligation.paidCount} />
+              <DeleteObligationButton
+                id={obligation.id} name={obligation.name} paidCount={obligation.paidCount}
+                paidAmount={pagado} currency={obligation.currency} status={obligation.status}
+              />
             )}
           </>
         }

@@ -159,16 +159,15 @@ export function lunesDe(ymd: string): string {
 export type DiaSemana = { status: AttendanceStatus; activity: string | null; reason: string | null };
 
 /**
- * La semana de trabajo completa, de lunes a sábado, una fila por trabajador.
+ * La semana completa, de lunes a domingo, una fila por trabajador.
  *
  * El día suelto dice quién vino hoy y el mes da totales, pero ninguno de los dos deja ver
- * la semana de un vistazo: quién faltó el martes, quién no tiene registro el sábado. El
- * domingo no se muestra porque no se trabaja; si alguien lo registró, igual queda en el
- * resumen del mes.
+ * la semana de un vistazo: quién faltó el martes, quién no tiene registro el sábado. Va
+ * hasta el domingo porque también se trabaja y se pasa lista ese día.
  */
 export async function attendanceWeek(lunes: string, f: { q?: string; area?: string } = {}) {
-  const sabado = addDays(lunes, 5);
-  const dias = Array.from({ length: 6 }, (_, i) => addDays(lunes, i));
+  const domingo = addDays(lunes, 6);
+  const dias = Array.from({ length: 7 }, (_, i) => addDays(lunes, i));
 
   const trabajadores = await db.select({
     employeeId: employees.id,
@@ -195,7 +194,7 @@ export async function attendanceWeek(lunes: string, f: { q?: string; area?: stri
     reason: attendance.reason,
   })
     .from(attendance)
-    .where(between(attendance.day, lunes, sabado));
+    .where(between(attendance.day, lunes, domingo));
 
   const porTrabajador = new Map<string, Record<string, DiaSemana>>();
   for (const r of registros) {
@@ -210,7 +209,7 @@ export async function attendanceWeek(lunes: string, f: { q?: string; area?: stri
 
   return {
     lunes,
-    sabado,
+    domingo,
     dias,
     conLista,
     filas: trabajadores.map((t) => {

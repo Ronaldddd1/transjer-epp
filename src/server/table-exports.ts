@@ -19,7 +19,7 @@ import {
 } from "./invoice-queries";
 import { estadoFlota, listFleet } from "./document-queries";
 import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
-import { attendanceMonth, listAttendanceDay, readAttendanceFilters } from "./attendance-queries";
+import { attendanceMonth, attendanceWeek, listAttendanceDay, lunesDe, readAttendanceFilters } from "./attendance-queries";
 import { listProvinceClients, readProvinceFilters } from "./province-queries";
 import { listInstallments, listObligations, listPaymentCalendar, readObligationFilters } from "./obligation-queries";
 import type { Report } from "./reports";
@@ -1053,6 +1053,89 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
             { label: "Días con lista pasada", value: delMes.diasRegistrados },
             { label: "Faltas del mes", value: delMes.filas.reduce((n, r) => n + r.faltas, 0) },
           ],
+        },
+      ];
+    },
+  },
+
+  /**
+   * La semana de lunes a domingo, en dos hojas.
+   *
+   * La primera es la tabla tal como se ve: un trabajador por fila y un día por columna, con
+   * los totales al final. La segunda, una fila por cada marca con la actividad o el motivo
+   * completos, que en la pantalla salen recortados.
+   */
+  "asistencia-semana": {
+    title: "Asistencia semanal",
+    permission: "attendance.view",
+    async build(sp) {
+      const f = readAttendanceFilters(sp);
+      const pedida = typeof sp.semana === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.semana) ? sp.semana : todayLima();
+      const lunes = lunesDe(pedida);
+      const semana = await attendanceWeek(lunes, { q: f.q, area: f.area });
+      const hoy = todayLima();
+      const NOMBRES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+      const etiqueta = (s: string) => (s === "PRESENTE" ? "Vino" : s === "FALTA" ? "Faltó" : "Justificado");
+      // Igual que en la pantalla: sin marca en un día con lista es un olvido; sin lista, nada.
+      const celda = (dia: (typeof semana.filas)[number]["semana"][string] | undefined, d: string) =>
+        dia ? etiqueta(dia.status) : d > hoy ? "" : semana.conLista.has(d) ? "Sin marcar" : "—";
+
+      const diasCols = semana.dias.map((d, i) => ({
+        key: `d${i}`, header: `${NOMBRES[i]} ${formatDate(d).slice(0, 5)}`, width: 13,
+      }));
+
+      const detalle = semana.filas.flatMap((r) =>
+        semana.dias.flatMap((d, i) => {
+          const dia = r.semana[d];
+          if (!dia) return [];
+          return [{
+            fecha: formatDate(d), dia: NOMBRES[i], trabajador: r.nombre, dni: r.dni, area: r.area,
+            estado: etiqueta(dia.status), actividad: texto(dia.activity), motivo: texto(dia.reason),
+          }];
+        }));
+
+      return [
+        {
+          // Corto a propósito: Excel no admite nombres de hoja de más de 31 caracteres.
+          title: `Semana del ${formatDate(semana.lunes).slice(0, 5)} al ${formatDate(semana.domingo)}`,
+          columns: [
+            { key: "trabajador", header: "Trabajador", width: 28 },
+            { key: "dni", header: "DNI", width: 11 },
+            { key: "area", header: "Área", width: 16 },
+            ...diasCols,
+            { key: "presentes", header: "Vino", width: 8, align: "right" as const },
+            { key: "faltas", header: "Faltó", width: 8, align: "right" as const },
+            { key: "justificados", header: "Justificado", width: 11, align: "right" as const },
+          ],
+          rows: semana.filas.map((r) => ({
+            trabajador: r.nombre,
+            dni: r.dni,
+            area: r.area,
+            ...Object.fromEntries(semana.dias.map((d, i) => [`d${i}`, celda(r.semana[d], d)])),
+            presentes: r.presentes,
+            faltas: r.faltas,
+            justificados: r.justificados,
+          })),
+          summary: [
+            { label: "Días con lista pasada", value: semana.conLista.size },
+            { label: "Faltas de la semana", value: semana.filas.reduce((n, r) => n + r.faltas, 0) },
+          ],
+        },
+        {
+          title: "Detalle por día",
+          columns: [
+            { key: "fecha", header: "Fecha", width: 11 },
+            { key: "dia", header: "Día", width: 11 },
+            { key: "trabajador", header: "Trabajador", width: 28 },
+            { key: "dni", header: "DNI", width: 11 },
+            { key: "area", header: "Área", width: 16 },
+            { key: "estado", header: "Asistencia", width: 13 },
+            { key: "actividad", header: "Actividad realizada", width: 40 },
+            { key: "motivo", header: "Motivo", width: 30 },
+          ],
+          rows: detalle,
+          summary: [{ label: "Marcas registradas", value: detalle.length }],
         },
       ];
     },

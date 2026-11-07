@@ -854,3 +854,6 @@ export function pageParams(sp: SearchParamsRecord, pageSize = 15) {
 export function isYmd(v: string | undefined): v is string {
   return !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 }
+
+/** La palabra que hay que escribir para eliminar una obligación que ya tiene pagos. */
+export const CONFIRMAR_ELIMINAR = "ELIMINAR";
