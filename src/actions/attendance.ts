@@ -7,7 +7,7 @@ import { attendance, employees } from "@/db/schema";
 import { BusinessError, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { formatDate, todayLima } from "@/lib/utils";
+import { formatDate, HORAS_PARA_CORREGIR_ASISTENCIA, todayLima } from "@/lib/utils";
 
 /**
  * La asistencia de un día, guardada de una sola vez.
@@ -16,7 +16,10 @@ import { formatDate, todayLima } from "@/lib/utils";
  * petición por trabajador serían veinte peticiones para una tarea de treinta segundos,
  * con el riesgo de que a la quinta se le vaya el internet y quede media lista guardada.
  *
- * Volver a marcar un día ya marcado lo corrige: la fila es una por trabajador y día.
+ * Volver a marcar un día ya marcado lo corrige: la fila es una por trabajador y día. Pero
+ * solo durante un día desde que se guardó (HORAS_PARA_CORREGIR_ASISTENCIA); después la
+ * marca queda cerrada. Lo que nunca se registró se puede registrar siempre, sea del día
+ * que sea: cerrar los huecos impediría completar una lista que se olvidó pasar.
  */
 
 const ESTADOS = ["PRESENTE", "FALTA", "JUSTIFICADO"] as const;
@@ -86,6 +89,19 @@ export async function saveAttendance(formData: FormData): Promise<ActionResult> 
     const aGuardar = marcas.filter((m) => permitidos.has(m.employeeId));
     if (aGuardar.length === 0) throw new BusinessError("Ninguno de esos trabajadores está activo.");
 
+    // Las marcas que ya tienen más de un día no se tocan. Se corta la lista entera, igual
+    // que con la actividad: guardar la mitad dejaría a quien pasa lista sin saber qué entró.
+    const cerradas = await marcasCerradas(aGuardar.map((m) => m.employeeId), day);
+    if (cerradas.length > 0) {
+      const lista = cerradas.map((c) => c.nombre).join(", ");
+      throw new BusinessError(
+        (cerradas.length === 1
+          ? `La asistencia de ${lista} del ${formatDate(day)} ya está cerrada`
+          : `La asistencia del ${formatDate(day)} de ${cerradas.length} trabajadores (${lista}) ya está cerrada`)
+        + `: pasó más de un día desde que se guardó y no se puede cambiar.`,
+      );
+    }
+
     const resumen = { PRESENTE: 0, FALTA: 0, JUSTIFICADO: 0 };
     for (const m of aGuardar) resumen[m.status]++;
 
@@ -141,6 +157,9 @@ export async function clearAttendance(employeeId: string, day: string): Promise<
     const [row] = await db.select().from(attendance)
       .where(and(eq(attendance.employeeId, employeeId), eq(attendance.day, day))).limit(1);
     if (!row) throw new BusinessError("Ese día no estaba marcado.");
+    if ((await marcasCerradas([employeeId], day)).length > 0) {
+      throw new BusinessError("Esa marca ya está cerrada: pasó más de un día desde que se guardó.");
+    }
 
     await db.delete(attendance)
       .where(and(eq(attendance.employeeId, employeeId), eq(attendance.day, day)));
@@ -156,4 +175,17 @@ export async function clearAttendance(employeeId: string, day: string): Promise<
   } catch (e) {
     return toActionError(e);
   }
+}
+
+/** De esos trabajadores, los que ese día ya tienen una marca guardada hace más de un día. */
+async function marcasCerradas(employeeIds: string[], day: string) {
+  if (employeeIds.length === 0) return [];
+  return db.select({ nombre: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}` })
+    .from(attendance)
+    .innerJoin(employees, eq(employees.id, attendance.employeeId))
+    .where(and(
+      eq(attendance.day, day),
+      inArray(attendance.employeeId, employeeIds),
+      sql`${attendance.createdAt} < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)`,
+    ));
 }

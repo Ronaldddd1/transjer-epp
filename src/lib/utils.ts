@@ -857,3 +857,10 @@ export function isYmd(v: string | undefined): v is string {
 
 /** La palabra que hay que escribir para eliminar una obligación que ya tiene pagos. */
 export const CONFIRMAR_ELIMINAR = "ELIMINAR";
+
+/**
+ * Cuántas horas se puede corregir una marca de asistencia desde que se guardó por primera
+ * vez. Pasado ese plazo queda cerrada: la lista de un día no se reescribe semanas después.
+ * Lo que nunca se registró sí se puede registrar en cualquier momento.
+ */
+export const HORAS_PARA_CORREGIR_ASISTENCIA = 24;

@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleSlash, FileText, Loader2, X } from "lucide-react";
+import { Check, CircleSlash, FileText, Loader2, Lock, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { saveAttendance } from "@/actions/attendance";
@@ -19,6 +19,10 @@ export type FilaAsistencia = {
   reason: string | null;
   activity: string | null;
   recordedByName: string | null;
+  /** Guardada hace más de un día: ya no se puede cambiar. */
+  bloqueado: boolean;
+  /** Hasta cuándo se puede corregir, "DD/MM HH:MI" en hora de Lima; null si no hay marca. */
+  editableHasta: string | null;
 };
 
 type Estado = "PRESENTE" | "FALTA" | "JUSTIFICADO";
@@ -38,6 +42,12 @@ const BOTONES: { valor: Estado; etiqueta: string; icono: typeof Check; activo: s
  *
  * Lo que no se marca NO se guarda. Un día sin registrar es un dato que falta, y mezclarlo
  * con las faltas de verdad arruinaría el único número que esta pantalla tiene que dar bien.
+ *
+ * Una marca guardada se puede corregir durante un día; después queda cerrada y aquí se ve
+ * con candado. Los que siguen sin marcar se pueden registrar siempre.
+ *
+ * La pantalla monta una lista nueva por cada día (key={dia}): si se reutilizara, al pasar
+ * a un día sin registrar seguiría mostrando lo marcado en el anterior.
  */
 export function AttendanceSheet({ dia, filas, puedeMarcar }: {
   dia: string;
@@ -109,8 +119,17 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
     setActividadComun("");
   };
 
+  /** Marca a los que están sin marcar. Lo ya marcado, y sobre todo lo cerrado, no se toca. */
   const marcarTodos = (estado: Estado) =>
-    setMarcas(Object.fromEntries(filas.map((f) => [f.employeeId, estado])));
+    setMarcas((m) => {
+      const siguiente = { ...m };
+      for (const f of filas) {
+        if (!f.bloqueado && !siguiente[f.employeeId]) siguiente[f.employeeId] = estado;
+      }
+      return siguiente;
+    });
+  const hayParaMarcar = filas.some((f) => !f.bloqueado && !marcas[f.employeeId]);
+  const cerradas = filas.filter((f) => f.bloqueado).length;
 
   const guardar = () => {
     const fd = new FormData();
@@ -159,13 +178,15 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
 
         {puedeMarcar && (
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => marcarTodos("PRESENTE")}
-              className="rounded-md border border-steel-300 bg-white px-3 py-1.5 text-sm text-steel-600 hover:border-emerald-600 hover:text-emerald-700"
-            >
-              Marcar a todos como que vinieron
-            </button>
+            {hayParaMarcar && (
+              <button
+                type="button"
+                onClick={() => marcarTodos("PRESENTE")}
+                className="rounded-md border border-steel-300 bg-white px-3 py-1.5 text-sm text-steel-600 hover:border-emerald-600 hover:text-emerald-700"
+              >
+                Marcar a los que faltan como que vinieron
+              </button>
+            )}
             <Button onClick={guardar} loading={guardando} disabled={cambios === 0}>
               {guardando ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               {cambios === 0 ? "Sin cambios" : `Guardar la lista (${cambios})`}
@@ -173,6 +194,17 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
           </div>
         )}
       </div>
+
+      {cerradas > 0 && (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border border-steel-200 bg-steel-50 px-4 py-2.5 text-sm text-steel-600">
+          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+          <span>
+            {cerradas === filas.length
+              ? "La asistencia de este día está cerrada: se guardó hace más de un día y ya no se puede cambiar."
+              : `${cerradas} marca(s) de este día están cerradas porque se guardaron hace más de un día. A los que siguen sin marcar sí se los puede registrar.`}
+          </span>
+        </p>
+      )}
 
       {/* Cuando la cuadrilla entera hizo lo mismo, escribirlo veinte veces sobra. Aparece
           solo mientras haya presentes sin actividad, que es cuando sirve de algo. */}
@@ -209,6 +241,7 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
         <tbody>
           {filas.map((f) => {
             const marca = marcas[f.employeeId] ?? null;
+            const editable = puedeMarcar && !f.bloqueado;
             return (
               <Tr
                 key={f.employeeId}
@@ -218,6 +251,11 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
                 <Td>
                   <span className="font-semibold">{f.nombre}</span>
                   <p className="text-xs text-steel-500">DNI {f.dni}</p>
+                  {f.bloqueado && (
+                    <p className="mt-0.5 inline-flex items-center gap-1 text-xs text-steel-500">
+                      <Lock className="h-3 w-3" aria-hidden /> cerrada
+                    </p>
+                  )}
                 </Td>
                 <Td className="hidden text-sm text-steel-600 lg:table-cell">
                   {f.position}
@@ -232,7 +270,7 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
                         <button
                           key={b.valor}
                           type="button"
-                          disabled={!puedeMarcar}
+                          disabled={!editable}
                           aria-pressed={activo}
                           title={b.etiqueta}
                           onClick={() => setMarcas((m) => ({
@@ -242,7 +280,8 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
                           className={cn(
                             "inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-sm transition-colors",
                             activo ? b.activo : "border-steel-300 bg-white text-steel-600 hover:border-steel-400 hover:text-ink",
-                            !puedeMarcar && "cursor-not-allowed opacity-60",
+                            !editable && "cursor-not-allowed",
+                            !editable && !activo && "opacity-50",
                           )}
                         >
                           <Icono className="h-4 w-4" aria-hidden />
@@ -268,7 +307,7 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
                           }
                         }}
                         maxLength={250}
-                        disabled={!puedeMarcar}
+                        disabled={!editable}
                         aria-invalid={faltantes.has(f.employeeId)}
                         aria-label={`Actividad de ${f.nombre}`}
                         placeholder="Descarga de mercadería, apoyo en despacho…"
@@ -290,19 +329,28 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
                       value={motivos[f.employeeId] ?? ""}
                       onChange={(e) => setMotivos((m) => ({ ...m, [f.employeeId]: e.target.value }))}
                       maxLength={160}
-                      disabled={!puedeMarcar}
+                      disabled={!editable}
                       aria-label={`Motivo de ${f.nombre}`}
                       placeholder="Permiso, descanso médico, vacaciones…"
                       className="w-full min-w-[12rem] rounded-md border border-steel-300 px-2.5 py-1.5 text-sm"
                     />
-                  ) : (
+                  ) : marca === "FALTA" ? (
                     <span className="inline-flex items-center gap-1 text-xs text-steel-400">
                       <CircleSlash className="h-3 w-3" aria-hidden /> no aplica en las faltas
                     </span>
+                  ) : (
+                    <span className="text-steel-300">—</span>
                   )}
                 </Td>
                 <Td className="hidden text-xs text-steel-500 xl:table-cell">
-                  {f.status ? (f.recordedByName ?? "—") : <span className="text-steel-400">sin registrar</span>}
+                  {f.status ? (
+                    <>
+                      {f.recordedByName ?? "—"}
+                      <p className={f.bloqueado ? "text-steel-400" : "text-steel-500"}>
+                        {f.bloqueado ? "cerrada" : f.editableHasta ? `se puede corregir hasta el ${f.editableHasta}` : ""}
+                      </p>
+                    </>
+                  ) : <span className="text-steel-400">sin registrar</span>}
                 </Td>
               </Tr>
             );

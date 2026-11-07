@@ -145,6 +145,48 @@ with sync_playwright() as p:
           psql("select a.status from attendance a join employees e on e.id=a.employee_id "
                f"where e.area='{AREA}' and e.first_name='Beto' and a.day=((now() at time zone 'America/Lima')::date)") == "PRESENTE")
 
+    # --- Pasar al día anterior con el botón: la lista empieza de cero ---
+    # Antes la lista se reutilizaba y el día sin registrar aparecía con lo marcado hoy.
+    page.get_by_role("button", name=re.compile("Día anterior")).first.click()
+    page.wait_for_url(re.compile(r"dia="), timeout=15000)
+    page.wait_for_timeout(1800)
+    cuerpo = page.locator("body").inner_text()
+    check("al pasar al día anterior la lista no arrastra lo de hoy",
+          "3 sin marcar" in cuerpo and page.locator("section[aria-labelledby=titulo-dia] [aria-pressed=true]").count() == 0,
+          cuerpo[:300])
+    page.goto(f"{BASE}/asistencia?area={AREA.replace(' ', '+')}")
+    page.wait_for_timeout(1700)
+
+    # --- Pasado un día, lo guardado queda cerrado ---
+    ejecutar("update attendance a set created_at = now() - interval '25 hours' from employees e "
+             f"where e.id = a.employee_id and e.area = '{AREA}' and e.first_name = 'Ana' "
+             "and a.day = ((now() at time zone 'America/Lima')::date)")
+    page.reload(); page.wait_for_timeout(1800)
+    fila_ana = page.get_by_role("row").filter(has_text="Ana").filter(has=page.get_by_role("button", name="Vino"))
+    fila_beto = page.get_by_role("row").filter(has_text="Beto").filter(has=page.get_by_role("button", name="Vino"))
+    check("la marca de hace más de un día se ve cerrada", "cerrada" in fila_ana.inner_text(), fila_ana.inner_text())
+    check("y sus botones no responden", fila_ana.get_by_role("button", name="Faltó").is_disabled()
+          and fila_ana.locator("input").first.is_disabled())
+    check("la de hoy todavía se puede corregir", not fila_beto.get_by_role("button", name="Faltó").is_disabled()
+          and "se puede corregir hasta" in fila_beto.inner_text(), fila_beto.inner_text())
+    check("y la pantalla avisa que hay marcas cerradas", "cerradas" in page.locator("body").inner_text())
+
+    # La pantalla quedó abierta y el plazo venció mientras tanto: el servidor no deja pasar
+    # el cambio aunque el botón todavía estuviera activo.
+    fila_beto.get_by_role("button", name="Faltó").click()
+    page.wait_for_timeout(300)
+    ejecutar("update attendance a set created_at = now() - interval '25 hours' from employees e "
+             f"where e.id = a.employee_id and e.area = '{AREA}' and e.first_name = 'Beto' "
+             "and a.day = ((now() at time zone 'America/Lima')::date)")
+    page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
+    page.wait_for_timeout(2400)
+    check("el servidor rechaza cambiar una marca que se cerró con la pantalla abierta",
+          psql("select a.status from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and e.first_name='Beto' "
+               "and a.day=((now() at time zone 'America/Lima')::date)") == "PRESENTE")
+    check("y dice por qué", "ya está cerrada" in page.locator("body").inner_text())
+    page.reload(); page.wait_for_timeout(1500)
+
     # --- Un día anterior ---
     page.goto(f"{BASE}/asistencia?dia={ayer}&area={AREA.replace(' ', '+')}")
     page.wait_for_timeout(1700)

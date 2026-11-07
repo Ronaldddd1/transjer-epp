@@ -98,7 +98,8 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
               No hay trabajadores activos con esos filtros.
             </p>
           ) : (
-            <AttendanceSheet dia={dia} filas={filas} puedeMarcar={puedeMarcar} />
+            // Una lista nueva por día y por filtro: reutilizar la anterior arrastraba sus marcas.
+            <AttendanceSheet key={`${dia}|${f.q ?? ""}|${f.area ?? ""}`} dia={dia} filas={filas} puedeMarcar={puedeMarcar} />
           )}
         </div>
       </section>

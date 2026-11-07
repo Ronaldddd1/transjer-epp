@@ -3,7 +3,7 @@ import { and, asc, between, count, eq, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { attendance, employees, users } from "@/db/schema";
 import {
-  addDays, first, monthEnd, monthStart, todayLima, weekdayOf, type SearchParamsRecord,
+  addDays, first, HORAS_PARA_CORREGIR_ASISTENCIA, monthEnd, monthStart, todayLima, weekdayOf, type SearchParamsRecord,
 } from "@/lib/utils";
 
 /**
@@ -48,6 +48,11 @@ export async function listAttendanceDay(f: AttendanceFilters) {
     activity: attendance.activity,
     recordedByName: users.name,
     recordedAt: attendance.updatedAt,
+    // Una marca se puede corregir durante un día desde que se guardó por primera vez;
+    // después queda cerrada. Se calcula aquí, con el reloj del servidor, y no en el
+    // navegador, cuyo reloj puede estar mal puesto.
+    bloqueado: sql<boolean>`coalesce(${attendance.createdAt} < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int), false)`,
+    editableHasta: sql<string | null>`to_char((${attendance.createdAt} + make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)) at time zone 'America/Lima', 'DD/MM HH24:MI')`,
   })
     .from(employees)
     .leftJoin(attendance, and(eq(attendance.employeeId, employees.id), eq(attendance.day, day)))
