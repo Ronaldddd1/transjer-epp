@@ -192,6 +192,11 @@ const optionalMoney = (label: string) =>
     .refine((v) => v === "" || /^\d{1,12}(\.\d{1,2})?$/.test(v), `${label} debe ser un importe válido`)
     .transform((v) => (v === "" ? null : Number(v).toFixed(2)));
 
+export const cuentaDetracciones = z.string().optional()
+  .transform((v) => (v ?? "").replace(/[\s-]/g, ""))
+  .refine((v) => v === "" || /^\d{11}$/.test(v), "La cuenta de detracciones del Banco de la Nación tiene 11 dígitos")
+  .transform((v) => (v ? v : null));
+
 export const supplierSchema = z.object({
   // El RUC puede faltar: los proveedores que vienen del control en Excel no lo traen y se
   // completa cuando llega una factura electrónica suya con el XML.
@@ -206,6 +211,9 @@ export const supplierSchema = z.object({
   notes: optionalText(1000),
   defaultPaymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
   defaultTermDays: intField("Los días de plazo", 0, 180).default(1),
+  // La cuenta de detracciones del Banco de la Nación: 11 dígitos. Se acepta con guiones
+  // o espacios, que es como aparece en las constancias, y se guarda solo con los números.
+  detractionAccount: cuentaDetracciones,
 });
 
 export const invoiceSchema = z.object({

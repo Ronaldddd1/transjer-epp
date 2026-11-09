@@ -282,6 +282,11 @@ export const suppliers = pgTable("suppliers", {
   defaultPaymentTerm: paymentTermEnum("default_payment_term").notNull().default("CONTADO"),
   /** Días de plazo por defecto. Contado suele ser 1; crédito, 7. */
   defaultTermDays: integer("default_term_days").notNull().default(1),
+  /**
+   * Cuenta de detracciones del proveedor en el Banco de la Nación (11 dígitos). Es a donde
+   * va el depósito del 4 %; sin ella su detracción no puede ir en el pago masivo de SUNAT.
+   */
+  detractionAccount: varchar("detraction_account", { length: 11 }),
   active: boolean("active").notNull().default(true),
   isDemo: boolean("is_demo").notNull().default(false),
   ...timestamps,
@@ -289,6 +294,7 @@ export const suppliers = pgTable("suppliers", {
   index("suppliers_active_name_idx").on(t.active, t.businessName),
   check("suppliers_ruc_format", sql`${t.ruc} is null or ${t.ruc} ~ '^[0-9]{11}$'`),
   check("suppliers_term_days_range", sql`${t.defaultTermDays} between 0 and 180`),
+  check("suppliers_detraction_account_format", sql`${t.detractionAccount} is null or ${t.detractionAccount} ~ '^[0-9]{11}$'`),
 ]);
 
 export const supplierInvoices = pgTable("supplier_invoices", {
@@ -343,6 +349,8 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   detractionNotes: text("detraction_notes"),
   /** La imagen de la constancia del Banco de la Nación. Sin ella no se da por depositada. */
   detractionProofId: uuid("detraction_proof_id").references((): AnyPgColumn => invoiceAttachments.id, { onDelete: "set null" }),
+  /** El lote de pago masivo en el que salió, si se pagó con el archivo de SUNAT. */
+  detractionBatchId: uuid("detraction_batch_id").references((): AnyPgColumn => detractionBatches.id, { onDelete: "set null" }),
 
   /** Condición de pago: contado cuenta desde el correo, crédito desde la entrega de la guía. */
   paymentTerm: paymentTermEnum("payment_term").notNull().default("CONTADO"),
@@ -400,6 +408,7 @@ export const supplierInvoices = pgTable("supplier_invoices", {
   index("invoices_pay_due_idx").on(t.status, t.payDueDate),
   check("invoices_term_days_range", sql`${t.termDays} between 0 and 180`),
   index("invoices_detraction_idx").on(t.detractionStatus, t.detractionPaidAt),
+  index("supplier_invoices_detraction_batch_idx").on(t.detractionBatchId),
   index("invoices_client_idx").on(t.clientName),
   check("invoices_detraction_rate_range", sql`${t.detractionRate} between 0 and 100`),
   check("invoices_credit_note_amount_positive",
@@ -474,6 +483,37 @@ export const invoiceEmails = pgTable("invoice_emails", {
     sql`${t.status} in ('POR_APROBAR','PROCESADO','REVISAR','DESCARTADO','RECHAZADO','ERROR')`),
   check("invoice_emails_amount_status_valid",
     sql`${t.amountStatus} in ('PENDIENTE','CONFORME','OBSERVADO')`),
+]);
+
+/**
+ * Un lote de pago masivo de detracciones (Depósitos Masivos de SUNAT).
+ *
+ * Al generarlo se arma el archivo TXT y sus detracciones pasan a "En proceso". Cuando se
+ * paga en SUNAT, la constancia se registra una vez y todas quedan pagadas. Si no se llegó a
+ * pagar, se anula y vuelven a pendientes; el número de lote no se reutiliza.
+ */
+export const detractionBatches = pgTable("detraction_batches", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  /** AANNNN: año en dos dígitos y correlativo. */
+  lot: varchar("lot", { length: 6 }).notNull(),
+  payerRuc: varchar("payer_ruc", { length: 11 }).notNull(),
+  payerName: varchar("payer_name", { length: 35 }).notNull(),
+  total: numeric("total", { precision: 14, scale: 2 }).notNull(),
+  invoiceCount: integer("invoice_count").notNull(),
+  status: varchar("status", { length: 10 }).notNull().default("GENERADO").$type<"GENERADO" | "PAGADO" | "ANULADO">(),
+  paidAt: date("paid_at"),
+  operation: varchar("operation", { length: 40 }),
+  proofId: uuid("proof_id").references((): AnyPgColumn => invoiceAttachments.id, { onDelete: "set null" }),
+  notes: text("notes"),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  paidBy: uuid("paid_by").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+}, (t) => [
+  uniqueIndex("detraction_batches_payer_lot_idx").on(t.payerRuc, t.lot),
+  index("detraction_batches_status_idx").on(t.status, t.createdAt),
+  check("detraction_batches_lot_format", sql`${t.lot} ~ '^[0-9]{6}$'`),
+  check("detraction_batches_status", sql`${t.status} in ('GENERADO', 'PAGADO', 'ANULADO')`),
+  check("detraction_batches_paid", sql`(${t.status} = 'PAGADO') = (${t.paidAt} is not null)`),
 ]);
 
 export const invoiceAttachments = pgTable("invoice_attachments", {

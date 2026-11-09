@@ -1,0 +1,61 @@
+PAGO MASIVO DE DETRACCIONES (DEPÓSITOS MASIVOS DE SUNAT)
+=======================================================
+
+ANTES DE SUBIR
+--------------
+Lleva una migración nueva. En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0026_pago_masivo_detracciones   la cuenta de detracciones de cada proveedor y
+                                    la tabla de lotes de pago
+
+Solo agrega: no toca ni borra datos.
+
+Opcional, en Vercel (Settings > Environment Variables):
+    COMPANY_NAME   la razón social de TransJer, para que el primer lote la traiga escrita.
+    COMPANY_RUC    (ya existía) el RUC de TransJer.
+Si no están, se escriben una vez en el formulario y los lotes siguientes las recuerdan.
+
+
+CÓMO SE USA
+-----------
+1. Detracciones: marca las pendientes que vas a pagar (o la casilla de arriba para
+   todas las de la página) y pulsa "Armar archivo para SUNAT".
+     - Revisa el RUC y la razón social de la empresa, y el N.º de lote (AANNNN: el
+       sistema propone el siguiente del año; SUNAT no deja repetirlo).
+     - Si a un proveedor le falta su cuenta de detracciones del Banco de la Nación,
+       el formulario la pide ahí mismo y queda guardada en su ficha.
+     - Se descarga el archivo D + RUC + lote .txt, y esas detracciones pasan a
+       "En proceso".
+
+2. En SUNAT Operaciones en Línea (Clave SOL): Depósitos Masivos de detracciones >
+   subir el archivo > pagar (cargo en cuenta o tarjeta).
+
+3. De vuelta en Detracciones, en "Pagos masivos a SUNAT", el lote dice "Falta pagar".
+   "Registrar pago": fecha, N.º de operación y la constancia (captura o PDF). Todas
+   las detracciones del lote quedan pagadas a la vez, con la constancia enlazada.
+   Si SUNAT dio un número de constancia por cada depósito, se pueden anotar uno por
+   uno (es opcional; si no, se usa el N.º de operación).
+
+Si un lote no se llegó a pagar: "Anular". Sus detracciones vuelven a pendientes y
+ese número de lote ya no se usa.
+
+El TXT de cualquier lote se vuelve a bajar con el botón "TXT".
+
+
+LO QUE NO SE PUEDE MARCAR
+-------------------------
+- Facturas de un proveedor sin RUC (se completa en Proveedores).
+- Notas de crédito, facturas anuladas, y las que no están pendientes.
+
+La cuenta de detracciones del proveedor también se puede escribir o corregir en
+Proveedores > Editar. En la lista de proveedores sale debajo del RUC.
+
+
+FORMATO
+-------
+El archivo sigue el instructivo de SUNAT para el pago masivo por internet:
+cabecera de 68 caracteres y una línea de 107 por depósito, código de servicio 027
+(transporte de carga), operación 01, montos en soles enteros.
+https://www.sunat.gob.pe/orientacion/Detracciones/InstructivoPagoMasivonuevaversionv3.pdf

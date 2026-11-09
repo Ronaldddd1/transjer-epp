@@ -183,6 +183,13 @@
       "when": 1794200000000,
       "tag": "0025_accesos_por_modulo",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1794300000000,
+      "tag": "0026_pago_masivo_detracciones",
+      "breakpoints": true
     }
   ]
 }

@@ -19,6 +19,7 @@ export type SupplierRow = {
   notes: string | null;
   defaultPaymentTerm: string;
   defaultTermDays: number;
+  detractionAccount?: string | null;
 };
 
 export function SupplierFormModal({ supplier }: { supplier?: SupplierRow }) {
@@ -75,6 +76,15 @@ export function SupplierFormModal({ supplier }: { supplier?: SupplierRow }) {
           </Field>
           <Field label="Teléfono" name="phone" error={errors.phone}>
             <Input name="phone" defaultValue={supplier?.phone ?? ""} invalid={!!errors.phone} maxLength={20} />
+          </Field>
+          <Field
+            label="Cuenta de detracciones (Banco de la Nación)"
+            name="detractionAccount"
+            error={errors.detractionAccount}
+            className="sm:col-span-2"
+            hint="11 dígitos. Es a donde va el depósito del 4 %; sin ella su detracción no puede ir en el pago masivo de SUNAT."
+          >
+            <Input name="detractionAccount" defaultValue={supplier?.detractionAccount ?? ""} invalid={!!errors.detractionAccount} maxLength={15} inputMode="numeric" placeholder="00012345678" />
           </Field>
           <div className="rounded-lg border border-steel-200 bg-steel-50 p-4 sm:col-span-2">
             <p className="mb-3 text-sm font-semibold text-ink">Condición de pago pactada</p>

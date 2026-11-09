@@ -289,6 +289,16 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                 </p>
               )}
               {invoice.detractionNotes && <p className="mt-1 text-steel-600"><span className="text-steel-500">Observaciones: </span>{invoice.detractionNotes}</p>}
+              {(invoice.detractionLot || invoice.detractionProofId) && (
+                <p className="mt-1 text-steel-600">
+                  {invoice.detractionLot && <>Va en el lote {invoice.detractionLot} del pago masivo a SUNAT. </>}
+                  {invoice.detractionProofId && (
+                    <a href={`/api/facturas/adjuntos/${invoice.detractionProofId}`} target="_blank" rel="noreferrer" className="underline">
+                      Ver la constancia
+                    </a>
+                  )}
+                </p>
+              )}
             </div>
           </Panel>
 

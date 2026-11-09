@@ -207,6 +207,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         columns: [
           { key: "razon", header: "Razón social", width: 34 },
           { key: "ruc", header: "RUC", width: 13 },
+          { key: "cuentaBN", header: "Cta. detracciones BN", width: 16 },
           { key: "comercial", header: "Nombre comercial", width: 24 },
           { key: "contacto", header: "Contacto", width: 20 },
           { key: "correo", header: "Correo", width: 26 },
@@ -226,6 +227,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         rows: rows.map((s) => ({
           razon: s.businessName,
           ruc: s.ruc ?? "pendiente",
+          cuentaBN: texto(s.detractionAccount),
           comercial: texto(s.tradeName),
           contacto: texto(s.contactName),
           correo: texto(s.email),

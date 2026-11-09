@@ -141,7 +141,12 @@ export default async function SuppliersPage({ searchParams }: { searchParams: Se
           )}
           {rows.map((s) => (
             <Tr key={s.id}>
-              <Td className="whitespace-nowrap tabular">{s.ruc}</Td>
+              <Td className="whitespace-nowrap tabular">
+                {s.ruc}
+                <p className="text-xs text-steel-500" title="Cuenta de detracciones en el Banco de la Nación">
+                  {s.detractionAccount ? `Cta. BN ${s.detractionAccount}` : "Sin cta. de detracciones"}
+                </p>
+              </Td>
               <Td>
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-semibold">{s.businessName}</span>

@@ -182,6 +182,7 @@ export async function mergeSuppliers(origenId: string, formData: FormData): Prom
       if (!destino.phone && origen.phone) completar.phone = origen.phone;
       if (!destino.contactName && origen.contactName) completar.contactName = origen.contactName;
       if (!destino.tradeName && origen.tradeName) completar.tradeName = origen.tradeName;
+      if (!destino.detractionAccount && origen.detractionAccount) completar.detractionAccount = origen.detractionAccount;
 
       // El RUC es único: se libera del duplicado antes de pasarlo.
       await tx.delete(suppliers).where(eq(suppliers.id, origenId));

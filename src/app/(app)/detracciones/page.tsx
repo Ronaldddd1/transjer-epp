@@ -1,9 +1,10 @@
-import { AlertTriangle, Landmark } from "lucide-react";
+import { AlertTriangle, Download, Landmark } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { DetractionModal } from "@/components/invoices/detraction-actions";
-import { DetractionBadge } from "@/components/ui/badge";
-import { ButtonLink } from "@/components/ui/button";
+import { AnularLoteButton, FORM_LOTE, LoteSunatBar, MarcarTodas, PagoLoteModal } from "@/components/invoices/lote-sunat";
+import { Badge, DetractionBadge } from "@/components/ui/badge";
+import { buttonClass, ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
 import { PageHeader } from "@/components/ui/page-header";
 import { ExportTable } from "@/components/ui/export-table";
@@ -18,6 +19,7 @@ import {
 import {
   getClientOptions, getDetractionSummary, getSupplierOptions, listInvoices, readInvoiceFilters,
 } from "@/server/invoice-queries";
+import { datosParaNuevoLote, facturasDeLote, listarLotes } from "@/server/detraction-batches";
 
 export const metadata: Metadata = { title: "Detracciones" };
 
@@ -41,12 +43,22 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
   };
   const canManage = can(user, "detractions.manage");
 
-  const [{ rows, total }, resumen, suppliers, clients] = await Promise.all([
+  const [{ rows, total }, resumen, suppliers, clients, lotes, propuesta] = await Promise.all([
     listInvoices(f, pageSize, offset),
     getDetractionSummary(),
     getSupplierOptions(),
     getClientOptions(),
+    listarLotes(),
+    canManage ? datosParaNuevoLote() : Promise.resolve(null),
   ]);
+  // Las facturas de los lotes que esperan pago, para el formulario de la constancia.
+  const abiertos = await Promise.all(
+    lotes.filter((l) => l.status === "GENERADO").map(async (l) => ({ ...l, facturas: await facturasDeLote(l.id) })),
+  );
+  const loteDe = new Map(lotes.map((l) => [l.id, l.lot]));
+  // Las casillas para armar el pago masivo solo salen donde hay detracciones pendientes.
+  const conCasillas = canManage && rows.some((r) => r.detractionStatus === "PENDIENTE");
+  const columnas = (canManage ? 8 : 7) + (conCasillas ? 1 : 0);
 
   const tarjetas = [
     { label: "Pendientes de depositar", count: resumen.pendientes.cantidad, importe: resumen.pendientes.importe, tone: "alert" as const, href: "/detracciones?detraccion=PENDIENTE" },
@@ -111,9 +123,68 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
         </p>
       )}
 
+      {lotes.length > 0 && (
+        <section className="mb-5 rounded-lg border border-steel-200 bg-white" aria-labelledby="lotes-sunat">
+          <h2 id="lotes-sunat" className="border-b border-steel-100 px-4 py-3 font-display text-base font-bold text-ink">
+            Pagos masivos a SUNAT
+          </h2>
+          <ul className="divide-y divide-steel-100">
+            {lotes.map((l) => {
+              const abierto = abiertos.find((a) => a.id === l.id);
+              return (
+                <li key={l.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 text-sm">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-semibold text-ink">
+                      Lote {l.lot}{" "}
+                      {l.status === "GENERADO" && <Badge tone="yellow">Falta pagar</Badge>}
+                      {l.status === "PAGADO" && <Badge tone="green">Pagado</Badge>}
+                      {l.status === "ANULADO" && <Badge>Anulado</Badge>}
+                    </p>
+                    <p className="text-steel-500">
+                      {l.invoiceCount} detracción(es) · {formatMoney(l.total)}
+                      {l.status === "PAGADO" && l.paidAt && <> · pagado el {formatDate(l.paidAt)}{l.operation && `, op. ${l.operation}`}</>}
+                      {l.status !== "PAGADO" && <> · armado el {formatDate(l.createdAt.toISOString().slice(0, 10))}{l.createdByName && ` por ${l.createdByName}`}</>}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1">
+                    {l.status !== "ANULADO" && (
+                      <a href={`/api/detracciones/lotes/${l.id}`} download className={buttonClass("outline", "sm")} title="Descargar el archivo TXT para SUNAT">
+                        <Download className="h-4 w-4" /> TXT
+                      </a>
+                    )}
+                    {l.proofId && (
+                      <a href={`/api/facturas/adjuntos/${l.proofId}`} target="_blank" rel="noreferrer" className={buttonClass("ghost", "sm")}>
+                        Constancia
+                      </a>
+                    )}
+                    {canManage && abierto && (
+                      <>
+                        <PagoLoteModal
+                          lote={{
+                            id: abierto.id, lot: abierto.lot, total: abierto.total,
+                            facturas: abierto.facturas.map((fa) => ({
+                              id: fa.id, etiqueta: invoiceNumber(fa.series, fa.number), proveedor: fa.supplierName,
+                              monto: fa.detractionAmount ?? "0", enProceso: fa.detractionStatus === "EN_PROCESO",
+                            })),
+                          }}
+                        />
+                        <AnularLoteButton id={abierto.id} lot={abierto.lot} />
+                      </>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
+      {conCasillas && propuesta && <LoteSunatBar propuesta={propuesta} />}
+
       <TableShell>
         <thead>
           <tr>
+            {conCasillas && <Th className="w-8"><MarcarTodas /></Th>}
             <Th>Factura</Th>
             <Th>Proveedor</Th>
             <Th className="hidden 2xl:table-cell">Emisión</Th>
@@ -126,7 +197,7 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
         </thead>
         <tbody>
           {rows.length === 0 && (
-            <EmptyRow colSpan={canManage ? 8 : 7} title="No hay detracciones con esos filtros" />
+            <EmptyRow colSpan={columnas} title="No hay detracciones con esos filtros" />
           )}
           {rows.map((i) => {
             const ref = {
@@ -139,6 +210,34 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
             };
             return (
               <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
+                {conCasillas && (
+                  <Td className="w-8">
+                    {i.detractionStatus === "PENDIENTE" && (() => {
+                      // Lo que impide mandarla en el archivo y no se arregla desde el formulario.
+                      const motivo = i.status === "ANULADA" ? "La factura está anulada"
+                        : !i.supplierRuc ? "El proveedor no tiene RUC: complétalo en Proveedores"
+                          : i.docType === "NOTA_CREDITO" ? "Una nota de crédito no lleva detracción"
+                            : null;
+                      return (
+                        <input
+                          type="checkbox"
+                          form={FORM_LOTE}
+                          name="ids"
+                          value={i.id}
+                          disabled={!!motivo}
+                          title={motivo ?? "Marcar para el pago masivo"}
+                          aria-label={`Marcar ${invoiceNumber(i.series, i.number)} para el pago masivo`}
+                          className="h-4 w-4 accent-[#F5B800] disabled:opacity-40"
+                          data-factura={invoiceNumber(i.series, i.number)}
+                          data-monto={Number(i.detractionAmount ?? 0)}
+                          data-proveedor-id={i.supplierId}
+                          data-proveedor={i.supplierName}
+                          data-cuenta={i.supplierDetractionAccount ?? ""}
+                        />
+                      );
+                    })()}
+                  </Td>
+                )}
                 <Td>
                   <Link href={`/facturas/${i.id}`} className="font-semibold tabular hover:underline">
                     {invoiceNumber(i.series, i.number)}
@@ -148,6 +247,9 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
                 <Td>
                   <p className="font-medium">{i.supplierName}</p>
                   <p className="text-xs text-steel-500">{i.supplierRuc ? `RUC ${i.supplierRuc}` : "RUC pendiente"}</p>
+                  {i.detractionStatus === "PENDIENTE" && !i.supplierDetractionAccount && (
+                    <p className="text-xs text-[#7A5A00]">Sin cuenta del Banco de la Nación</p>
+                  )}
                 </Td>
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 2xl:table-cell">{formatDate(i.issueDate)}</Td>
                 <Td className="whitespace-nowrap text-right tabular text-steel-600">{formatMoney(i.total, i.currency)}</Td>
@@ -157,6 +259,9 @@ export default async function DetractionsPage({ searchParams }: { searchParams: 
                 <Td>
                   <DetractionBadge status={i.detractionStatus} />
                   {i.detractionPaidAt && <p className="mt-1 text-xs text-steel-500">{formatDate(i.detractionPaidAt)}</p>}
+                  {i.detractionBatchId && loteDe.get(i.detractionBatchId) && (
+                    <p className="mt-1 text-xs text-steel-500">Lote {loteDe.get(i.detractionBatchId)}</p>
+                  )}
                 </Td>
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 2xl:table-cell">
                   {i.detractionReceipt ?? "—"}

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { invoiceAttachments } from "@/db/schema";
@@ -23,7 +23,11 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   // préstamo no es un papel de facturas: quien lleva las obligaciones tiene que poder
   // abrirlo, y quien solo ve facturas no.
   const permiso = file.installmentId ? "obligations.view" : "invoices.view";
-  if (!can(user, permiso)) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
+  // La constancia de una detracción la abre también quien solo lleva Detracciones.
+  const esConstanciaDeDetraccion = !file.installmentId && can(user, "detractions.view") && (await db.execute(sql`
+    select 1 from supplier_invoices where detraction_proof_id = ${file.id}
+    union all select 1 from detraction_batches where proof_id = ${file.id} limit 1`)).length > 0;
+  if (!can(user, permiso) && !esConstanciaDeDetraccion) return NextResponse.json({ error: "Sin permiso" }, { status: 403 });
 
   try {
     const data = await readFile(file);
