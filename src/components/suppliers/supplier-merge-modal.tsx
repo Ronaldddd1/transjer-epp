@@ -69,6 +69,10 @@ function Campos({ origen, opciones, destinoSugerido, errors }: {
           <strong>{elegido ? elegido.name : "el que elijas"}</strong>, con su deuda y sus pagos.
         </p>
         <p className="mt-1.5">
+          Si una factura está registrada en los dos, queda una sola: la más avanzada (la pagada antes que la
+          pendiente), con los archivos de las dos.
+        </p>
+        <p className="mt-1.5">
           Después, la ficha de <strong>{origen.name}</strong> se borra. Si tenía RUC, correo o teléfono y el
           otro no, se los pasa. Queda registrado en auditoría.
         </p>

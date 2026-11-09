@@ -1,4 +1,4 @@
-import { AlertTriangle, Building2, CalendarClock, FileClock, Mail, MapPin, Eye } from "lucide-react";
+import { AlertTriangle, CalendarClock, FileClock, Mail, MapPin, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { AdvanceModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
@@ -16,10 +16,10 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL,
-  invoiceNumber, pageParams, saldoAPagar, todayLima, type SearchParams,
+  invoiceNumber, pageParams, saldoAPagar, type SearchParams,
 } from "@/lib/utils";
 import {
-  countAwaitingCreditNote, countEmailsToReview, countSuppliersWithoutRuc, getClientOptions,
+  countAwaitingCreditNote, countEmailsToReview, getClientOptions,
   getDestinationOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters,
 } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
@@ -46,7 +46,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, destinos, emailsToReview, sinRuc] = await Promise.all([
+  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, destinos, emailsToReview] = await Promise.all([
     listInvoices(f, pageSize, offset),
     invoiceTotals(f),
     // Los mismos filtros pero sin el estado NI la espera de nota de crédito: así cada
@@ -57,7 +57,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     getClientOptions(),
     getDestinationOptions(),
     countEmailsToReview(),
-    canManage ? countSuppliersWithoutRuc() : Promise.resolve(0),
   ]);
 
   // Resumen de lo que se está viendo, separado por moneda.
@@ -77,11 +76,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     { label: "Pagadas", count: sum(pagadas), detail: amounts(pagadas), tone: "plain" as const },
     { label: "Observadas", count: sum(observadas), detail: amounts(observadas), tone: "plain" as const },
   ];
-
-  // Lo urgente de esta página: lo que ya venció y lo que espera la guía para poder vencer.
-  const hoy = todayLima();
-  const vencidas = rows.filter((r) => r.status === "PENDIENTE" && !!r.payDueDate && r.payDueDate < hoy);
-  const sinGuia = rows.filter((r) => r.status === "PENDIENTE" && r.paymentTerm === "CREDITO" && !r.guideReceivedAt);
 
   return (
     <>
@@ -108,53 +102,6 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           </>
         }
       />
-
-      {emailsToReview > 0 && canManage && (
-        <Link
-          href="/facturas/correos?estado=REVISAR"
-          className="mb-4 flex items-center gap-3 rounded-lg border border-brand/60 bg-brand-soft px-4 py-3 text-sm text-[#7A5A00] hover:border-brand"
-        >
-          <Mail className="h-5 w-5 shrink-0" aria-hidden />
-          <span>
-            <strong>{emailsToReview} correo(s)</strong> llegaron al buzón y no se pudieron registrar solos. Revísalos para no perder ninguna factura.
-          </span>
-        </Link>
-      )}
-
-      {sinRuc > 0 && (
-        <Link
-          href="/proveedores"
-          className="mb-4 flex items-center gap-3 rounded-lg border border-steel-300 bg-steel-50 px-4 py-3 text-sm text-steel-700 hover:border-steel-400"
-        >
-          <Building2 className="h-5 w-5 shrink-0 text-steel-400" aria-hidden />
-          <span>
-            <strong>{sinRuc} proveedor(es)</strong> todavía no tienen RUC. Se completa solo cuando llegue
-            una factura suya con el XML, o puedes escribirlo a mano desde Proveedores.
-          </span>
-        </Link>
-      )}
-
-      {(vencidas.length > 0 || sinGuia.length > 0) && (
-        <div className="mb-4 grid gap-2 sm:grid-cols-2">
-          {vencidas.length > 0 && (
-            <Link href="/facturas?vencidas=1" className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 hover:border-red-400">
-              <AlertTriangle className="h-5 w-5 shrink-0" aria-hidden />
-              <span>
-                <strong>{vencidas.length} factura(s)</strong> pasaron su fecha límite de pago.
-              </span>
-            </Link>
-          )}
-          {sinGuia.length > 0 && (
-            <Link href="/facturas?singuia=1" className="flex items-center gap-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900 hover:border-sky-400">
-              <FileClock className="h-5 w-5 shrink-0" aria-hidden />
-              <span>
-                <strong>{sinGuia.length} factura(s)</strong> a crédito esperan que el proveedor entregue la guía en físico.
-                Hasta entonces su plazo no corre.
-              </span>
-            </Link>
-          )}
-        </div>
-      )}
 
       <dl className="mb-6 grid gap-3 sm:grid-cols-3">
         {resumen.map((r) => (

@@ -3,7 +3,7 @@ Limpieza de datos que vinieron del Excel, y la deuda total de Finanzas.
 
   - Unir dos proveedores que son el mismo escrito de otra manera: las facturas pasan al
     correcto, se le completa el RUC y el duplicado desaparece. Si los dos tienen la
-    misma factura, no se une y se dice cuál.
+    misma factura, se une igual y queda una sola: la más avanzada (la pagada).
   - Destinos: "BARRANCA", "barranca" y "Barranca " son uno solo en el filtro, se unifican
     de una vez, y renombrar uno con el nombre de otro los junta. (Que una factura nueva
     tome la escritura que ya existe lo prueba tests/destinos.test.ts.)
@@ -138,9 +138,12 @@ with sync_playwright() as p:
     check("queda en auditoría",
           psql(f"select count(*) from audit_logs where module = 'PROVEEDORES' and description like '%unió%{MAL}%'") == "1")
 
-    # --- Si los dos tienen la misma factura, no se une ---
+    # --- Si los dos tienen la misma factura, se une y queda una sola: la más avanzada ---
     ejecutar(f"insert into suppliers (business_name) values ('{OTRO}')")
     factura(OTRO, "F001", f"9{SELLO}")
+    # La copia del duplicado está pagada y la del correcto no: tiene que quedar la pagada.
+    ejecutar(f"update supplier_invoices set status = 'PAGADA', paid_at = now(), description = 'copia-pagada' where number = '9{SELLO}' "
+             f"and supplier_id = (select id from suppliers where business_name = '{OTRO}')")
     page.goto(f"{BASE}/proveedores?q={SELLO}"); page.wait_for_timeout(1500)
     fila = page.get_by_role("row").filter(has_text=OTRO.replace("  ", " ")).first
     if fila.count() == 0:
@@ -148,9 +151,29 @@ with sync_playwright() as p:
     fila.get_by_role("button", name="Unir con otro proveedor").click(); page.wait_for_timeout(600)
     dialogo = page.locator("[role=dialog]")
     dialogo.locator("select[name=destinoId]").select_option(label=f"{BIEN} · RUC {RUC}")
-    dialogo.get_by_role("button", name="Unir y pasar las facturas").click(); page.wait_for_timeout(2200)
-    check("con una factura repetida no se une", psql(f"select count(*) from suppliers where business_name = '{OTRO}'") == "1")
-    check("y dice cuál es la repetida", f"F001-9{SELLO}" in page.locator("body").inner_text())
+    dialogo.get_by_role("button", name="Unir y pasar las facturas").click(); page.wait_for_timeout(2500)
+    check("con una factura repetida igual se une", psql(f"select count(*) from suppliers where business_name = '{OTRO}'") == "0")
+    check("y la factura repetida queda una sola vez",
+          psql(f"select count(*) from supplier_invoices where series = 'F001' and number = '9{SELLO}'") == "1")
+    check("la que queda es la más avanzada: la pagada",
+          psql(f"select status || '|' || coalesce(description, '') from supplier_invoices where series = 'F001' and number = '9{SELLO}'")
+          == "PAGADA|copia-pagada",
+          psql(f"select status || '|' || coalesce(description, '') from supplier_invoices where number = '9{SELLO}'"))
+    check("y queda en manos del correcto",
+          psql(f"select s.business_name from supplier_invoices i join suppliers s on s.id = i.supplier_id where i.number = '9{SELLO}'") == BIEN)
+    check("la auditoría cuenta las repetidas que se borraron",
+          psql(f"select count(*) from audit_logs where module = 'PROVEEDORES' and description like '%unió%{OTRO}%' "
+               f"and old_data::text like '%facturasRepetidasBorradas%'") == "1",
+          psql(f"select description || ' ' || coalesce(old_data::text, '') from audit_logs where module = 'PROVEEDORES' order by created_at desc limit 1"))
+
+    # --- Facturas: sin los avisos grandes de arriba ---
+    page.goto(f"{BASE}/facturas"); page.wait_for_timeout(1500)
+    cuerpo = page.locator("body").inner_text()
+    for texto in ["no se pudieron registrar solos", "todavía no tienen RUC", "pasaron su fecha límite de pago",
+                  "esperan que el proveedor entregue la guía"]:
+        check(f"Facturas ya no muestra el aviso «{texto}»", texto not in cuerpo)
+    check("el contador de correos sigue en el botón Correos",
+          page.get_by_role("link", name=re.compile("Correos")).count() == 1)
 
     check("sin errores de JavaScript", not errores, errores[:3])
     nav.close()

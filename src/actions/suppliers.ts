@@ -3,7 +3,7 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { supplierInvoices, suppliers } from "@/db/schema";
+import { invoiceAttachments, invoiceEmails, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
@@ -93,10 +93,14 @@ export async function toggleSupplier(id: string): Promise<ActionResult> {
  * de dos maneras ("Transportes Pérez SAC" y "TRANSPORTES PEREZ S.A.C.") y el sistema los
  * contaba como dos, con sus facturas y su deuda partidas.
  *
- * No se hace si:
- *  - los dos tienen RUC y son distintos: entonces sí son dos proveedores;
- *  - la misma factura (tipo, serie y número) está registrada en los dos: unirlos la
- *    duplicaría; primero hay que anular o corregir la repetida.
+ * No se hace si los dos tienen RUC y son distintos: entonces sí son dos proveedores.
+ *
+ * Si la misma factura (tipo, serie y número) está registrada en los dos —lo normal, si
+ * se cargó dos veces con el nombre escrito distinto—, se queda una sola: la más avanzada
+ * (pagada antes que pendiente, y pendiente antes que anulada; luego la que tiene más
+ * adelantos, la detracción pagada y más archivos). Si empatan, la del proveedor que queda.
+ * Los archivos y los correos de la que se borra pasan a la que queda, para no perder el
+ * XML ni el comprobante, y la borrada queda entera en la auditoría.
  *
  * Al correcto se le completan los datos que le falten y el duplicado sí tenga (RUC,
  * correo, teléfono, contacto). Todo, con el detalle del borrado, queda en auditoría.
@@ -119,20 +123,51 @@ export async function mergeSuppliers(origenId: string, formData: FormData): Prom
         );
       }
 
-      const choques = await tx.execute<{ doc: string }>(sql`
-        select a.series || '-' || a.number as doc
+      // Las facturas que están en los dos, con lo que cuenta para decidir cuál queda.
+      const pares = await tx.execute<{
+        origen_id: string; destino_id: string; doc: string;
+        puntos_origen: number; puntos_destino: number;
+      }>(sql`
+        with puntos as (
+          select i.id,
+            (case i.status when 'PAGADA' then 3 when 'ANULADA' then 0 else 1 end) * 100000
+            + (select count(*) from invoice_advances a where a.invoice_id = i.id) * 1000
+            + (case when i.detraction_status = 'PAGADA' then 100 else 0 end)
+            + (select count(*) from invoice_attachments f where f.invoice_id = i.id) as p
+          from supplier_invoices i
+          where i.supplier_id in (${origenId}, ${destinoId})
+        )
+        select a.id as origen_id, b.id as destino_id, a.series || '-' || a.number as doc,
+               pa.p::int as puntos_origen, pb.p::int as puntos_destino
         from supplier_invoices a
         join supplier_invoices b on b.supplier_id = ${destinoId}
           and b.doc_type = a.doc_type and b.series = a.series and b.number = a.number
+        join puntos pa on pa.id = a.id
+        join puntos pb on pb.id = b.id
         where a.supplier_id = ${origenId}
-        order by 1 limit 6
       `);
-      const repetidas = [...choques].map((c) => c.doc);
-      if (repetidas.length > 0) {
-        throw new BusinessError(
-          `Las dos fichas tienen registrada la misma factura (${repetidas.slice(0, 5).join(", ")}${repetidas.length > 5 ? "…" : ""}). `
-          + "Anula o corrige la repetida y vuelve a unirlos.",
-        );
+
+      const descartadas: { doc: string; queda: string; borrada: unknown }[] = [];
+      for (const par of [...pares]) {
+        // Gana la de más puntos; si empatan, la del proveedor que queda.
+        const quedaOrigen = Number(par.puntos_origen) > Number(par.puntos_destino);
+        const queda = quedaOrigen ? par.origen_id : par.destino_id;
+        const sobra = quedaOrigen ? par.destino_id : par.origen_id;
+
+        const [borrada] = await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, sobra));
+        const [ganadora] = await tx.select().from(supplierInvoices).where(eq(supplierInvoices.id, queda));
+        // Los archivos (XML, PDF, comprobantes) y los correos de la que sobra pasan a la que queda.
+        await tx.update(invoiceAttachments).set({ invoiceId: queda }).where(eq(invoiceAttachments.invoiceId, sobra));
+        await tx.update(invoiceEmails).set({ invoiceId: queda }).where(eq(invoiceEmails.invoiceId, sobra));
+        // Si la que queda no tenía la imagen del pago o de la detracción y la otra sí, se la lleva.
+        const completarFactura: Partial<typeof supplierInvoices.$inferInsert> = {};
+        if (!ganadora.paymentProofId && borrada.paymentProofId) completarFactura.paymentProofId = borrada.paymentProofId;
+        if (!ganadora.detractionProofId && borrada.detractionProofId) completarFactura.detractionProofId = borrada.detractionProofId;
+        await tx.delete(supplierInvoices).where(eq(supplierInvoices.id, sobra));
+        if (Object.keys(completarFactura).length) {
+          await tx.update(supplierInvoices).set(completarFactura).where(eq(supplierInvoices.id, queda));
+        }
+        descartadas.push({ doc: par.doc, queda: quedaOrigen ? "la del duplicado" : "la del proveedor que queda", borrada });
       }
 
       const movidas = await tx.update(supplierInvoices)
@@ -158,18 +193,25 @@ export async function mergeSuppliers(origenId: string, formData: FormData): Prom
         user, action: "EDITAR", module: "PROVEEDORES", recordId: destinoId,
         description: `${user.name} unió "${origen.businessName}" con "${destino.businessName}": `
           + `pasaron ${movidas.length} factura(s) y se borró la ficha duplicada`
+          + (descartadas.length
+            ? `; ${descartadas.length} factura(s) estaban en los dos y quedó una sola de cada una (${descartadas.map((d) => d.doc).join(", ")})`
+            : "")
           + (Object.keys(completar).length ? ` (se le completó: ${Object.keys(completar).join(", ")}).` : "."),
-        oldData: { duplicado: origen },
+        oldData: { duplicado: origen, facturasRepetidasBorradas: descartadas },
         newData: { proveedor: destinoId, facturas: movidas.map((m) => m.id), completado: completar },
       }, tx);
 
-      return { movidas: movidas.length, origen: origen.businessName, destino: destino.businessName };
+      return {
+        movidas: movidas.length, repetidas: descartadas.length,
+        origen: origen.businessName, destino: destino.businessName,
+      };
     });
 
     revalidatePath("/", "layout");
     return {
       ok: true,
-      message: `Listo: ${resultado.movidas} factura(s) de "${resultado.origen}" quedaron en "${resultado.destino}".`,
+      message: `Listo: ${resultado.movidas} factura(s) de "${resultado.origen}" quedaron en "${resultado.destino}"`
+        + (resultado.repetidas ? `, y ${resultado.repetidas} que estaban repetidas quedaron una sola vez.` : "."),
     };
   } catch (e) {
     return toActionError(e);
