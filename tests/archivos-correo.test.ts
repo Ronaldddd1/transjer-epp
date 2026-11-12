@@ -48,6 +48,20 @@ check("una nota de crédito no pide guía",
 check("un comprimido puede traer todo: no se reclama PDF ni guía",
   igual(archivosFaltantes(a("todo.zip"), { xmlLegible: true }), []));
 
+// --- Reconocer la guía por su número (el caso de E001-30) ---
+const caso = a("10408642391-31-EG03-75.pdf", "FACTURAE001-3010408642391.XML", "FACTURAE001-3010408642391.pdf");
+check("la guía que nombra la factura (EG03 - 75) se reconoce por su número",
+  !archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }).includes(FALTA_GUIA),
+  archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }));
+check("y si el concepto nombra otra del transportista que no vino, solo esa falta",
+  igual(archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }), [FALTA_GUIA_TRANSPORTISTA]));
+check("con ceros delante también cruza",
+  !archivosFaltantes(a("guia EG03-00000075.pdf", "f.pdf", "grt.pdf"), { xmlLegible: true, guias: { remision: ["EG03-75"], transportista: [] } }).includes(FALTA_GUIA));
+check("el mismo número en las dos cuenta como la del transportista",
+  igual(archivosFaltantes(a("x-01-F001-1.pdf", "VT01-8407.pdf"), { xmlLegible: true, guias: { remision: ["VT01-8407"], transportista: ["VT01-8407"] } }), [FALTA_GUIA]));
+check("el PDF de la guía no cuenta como la factura",
+  archivosFaltantes(a("EG03-75.pdf"), { xmlLegible: true, guias: { remision: ["EG03-75"], transportista: [] } }).includes(FALTA_FACTURA));
+
 // --- El aviso de aceptación ---
 const cuerpo = acceptanceEmailBody({ comprobante: "F001-12", proveedor: "RYK LOGISTICS SAC", total: "S/ 1,180.00", transporte: true });
 check("saluda al proveedor", cuerpo.startsWith("Estimados señores de RYK LOGISTICS SAC:"));

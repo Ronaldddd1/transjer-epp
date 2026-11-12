@@ -15,7 +15,9 @@ import { Pagination } from "@/components/ui/pagination";
 import { TabLinks } from "@/components/ui/tab-links";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
-import { archivosFaltantes, FALTANTE_CORTO, SIN_ADJUNTOS } from "@/lib/archivos-correo";
+import {
+  archivosFaltantes, FALTA_GUIA, FALTA_GUIA_TRANSPORTISTA, FALTANTE_CORTO, SIN_ADJUNTOS,
+} from "@/lib/archivos-correo";
 import { can } from "@/lib/permissions";
 import {
   AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, valorSinIgv,
@@ -232,8 +234,21 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
             // Lo que le falta al correo de los tres archivos de un comprobante: factura,
             // XML y guía. Solo importa mientras está por decidir.
             const faltan = porAprobar || sinLeer
-              ? archivosFaltantes(correo.archivos, { xmlLegible: !!c, esNotaCredito: c?.docType === "NOTA_CREDITO" })
+              ? archivosFaltantes(correo.archivos, {
+                xmlLegible: !!c,
+                esNotaCredito: c?.docType === "NOTA_CREDITO",
+                // Las guías que nombra la factura: así se reconocen por su número aunque el
+                // archivo se llame de cualquier manera.
+                guias: {
+                  remision: [c?.grtNumber, correo.viaje?.dispatchNote],
+                  transportista: [correo.viaje?.grtNumber],
+                },
+              })
               : [];
+            // El número de la guía que falta, cuando la factura lo dice.
+            const numeroDe = (m: string) =>
+              m === FALTA_GUIA ? (c?.grtNumber ?? correo.viaje?.dispatchNote ?? null)
+                : m === FALTA_GUIA_TRANSPORTISTA ? (correo.viaje?.grtNumber ?? null) : null;
             const avisoFallido = e.status === "RECHAZADO" && !e.replySentAt;
             return (
               <Tr key={e.id} tone={porAprobar ? "bg-blue-50/60 hover:bg-blue-50" : undefined}>
@@ -327,6 +342,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                           {faltan.map((m) => (
                             <li key={m} className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium leading-tight text-red-800 ring-1 ring-inset ring-red-200">
                               {FALTANTE_CORTO[m] ?? m}
+                              {numeroDe(m) && <span className="font-normal"> {numeroDe(m)!.replace(/\s+/g, "")}</span>}
                             </li>
                           ))}
                         </ul>

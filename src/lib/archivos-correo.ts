@@ -48,27 +48,71 @@ export const FALTANTE_CORTO: Record<string, string> = {
 };
 
 /**
+ * Un número de guía reducido a lo que lo identifica: la serie y el número sin ceros.
+ * "EG03 - 75", "EG03-00000075" y "eg03_75" son la misma guía.
+ */
+export function claveGuia(texto: string | null | undefined): string | null {
+  const m = /([A-Za-z][A-Za-z0-9]{3})\s*[-_ ]\s*0*(\d{1,10})/.exec(texto ?? "");
+  return m ? `${m[1].toUpperCase()}-${Number(m[2])}` : null;
+}
+
+/** Todos los números de guía (o de comprobante) que aparecen en el nombre de un archivo. */
+function clavesEnNombre(nombre: string): Set<string> {
+  const claves = new Set<string>();
+  for (const m of nombre.matchAll(/([A-Za-z][A-Za-z0-9]{3})\s*[-_ ]\s*0*(\d{1,10})(?!\d)/g)) {
+    claves.add(`${m[1].toUpperCase()}-${Number(m[2])}`);
+  }
+  return claves;
+}
+
+/**
+ * Las guías que el comprobante dice tener: la de remisión (la que trae el XML, o la del
+ * remitente escrita en el concepto) y la del transportista (la GRT del concepto).
+ */
+export type GuiasEsperadas = { remision: (string | null | undefined)[]; transportista: (string | null | undefined)[] };
+
+/**
  * Lo que le falta al correo, en frases para mostrar tal cual. Vacío si trae todo.
+ *
+ * Una guía se reconoce primero por su número: si la factura dice "guía EG03-75" y viene un
+ * archivo que se llama …EG03-75.pdf, esa es la guía, se llame como se llame lo demás. Solo
+ * si no se puede cruzar por número se mira el tipo de SUNAT o las palabras del nombre.
  *
  * Una nota de crédito no lleva guías. Un archivo comprimido puede traer adentro el PDF y la
  * guía: como no se puede saber sin abrirlo, no se los da por faltantes.
  */
 export function archivosFaltantes(
   archivos: ArchivoCorreo[],
-  opciones: { xmlLegible: boolean; esNotaCredito?: boolean },
+  opciones: { xmlLegible: boolean; esNotaCredito?: boolean; guias?: GuiasEsperadas },
 ): string[] {
   if (archivos.length === 0) return [SIN_ADJUNTOS];
   const tipos = archivos.map(clasificarArchivo);
   const comprimido = tipos.includes("COMPRIMIDO");
   const faltan: string[] = [];
   if (!opciones.xmlLegible) faltan.push(tipos.includes("XML") || comprimido ? XML_ILEGIBLE : FALTA_XML);
-  if (!comprimido) {
-    const tienePdf = tipos.includes("COMPROBANTE") || (opciones.esNotaCredito && tipos.includes("NOTA_CREDITO"));
-    if (!tienePdf) faltan.push(FALTA_FACTURA);
-    if (!opciones.esNotaCredito) {
-      if (!tipos.includes("GUIA_REMITENTE")) faltan.push(FALTA_GUIA);
-      if (!tipos.includes("GUIA_TRANSPORTISTA")) faltan.push(FALTA_GUIA_TRANSPORTISTA);
-    }
+  if (comprimido) return faltan;
+
+  // Los documentos (no el XML) que coinciden con una guía que nombra la factura.
+  const claves = (lista?: (string | null | undefined)[]) =>
+    new Set((lista ?? []).map(claveGuia).filter((c): c is string => !!c));
+  const esperadasRemision = claves(opciones.guias?.remision);
+  const esperadasTransportista = claves(opciones.guias?.transportista);
+  // Si el mismo número figura como las dos, es la del transportista (así lo dice el concepto).
+  for (const k of esperadasTransportista) esperadasRemision.delete(k);
+  const documentos = archivos
+    .map((a, i) => ({ tipo: tipos[i], claves: clavesEnNombre(a.filename) }))
+    .filter((d) => d.tipo !== "XML" && d.tipo !== "OTRO");
+  const coincide = (d: { claves: Set<string> }, esperadas: Set<string>) => [...d.claves].some((k) => esperadas.has(k));
+  const porNumeroRemision = documentos.filter((d) => coincide(d, esperadasRemision));
+  const porNumeroTransportista = documentos.filter((d) => coincide(d, esperadasTransportista) && !porNumeroRemision.includes(d));
+  const usados = new Set([...porNumeroRemision, ...porNumeroTransportista]);
+  const libres = documentos.filter((d) => !usados.has(d));
+
+  const tienePdf = libres.some((d) => d.tipo === "COMPROBANTE" || (opciones.esNotaCredito && d.tipo === "NOTA_CREDITO"));
+  if (!tienePdf) faltan.push(FALTA_FACTURA);
+  if (!opciones.esNotaCredito) {
+    if (!porNumeroRemision.length && !libres.some((d) => d.tipo === "GUIA_REMITENTE")) faltan.push(FALTA_GUIA);
+    if (!porNumeroTransportista.length && !libres.some((d) => d.tipo === "GUIA_TRANSPORTISTA")) faltan.push(FALTA_GUIA_TRANSPORTISTA);
   }
   return faltan;
 }

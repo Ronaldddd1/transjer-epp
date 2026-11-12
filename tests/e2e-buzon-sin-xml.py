@@ -79,6 +79,18 @@ adjunto(completo, "email_id", f"{RUC}-01-{SERIE}-{SELLO}1.pdf")
 adjunto(completo, "email_id", f"{RUC}-31-EG03-{SELLO}.pdf")
 adjunto(completo, "email_id", f"20100055237-09-T001-{SELLO}.pdf")
 
+# El caso real de E001-30: la guía viene como …-31-EG03-75.pdf y la factura la nombra
+# "EG03 - 75"; el concepto nombra además la GRTE VT01-8407, que no vino.
+caso = correo("caso30", "POR_APROBAR", f"FACTURA E001-30 OSCAR {SELLO}", {
+    "docType": "FACTURA", "series": "E001", "number": f"30{SELLO}", "issueDate": "2026-11-12", "currency": "PEN",
+    "subtotal": "650.00", "igv": "117.00", "total": "767.00", "supplierRuc": RUC, "supplierName": PROVEEDOR,
+    "grtNumber": "EG03 - 75",
+    "description": "POR EL SERVICIO DE TRANSPORTE DE CARGA LOCAL DE V.E.S A LURIN CON PLACA A4M831 SEGUN GRTE VT01-8407",
+})
+adjunto(caso, "email_id", "10408642391-31-EG03-75.pdf")
+adjunto(caso, "email_id", f"FACTURAE001-30{SELLO}.XML", "application/xml")
+adjunto(caso, "email_id", f"FACTURAE001-30{SELLO}.pdf")
+
 # Dos facturas anuladas: una espera la NC, la otra ya la tiene, con su PDF.
 def factura(numero, extra):
     ejecutar("insert into supplier_invoices (supplier_id, series, number, issue_date, total, status, status_reason, detraction_status"
@@ -121,6 +133,12 @@ with sync_playwright() as p:
     fila2 = page.locator("tbody tr").filter(has_text=PROVEEDOR).filter(has_text=f"{SERIE}-{SELLO}1")
     check("el que trae factura, XML y las dos guías no reclama nada", fila2.count() == 1 and "No se encontró" not in fila2.inner_text(),
           fila2.inner_text() if fila2.count() else "")
+    fila30 = page.locator("tbody tr").filter(has_text=f"E001-30{SELLO}")
+    chips30 = fila30.locator("li").all_inner_texts() if fila30.count() else []
+    check("la guía EG03-75 se reconoce por su número: no se reclama la guía de remisión",
+          not any(t.startswith("Guía de remisión") for t in chips30), chips30)
+    check("solo falta la del transportista que nombra el concepto, con su número",
+          chips30 == ["Guía transportista VT01-8407"], chips30)
     check("sin XML todavía no se puede registrar: primero el monto",
           fila.get_by_role("button", name=re.compile("^Registrar")).count() == 0)
 
