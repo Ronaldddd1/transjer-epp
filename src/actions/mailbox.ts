@@ -8,8 +8,10 @@ import { BusinessError, formToObject, toActionError, type ActionResult } from "@
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
 import {
-  compararMonto, formatMoney, invoiceNumber, REJECT_REASON_LABEL, valorSinIgv, type RejectReasonKey,
+  acceptanceEmailBody, compararMonto, formatMoney, invoiceNumber, REJECT_REASON_LABEL, valorSinIgv,
+  type RejectReasonKey,
 } from "@/lib/utils";
+import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
 import {
   approveEmailSchema, invoiceSchema, observeInvoiceSchema, rejectEmailSchema, verifyAmountSchema,
 } from "@/lib/validations";
@@ -166,7 +168,7 @@ export async function syncMailboxNow(): Promise<ActionResult> {
     const partes = [
       `${r.revisados} correo(s) revisado(s)`,
       r.porAprobar ? `${r.porAprobar} comprobante(s) por aprobar` : null,
-      r.revisar ? `${r.revisar} por revisar` : null,
+      r.revisar ? `${r.revisar} sin XML (pasan a verificar monto)` : null,
       r.duplicados ? `${r.duplicados} ya registrada(s)` : null,
       r.errores ? `${r.errores} con error` : null,
     ].filter(Boolean);
@@ -205,12 +207,25 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
     }
     if (email.status === "RECHAZADO") throw new BusinessError("Este comprobante ya fue rechazado.");
 
-    const comprobante = parsedOf(email);
-    if (!comprobante) {
-      throw new BusinessError("Este correo no trae los datos del comprobante leídos, así que no hay importe que comparar.");
-    }
+    if (email.status === "DESCARTADO") throw new BusinessError("Este correo quedó descartado.");
 
-    const facturadoSinIgv = valorSinIgv(comprobante.subtotal, comprobante.total);
+    // Con XML, el importe sale del comprobante. Sin XML, lo escribe quien verifica mirando
+    // el PDF: es lo único que hay para comparar con lo pactado.
+    const leido = parsedOf(email);
+    if (!leido && !data.manualAmount) {
+      return {
+        ok: false,
+        message: "Este correo llegó sin XML: escribe el importe sin IGV que dice la factura.",
+        fieldErrors: { manualAmount: "Escribe el importe sin IGV que dice la factura" },
+      };
+    }
+    const comprobante = leido ?? {
+      series: "", number: "",
+      currency: data.manualCurrency ?? "PEN",
+      subtotal: data.manualAmount!, total: data.manualAmount!,
+    };
+
+    const facturadoSinIgv = leido ? valorSinIgv(leido.subtotal, leido.total) : data.manualAmount!;
     const { diferencia, coincide, cobraDeMas } = compararMonto(facturadoSinIgv, data.agreedAmount);
     const nota = data.amountNote?.trim() || null;
 
@@ -225,13 +240,14 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
 
     await db.update(invoiceEmails).set({
       agreedAmount: data.agreedAmount,
+      ...(leido ? {} : { manualAmount: data.manualAmount, manualCurrency: data.manualCurrency ?? "PEN" }),
       amountStatus: estado,
       amountNote: nota,
       amountCheckedBy: user.id,
       amountCheckedAt: new Date(),
     }).where(eq(invoiceEmails.id, id));
 
-    const label = invoiceNumber(comprobante.series, comprobante.number);
+    const label = leido ? invoiceNumber(leido.series, leido.number) : `"${email.subject ?? "(sin asunto)"}" (sin XML)`;
     await logAudit({
       user, action: "EDITAR", module: "CORREO", recordId: id,
       description: `${user.name} verificó el monto del comprobante ${label}:`
@@ -249,14 +265,14 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
     if (coincide) {
       return {
         ok: true,
-        message: `El monto coincide con lo pactado. ${label} ya se puede aceptar o rechazar.`,
+        message: `El monto coincide con lo pactado. ${label} ya se puede ${leido ? "aceptar" : "registrar"} o rechazar.`,
       };
     }
     if (conforme) {
       return {
         ok: true,
         message: `Diferencia de ${plata(diferencia)} ${cobraDeMas ? "de más" : "de menos"} aprobada.`
-          + ` ${label} ya se puede aceptar o rechazar.`,
+          + ` ${label} ya se puede ${leido ? "aceptar" : "registrar"} o rechazar.`,
       };
     }
     return {
@@ -267,6 +283,50 @@ export async function verifyEmailAmount(id: string, formData: FormData): Promise
   } catch (e) {
     return toActionError(e);
   }
+}
+
+/**
+ * Le avisa al proveedor que su comprobante se aceptó, y deja guardado lo que se le mandó.
+ *
+ * La aceptación no depende del correo: si no sale, la factura igual queda registrada, y lo
+ * que se guarda es que el aviso falló, para que se vea en la bandeja.
+ */
+async function avisarAceptacion(
+  email: { id: string; fromAddress: string | null; internetMessageId: string | null },
+  factura: { label: string; proveedor: string | null; total: string; currency: string; transporte: boolean },
+): Promise<{ enviado: boolean; destino: string | null; error: string | null }> {
+  const destino = email.fromAddress?.trim() || null;
+  if (!destino) {
+    await db.update(invoiceEmails).set({ replyError: "El correo no trae remitente: no hubo a quién avisarle." })
+      .where(eq(invoiceEmails.id, email.id));
+    return { enviado: false, destino: null, error: "el correo no trae remitente" };
+  }
+  const cuerpo = acceptanceEmailBody({
+    comprobante: factura.label,
+    proveedor: factura.proveedor,
+    total: formatMoney(factura.total, factura.currency),
+    transporte: factura.transporte,
+    plazoDias: PLAZO_TRANSPORTE_DIAS,
+  });
+  const envio = await sendMail({
+    to: destino,
+    subject: `Comprobante ${factura.label} aceptado — Transjer Operador Logístico`,
+    text: cuerpo,
+    inReplyTo: email.internetMessageId,
+  });
+  await db.update(invoiceEmails).set({
+    replyTo: destino,
+    replyBody: cuerpo,
+    replySentAt: envio.ok ? new Date() : null,
+    replyError: envio.ok ? null : (envio.error ?? "No se pudo enviar el correo."),
+  }).where(eq(invoiceEmails.id, email.id));
+  return { enviado: envio.ok, destino, error: envio.ok ? null : (envio.error ?? "no se pudo enviar") };
+}
+
+/** La parte del mensaje que cuenta si al proveedor se le avisó. */
+function fraseAviso(r: { enviado: boolean; destino: string | null; error: string | null } | null) {
+  if (!r) return "";
+  return r.enviado ? ` Se le avisó a ${r.destino}.` : ` No se pudo avisar al proveedor: ${r.error}.`;
 }
 
 /**
@@ -316,12 +376,38 @@ export async function approveEmail(id: string, formData: FormData): Promise<Acti
       } : undefined,
     }));
 
+    if (!resultado.ok) {
+      revalidatePath("/", "layout");
+      return { ok: false, message: resultado.error };
+    }
+
+    // El aviso de aceptación, después de registrar: si el correo falla, la factura ya está.
+    const leido = parsedOf(email);
+    const aviso = data.avisar && leido
+      ? await avisarAceptacion(email, {
+        label: resultado.label,
+        proveedor: leido.supplierName,
+        total: leido.total,
+        currency: leido.currency,
+        transporte: data.serviceType === "TRANSPORTE",
+      })
+      : null;
+    if (aviso) {
+      await logAudit({
+        user, action: "EDITAR", module: "CORREO", recordId: id,
+        description: aviso.enviado
+          ? `Se le avisó a ${aviso.destino} que el comprobante ${resultado.label} fue aceptado.`
+          : `No se pudo avisar al proveedor que el comprobante ${resultado.label} fue aceptado: ${aviso.error}.`,
+        newData: { avisado: aviso.enviado, destino: aviso.destino },
+      });
+    }
+
     revalidatePath("/", "layout");
-    if (!resultado.ok) return { ok: false, message: resultado.error };
     return {
       ok: true,
       message: `Comprobante aceptado. Quedó registrado como factura ${resultado.label}`
-        + `${data.serviceType === "TRANSPORTE" ? " de transporte." : " de servicio."}`,
+        + `${data.serviceType === "TRANSPORTE" ? " de transporte." : " de servicio."}`
+        + fraseAviso(aviso),
     };
   } catch (e) {
     return toActionError(e);
@@ -616,6 +702,13 @@ export async function createInvoiceFromEmail(emailId: string, formData: FormData
     const [email] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, emailId)).limit(1);
     if (!email) throw new BusinessError("El correo no existe.");
     if (email.status === "PROCESADO") throw new BusinessError("Este correo ya generó una factura.");
+    // El filtro del monto vale también para los que llegan sin XML.
+    if (email.amountStatus === "PENDIENTE") {
+      throw new BusinessError("Antes de registrarlo hay que verificar el monto: compáralo con lo pactado por el flete.");
+    }
+    if (email.amountStatus === "OBSERVADO") {
+      throw new BusinessError(`El monto está observado: ${email.amountNote || "no coincide con lo pactado"}. Resuélvelo antes de registrarlo.`);
+    }
 
     const invoice = await db.transaction(async (tx) => {
       const row = await insertInvoice(tx, { ...data, source: "CORREO", receivedAt: email.receivedAt }, user);
@@ -632,8 +725,20 @@ export async function createInvoiceFromEmail(emailId: string, formData: FormData
       return row;
     });
 
+    // Registrarlo es aceptarlo: al proveedor se le avisa igual que con los que traen XML.
+    const etiqueta = invoiceNumber(invoice.series, invoice.number);
+    const aviso = formData.get("avisar") === "on"
+      ? await avisarAceptacion(email, {
+        label: etiqueta,
+        proveedor: (await db.select({ n: suppliers.businessName }).from(suppliers).where(eq(suppliers.id, invoice.supplierId)))[0]?.n ?? null,
+        total: invoice.total,
+        currency: invoice.currency,
+        transporte: invoice.serviceType === "TRANSPORTE",
+      })
+      : null;
+
     revalidatePath("/", "layout");
-    return { ok: true, message: `Factura ${invoiceNumber(invoice.series, invoice.number)} registrada desde el correo.` };
+    return { ok: true, message: `Factura ${etiqueta} registrada desde el correo.${fraseAviso(aviso)}` };
   } catch (e) {
     return toActionError(e);
   }

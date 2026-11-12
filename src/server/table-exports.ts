@@ -909,10 +909,10 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         }),
         summary: [
           { label: "Correos", value: rows.length },
-          { label: "Por verificar monto", value: rows.filter((e) => e.status === "POR_APROBAR" && e.amountStatus !== "CONFORME").length },
-          { label: "Por aprobar", value: rows.filter((e) => e.status === "POR_APROBAR" && e.amountStatus === "CONFORME").length },
+          { label: "Por verificar monto", value: rows.filter((e) => ["POR_APROBAR", "REVISAR", "ERROR"].includes(e.status) && e.amountStatus !== "CONFORME").length },
+          { label: "Por aprobar", value: rows.filter((e) => ["POR_APROBAR", "REVISAR", "ERROR"].includes(e.status) && e.amountStatus === "CONFORME").length },
           { label: "Rechazados", value: rows.filter((e) => e.status === "RECHAZADO").length },
-          { label: "Por revisar", value: rows.filter((e) => e.status === "REVISAR" || e.status === "ERROR").length },
+          { label: "Sin XML", value: rows.filter((e) => e.status === "REVISAR" || e.status === "ERROR").length },
         ],
       }];
     },

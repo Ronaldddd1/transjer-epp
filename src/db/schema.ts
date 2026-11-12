@@ -454,6 +454,12 @@ export const invoiceEmails = pgTable("invoice_emails", {
    * comprobante no se puede aceptar: esa es toda la gracia del filtro.
    */
   agreedAmount: numeric("agreed_amount", { precision: 12, scale: 2 }),
+  /**
+   * Para los que llegan sin XML: el importe sin IGV que dice el PDF, escrito por quien
+   * verifica. Es lo que se compara con lo pactado cuando no hay XML del que leerlo.
+   */
+  manualAmount: numeric("manual_amount", { precision: 12, scale: 2 }),
+  manualCurrency: varchar("manual_currency", { length: 3 }),
   /** PENDIENTE | CONFORME | OBSERVADO */
   amountStatus: varchar("amount_status", { length: 12 }).notNull().default("PENDIENTE"),
   /** Por qué se aprobó una diferencia, o qué se observó. */
@@ -483,6 +489,8 @@ export const invoiceEmails = pgTable("invoice_emails", {
     sql`${t.status} in ('POR_APROBAR','PROCESADO','REVISAR','DESCARTADO','RECHAZADO','ERROR')`),
   check("invoice_emails_amount_status_valid",
     sql`${t.amountStatus} in ('PENDIENTE','CONFORME','OBSERVADO')`),
+  check("invoice_emails_manual_currency_valid",
+    sql`${t.manualCurrency} is null or ${t.manualCurrency} in ('PEN', 'USD')`),
 ]);
 
 /**

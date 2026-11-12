@@ -1,11 +1,12 @@
 import "server-only";
-import { and, asc, count, desc, eq, gte, ilike, inArray, lte, ne, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
+import { and, asc, count, desc, eq, gte, ilike, inArray, isNotNull, lte, ne, or, sql, type AnyColumn, type SQL } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
   invoiceAdvances, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
   type DetractionStatus, type InvoiceDocType, type InvoiceEmailStatus, type InvoiceStatus,
 } from "@/db/schema";
+import { clasificarArchivo } from "@/lib/archivos-correo";
 import { first, INVOICE_EMAIL_STATUSES, invoiceNumber, isYmd, type SearchParamsRecord } from "@/lib/utils";
 
 const like = (v: string) => `%${v.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
@@ -53,6 +54,11 @@ export type InvoiceFilters = {
   destination?: string;
   /** Solo las anuladas que todavía esperan la nota de crédito del proveedor. */
   awaitingCreditNote?: boolean;
+  /**
+   * La pestaña de notas de crédito: las que la esperan y las que ya la tienen, para ver
+   * de un vistazo cuáles faltan (en rojo) y cuáles ya llegaron (en amarillo).
+   */
+  notasCredito?: boolean;
 };
 
 const STATUSES: InvoiceStatus[] = ["PENDIENTE", "PAGADA", "OBSERVADA", "ANULADA"];
@@ -89,7 +95,8 @@ export function readInvoiceFilters(sp: SearchParamsRecord): InvoiceFilters {
     awaitingGuide: first(sp.singuia) === "1" || undefined,
     // "SIN_NC" no es un estado de la factura sino una pestaña: las anuladas a las que
     // todavía les falta la nota de crédito del proveedor.
-    awaitingCreditNote: first(sp.sinnc) === "1" || pestana === "SIN_NC" || undefined,
+    awaitingCreditNote: first(sp.sinnc) === "1" || undefined,
+    notasCredito: pestana === "SIN_NC" || undefined,
   };
 }
 
@@ -107,6 +114,9 @@ function invoiceConditions(f: InvoiceFilters): SQL | undefined {
     f.to ? lte(supplierInvoices.issueDate, f.to) : undefined,
     f.paymentTerm ? eq(supplierInvoices.paymentTerm, f.paymentTerm) : undefined,
     f.awaitingCreditNote ? eq(supplierInvoices.awaitingCreditNote, true) : undefined,
+    f.notasCredito
+      ? or(eq(supplierInvoices.awaitingCreditNote, true), isNotNull(supplierInvoices.creditNoteNumber))
+      : undefined,
     // Una factura anulada no genera depósito, así que no estorba en la lista de detracciones.
     f.detraction ? and(eq(supplierInvoices.detractionStatus, f.detraction), ne(supplierInvoices.status, "ANULADA")) : undefined,
     f.client ? eq(supplierInvoices.clientName, f.client) : undefined,
@@ -216,7 +226,11 @@ export async function listInvoices(f: InvoiceFilters, limit = 20, offset = 0) {
       .leftJoin(payer, eq(supplierInvoices.paidBy, payer.id))
       .leftJoin(creator, eq(supplierInvoices.createdBy, creator.id))
       .where(where)
-      .orderBy(desc(supplierInvoices.issueDate), desc(supplierInvoices.createdAt))
+      .orderBy(
+        // En la pestaña de notas de crédito, primero las que todavía la esperan.
+        ...(f.notasCredito ? [desc(supplierInvoices.awaitingCreditNote)] : []),
+        desc(supplierInvoices.issueDate), desc(supplierInvoices.createdAt),
+      )
       .limit(limit).offset(offset),
     db.select({ total: count() })
       .from(supplierInvoices)
@@ -504,6 +518,8 @@ export type EmailFilters = {
   status?: InvoiceEmailStatus;
   /** En qué punto del filtro del monto está: lo que separa las dos primeras pestañas. */
   amount?: "POR_VERIFICAR" | "CONFORME";
+  /** Los que esperan a una persona: por aprobar, y los que llegaron sin XML legible. */
+  porDecidir?: boolean;
   from?: string;
   to?: string;
 };
@@ -526,11 +542,14 @@ export function readEmailFilters(sp: SearchParamsRecord): EmailFilters {
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
   };
-  if (pestaña === "POR_VERIFICAR") {
-    return { ...base, status: "POR_APROBAR", amount: "POR_VERIFICAR" };
+  // Los que llegan sin XML (REVISAR, ERROR) siguen el mismo camino que los demás: primero
+  // el monto, después la decisión. "Por revisar" ya no es una pestaña: un enlace viejo a
+  // ella cae en "Por verificar monto", que es donde están ahora.
+  if (pestaña === "POR_VERIFICAR" || pestaña === "REVISAR") {
+    return { ...base, porDecidir: true, amount: "POR_VERIFICAR" };
   }
   if (pestaña === "POR_APROBAR") {
-    return { ...base, status: "POR_APROBAR", amount: "CONFORME" };
+    return { ...base, porDecidir: true, amount: "CONFORME" };
   }
   const status = pestaña as InvoiceEmailStatus | undefined;
   return { ...base, status: status && EMAIL_STATUSES.includes(status) ? status : undefined };
@@ -541,8 +560,9 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
   // sistema no pudo leer y alguien tiene que resolver— y separarlos haría que la pestaña
   // dijera un número y la lista mostrara otro.
   const where = and(
-    f.status === "REVISAR" ? inArray(invoiceEmails.status, ["REVISAR", "ERROR"])
-      : f.status ? eq(invoiceEmails.status, f.status) : undefined,
+    f.porDecidir ? inArray(invoiceEmails.status, ["POR_APROBAR", "REVISAR", "ERROR"])
+      : f.status === "REVISAR" ? inArray(invoiceEmails.status, ["REVISAR", "ERROR"])
+        : f.status ? eq(invoiceEmails.status, f.status) : undefined,
     f.amount === "POR_VERIFICAR" ? inArray(invoiceEmails.amountStatus, ["PENDIENTE", "OBSERVADO"])
       : f.amount === "CONFORME" ? eq(invoiceEmails.amountStatus, "CONFORME") : undefined,
     f.from ? gte(invoiceEmails.receivedAt, new Date(`${f.from}T00:00:00-05:00`)) : undefined,
@@ -567,6 +587,8 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
       // viajan con la fila: sin ellos habría que abrir cada correo para saber qué trae.
       parsed: invoiceEmails.parsed,
       agreedAmount: invoiceEmails.agreedAmount,
+      manualAmount: invoiceEmails.manualAmount,
+      manualCurrency: invoiceEmails.manualCurrency,
       amountStatus: invoiceEmails.amountStatus,
       amountNote: invoiceEmails.amountNote,
       amountCheckedAt: invoiceEmails.amountCheckedAt,
@@ -600,9 +622,11 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
 export async function emailCounts() {
   const [row] = await db.select({
     // Los dos pasos del camino: primero el filtro del monto, después la decisión.
-    porVerificar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} in ('PENDIENTE','OBSERVADO'))::int`,
-    observados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'OBSERVADO')::int`,
-    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'CONFORME')::int`,
+    // Con o sin XML: los que llegaron sin XML también pasan por el monto.
+    porVerificar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} in ('PENDIENTE','OBSERVADO'))::int`,
+    observados: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} = 'OBSERVADO')::int`,
+    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} = 'CONFORME')::int`,
+    sinXml: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,
     esperando: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR')::int`,
     revisar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,
     aceptados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'PROCESADO')::int`,
@@ -611,7 +635,7 @@ export async function emailCounts() {
     total: sql<number>`count(*)::int`,
   }).from(invoiceEmails);
   return row ?? {
-    porVerificar: 0, observados: 0, porAprobar: 0, esperando: 0,
+    porVerificar: 0, observados: 0, porAprobar: 0, esperando: 0, sinXml: 0,
     revisar: 0, aceptados: 0, rechazados: 0, descartados: 0, total: 0,
   };
 }
@@ -700,6 +724,39 @@ export async function listEmailAttachments(emailId: string) {
     contentType: invoiceAttachments.contentType,
     sizeBytes: invoiceAttachments.sizeBytes,
   }).from(invoiceAttachments).where(eq(invoiceAttachments.emailId, emailId)).orderBy(asc(invoiceAttachments.filename));
+}
+
+/**
+ * Los archivos de la nota de crédito de cada factura: los que llegaron en el correo de la
+ * nota (que pasan a colgar de la factura al aplicarla), o los que por su nombre son una
+ * nota de crédito. El PDF va primero: es lo que se quiere ver.
+ */
+export async function archivosDeNotasCredito(facturas: { id: string; creditNoteNumber: string | null }[]) {
+  const mapa = new Map<string, { id: string; filename: string }[]>();
+  const conNota = facturas.filter((f) => f.creditNoteNumber);
+  if (!conNota.length) return mapa;
+  const filas = await db.select({
+    id: invoiceAttachments.id,
+    invoiceId: invoiceAttachments.invoiceId,
+    filename: invoiceAttachments.filename,
+    deNota: sql<boolean>`coalesce((select e.parsed->>'docType' = 'NOTA_CREDITO' from invoice_emails e
+      where e.id = "invoice_attachments"."email_id"), false)`,
+  }).from(invoiceAttachments)
+    .where(inArray(invoiceAttachments.invoiceId, conNota.map((f) => f.id)))
+    .orderBy(asc(invoiceAttachments.filename));
+  for (const f of conNota) {
+    const numero = (f.creditNoteNumber ?? "").toUpperCase().replace(/\s+/g, "");
+    const [serie, correlativo] = numero.split("-");
+    const propios = filas.filter((a) => a.invoiceId === f.id && (
+      a.deNota
+      || clasificarArchivo({ filename: a.filename }) === "NOTA_CREDITO"
+      || (!!serie && !!correlativo && a.filename.toUpperCase().includes(serie)
+        && a.filename.toUpperCase().includes(correlativo.replace(/^0+/, "")))
+    ));
+    propios.sort((a, b) => Number(b.filename.toLowerCase().endsWith(".pdf")) - Number(a.filename.toLowerCase().endsWith(".pdf")));
+    if (propios.length) mapa.set(f.id, propios.map(({ id, filename }) => ({ id, filename })));
+  }
+  return mapa;
 }
 
 /** Cuántas facturas anuladas siguen esperando la nota de crédito del proveedor. */

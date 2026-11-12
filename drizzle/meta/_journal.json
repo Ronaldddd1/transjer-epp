@@ -204,6 +204,13 @@
       "when": 1794500000000,
       "tag": "0028_guias_de_facturas",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1794600000000,
+      "tag": "0029_monto_sin_xml",
+      "breakpoints": true
     }
   ]
 }

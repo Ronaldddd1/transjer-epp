@@ -127,7 +127,7 @@ export const EMAIL_STATUS_LABEL = {
   POR_APROBAR: "Por aprobar",
   PROCESADO: "Aceptado",
   RECHAZADO: "Rechazado",
-  REVISAR: "Por revisar",
+  REVISAR: "Sin XML",
   DESCARTADO: "Descartado",
   ERROR: "Con error",
 } as const;
@@ -256,6 +256,39 @@ export function rejectionEmailBody(datos: {
     "Quedamos atentos.",
     "",
     datos.firma?.trim() || empresa,
+  ];
+  return lineas.filter((l) => l !== null).join("\n");
+}
+
+/**
+ * El aviso al proveedor de que su comprobante fue aceptado.
+ *
+ * Del otro lado, sin respuesta, no se sabe si la factura llegó, si se aceptó o si se
+ * perdió, y se vuelve a mandar o se llama a preguntar. Con el aviso queda claro que está
+ * registrada para pago y, si es un flete, qué falta para que corra el plazo: la guía.
+ */
+export function acceptanceEmailBody(datos: {
+  comprobante: string;
+  proveedor: string | null;
+  total: string;
+  transporte: boolean;
+  plazoDias?: number;
+  empresa?: string;
+}): string {
+  const empresa = datos.empresa?.trim() || "Transjer Operador Logístico S.A.C.";
+  const saludo = datos.proveedor ? `Estimados señores de ${datos.proveedor}:` : "Estimados señores:";
+  const lineas: (string | null)[] = [
+    saludo,
+    "",
+    `Les confirmamos que recibimos y aceptamos el comprobante ${datos.comprobante}, por ${datos.total}. Ya quedó registrado para pago.`,
+    datos.transporte ? "" : null,
+    datos.transporte
+      ? `El pago se programa ${datos.plazoDias ?? 15} días después de que recibamos en físico las guías de remisión del servicio. Les agradeceremos hacerlas llegar a nuestra oficina.`
+      : null,
+    "",
+    "Gracias por su atención.",
+    "",
+    empresa,
   ];
   return lineas.filter((l) => l !== null).join("\n");
 }

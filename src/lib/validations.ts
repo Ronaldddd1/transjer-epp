@@ -558,6 +558,8 @@ export const observeInvoiceSchema = z.object({
  * la pacta la empresa con el proveedor.
  */
 export const approveEmailSchema = z.object({
+  /** Mandarle al proveedor el aviso de que su comprobante se aceptó. */
+  avisar: checkbox,
   /** Transporte o servicio: de ahí sale el plazo y los datos que se piden. */
   serviceType: z.enum(["TRANSPORTE", "SERVICIO"], { required_error: "Indica si es transporte o servicio" }),
   paymentTerm: z.enum(["CONTADO", "CREDITO"]).default("CONTADO"),
@@ -587,6 +589,9 @@ export const verifyAmountSchema = z.object({
   agreedAmount: money("El monto pactado"),
   aprobarDiferencia: checkbox,
   amountNote: optionalText(250),
+  // Solo para los que llegan sin XML: lo que dice el PDF, sin IGV, y en qué moneda.
+  manualAmount: optionalMoney("El importe de la factura"),
+  manualCurrency: z.enum(["PEN", "USD"]).optional(),
 });
 
 /**

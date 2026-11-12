@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AdvanceModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
 import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
+import { VerNotaCreditoModal } from "@/components/invoices/nota-credito";
 import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -19,6 +20,7 @@ import {
   invoiceNumber, pageParams, saldoAPagar, type SearchParams,
 } from "@/lib/utils";
 import {
+  archivosDeNotasCredito,
   countAwaitingCreditNote, countEmailsToReview, getClientOptions,
   getDestinationOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters,
 } from "@/server/invoice-queries";
@@ -51,13 +53,17 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     invoiceTotals(f),
     // Los mismos filtros pero sin el estado NI la espera de nota de crédito: así cada
     // pestaña muestra cuántas hay en ella y no cero por estar mirando otra.
-    invoiceTotals({ ...f, status: undefined, awaitingCreditNote: undefined }),
+    invoiceTotals({ ...f, status: undefined, awaitingCreditNote: undefined, notasCredito: undefined }),
     countAwaitingCreditNote({ ...f, status: undefined }),
     getSupplierOptions(),
     getClientOptions(),
     getDestinationOptions(),
     countEmailsToReview(),
   ]);
+  // En la pestaña de notas de crédito, cada fila se pinta según si ya llegó o todavía
+  // falta, y la nota se abre desde la fila.
+  const vistaNC = !!f.notasCredito;
+  const archivosNC = vistaNC ? await archivosDeNotasCredito(rows) : new Map<string, { id: string; filename: string }[]>();
 
   // Resumen de lo que se está viendo, separado por moneda.
   const pendientes = totals.filter((t) => t.status === "PENDIENTE");
@@ -183,7 +189,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             // le adelantó. Un adelanto es plata que el proveedor ya tiene.
             const aPagar = saldoAPagar(i.total, i.detractionAmount, i.advances);
             return (
-              <Tr key={i.id} className={cn(i.status === "ANULADA" && "bg-steel-50/60 [&>td]:text-steel-400")}>
+              <Tr
+                key={i.id}
+                tone={vistaNC
+                  ? (i.creditNoteNumber ? "bg-amber-50 hover:bg-amber-100/70" : "bg-red-50 hover:bg-red-100/70")
+                  : undefined}
+                className={cn(i.status === "ANULADA" && !vistaNC && "bg-steel-50/60 [&>td]:text-steel-400")}
+              >
                 <Td>
                   <Link href={`/facturas/${i.id}`} className="font-semibold tabular hover:underline">{invoiceNumber(i.series, i.number)}</Link>
                   <p className="text-xs text-steel-500">
@@ -244,7 +256,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                     <p className="mt-1 line-clamp-2 w-36 text-xs text-steel-500" title={i.statusReason}>{i.statusReason}</p>
                   )}
                 </Td>
-                <Td className="sticky right-0 z-10 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]">
+                <Td className={cn(
+                  "sticky right-0 z-10 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]",
+                  vistaNC ? (i.creditNoteNumber ? "bg-amber-50" : "bg-red-50") : "bg-white",
+                )}>
                   <div className="flex items-center justify-end gap-1">
                     {canPay && (i.status === "PENDIENTE" || i.status === "OBSERVADA") && (
                       <>
@@ -256,6 +271,13 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                     )}
                     {/* Observar salió de la fila: se usa poco y ocupaba el ancho que hacía
                         falta para lo que sí se mira. Sigue estando dentro de Ver. */}
+                    {i.creditNoteNumber && (
+                      <VerNotaCreditoModal
+                        factura={{ id: i.id, label: invoiceNumber(i.series, i.number), currency: i.currency }}
+                        nota={{ numero: i.creditNoteNumber, fecha: i.creditNoteDate, importe: i.creditNoteAmount }}
+                        archivos={archivosNC.get(i.id) ?? []}
+                      />
+                    )}
                     <ButtonLink href={`/facturas/${i.id}`} variant="ghost" size="sm" title="Ver la factura" aria-label="Ver la factura">
                       <Eye className="h-4 w-4" />
                     </ButtonLink>
@@ -267,6 +289,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
         </tbody>
       </TableShell>
 
+      {vistaNC && (
+        <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-steel-600">
+          <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border border-red-300 bg-red-100" aria-hidden />Todavía falta la nota de crédito</span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-3 w-3 rounded-sm border border-amber-300 bg-amber-100" aria-hidden />Ya llegó: se abre con «Ver NC»</span>
+        </p>
+      )}
       {first(sp.porvencer) === "1" && (
         <p className="mt-3 flex items-center gap-2 text-sm text-steel-500">
           <CalendarClock className="h-4 w-4 text-[#9A7000]" aria-hidden />

@@ -1,0 +1,68 @@
+BUZÓN: CORREOS SIN XML, ARCHIVOS QUE FALTAN, AVISO DE ACEPTACIÓN; NOTAS DE CRÉDITO
+==================================================================================
+
+ANTES DE SUBIR
+--------------
+Lleva una migración nueva (0029). Si todavía no corriste la 0026, 0027 y 0028, van
+todas juntas. En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0029_monto_sin_xml   guarda el importe que se escribe a mano para los correos sin XML
+
+Solo agrega: no borra datos.
+
+
+CORREOS SIN XML
+---------------
+Ya no hay pestaña "Por revisar". Los correos que llegan sin XML (o con un XML que no
+se puede leer) siguen el mismo camino que los demás:
+
+  1. Por verificar monto: se marcan "Sin XML". En "Verificar monto" se escribe el
+     importe sin IGV que dice el PDF de la factura y lo pactado; el sistema compara.
+  2. Por aprobar: con el monto conforme, "Registrar" abre el formulario con el total
+     ya propuesto (con IGV). Si es un flete, se elige "Transporte" y entra a la regla
+     de las guías (15 días desde la última guía).
+  3. Rechazar y Descartar siguen disponibles en los dos pasos.
+
+Los enlaces viejos a "Por revisar" abren "Por verificar monto".
+
+
+LOS ARCHIVOS QUE FALTAN
+-----------------------
+Un comprobante completo trae tres archivos: la factura (PDF), el XML y la guía de
+remisión. En cada correo por verificar o por aprobar, debajo del estado, sale en rojo
+lo que falta:
+
+    No se encontró el XML del comprobante entre los archivos.
+    No se encontró la factura (PDF) entre los archivos.
+    No se encontró la guía de remisión entre los archivos.
+    (o "El correo no trae archivos adjuntos." / "El XML adjunto no se pudo leer.")
+
+Se reconoce cada archivo por su nombre: el de SUNAT (RUC-01-… factura, -09- y -31-
+guías, -07- nota de crédito) o palabras como "guia", "remision". A una nota de crédito
+no se le pide guía. Si viene un .zip, no se reclama ni el PDF ni la guía (pueden estar
+adentro).
+
+
+AVISO DE ACEPTACIÓN AL PROVEEDOR
+--------------------------------
+Al aceptar un comprobante (o al registrar uno sin XML) se le manda al remitente un
+correo: "Les confirmamos que recibimos y aceptamos el comprobante F001-12, por
+S/ 1,180.00. Ya quedó registrado para pago." Si es un flete, agrega que el pago se
+programa 15 días después de recibir las guías en físico.
+
+  - Es una casilla, marcada por defecto, en el formulario de aceptar y en el de
+    registrar. Se puede desmarcar.
+  - Si el correo no sale, la aceptación igual vale. En "Aceptados" se ve
+    "Aceptación avisada" o "aceptación sin avisar" (con el motivo al pasar el mouse).
+  - Usa el mismo correo de salida que el rechazo (SMTP).
+
+
+NOTAS DE CRÉDITO (Facturas > "Esperan nota de crédito")
+-------------------------------------------------------
+La pestaña muestra las dos situaciones:
+  - En ROJO, las que todavía esperan la nota de crédito (primero).
+  - En AMARILLO, las que ya la tienen, con el botón "Ver NC" en la fila: muestra el
+    número, la fecha, el importe y sus archivos, y abre el PDF sin entrar a la factura.
+El número de la pestaña sigue contando solo las que faltan.

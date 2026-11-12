@@ -9,7 +9,9 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { SupplierOption } from "@/components/invoices/invoice-form-modal";
-import { DEFAULT_TERM_DAYS, INVOICE_DOC_TYPE_LABEL, todayLima, type PaymentTermKey } from "@/lib/utils";
+import { AvisarAceptacion } from "@/components/invoices/approval-actions";
+import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
+import { DEFAULT_TERM_DAYS, formatMoney, INVOICE_DOC_TYPE_LABEL, todayLima, type PaymentTermKey } from "@/lib/utils";
 
 export function RetryEmailButton({ id, subject }: { id: string; subject: string }) {
   return (
@@ -60,7 +62,16 @@ export function DiscardEmailModal({ id, subject }: { id: string; subject: string
  * exige, el formulario devolvía «revisa los campos marcados» sin marcar ninguno: no había
  * forma de registrar una factura desde el buzón.
  */
-export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId: string; subject: string; suppliers: SupplierOption[] }) {
+export function InvoiceFromEmailModal({ emailId, subject, suppliers, remitente, verificado }: {
+  emailId: string;
+  subject: string;
+  suppliers: SupplierOption[];
+  /** A quién se le avisa que se aceptó. */
+  remitente?: string | null;
+  /** El importe sin IGV que se verificó contra lo pactado, para tenerlo a la vista. */
+  verificado?: { importe: string; moneda: string } | null;
+}) {
+  const [clase, setClase] = useState<"" | "TRANSPORTE" | "SERVICIO">("");
   const [term, setTerm] = useState<PaymentTermKey>("CONTADO");
   const [termDays, setTermDays] = useState(String(DEFAULT_TERM_DAYS.CONTADO));
 
@@ -121,31 +132,63 @@ export function InvoiceFromEmailModal({ emailId, subject, suppliers }: { emailId
               <option value="USD">Dólares (US$)</option>
             </Select>
           </Field>
-          <Field label="Importe total" name="total" required error={errors.total} className="sm:col-span-3">
-            <Input name="total" inputMode="decimal" placeholder="1180.00" invalid={!!errors.total} />
+          <Field
+            label="Importe total"
+            name="total"
+            required
+            error={errors.total}
+            className="sm:col-span-3"
+            hint={verificado ? `Verificado sin IGV: ${formatMoney(verificado.importe, verificado.moneda)}. Aquí va el total, con IGV.` : undefined}
+          >
+            <Input
+              name="total"
+              inputMode="decimal"
+              placeholder="1180.00"
+              defaultValue={verificado ? (Number(verificado.importe) * 1.18).toFixed(2) : undefined}
+              invalid={!!errors.total}
+            />
+          </Field>
+          <Field label="Tipo de servicio" name="serviceType" error={errors.serviceType} className="sm:col-span-3">
+            <Select name="serviceType" value={clase} onChange={(e) => setClase(e.target.value as typeof clase)}>
+              <option value="">Sin clasificar</option>
+              <option value="TRANSPORTE">Transporte</option>
+              <option value="SERVICIO">Servicio</option>
+            </Select>
           </Field>
           <Field label="Guía de remisión (GRT)" name="grtNumber" error={errors.grtNumber} className="sm:col-span-3">
             <Input name="grtNumber" maxLength={40} />
           </Field>
-          <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm} className="sm:col-span-3">
-            <Select name="paymentTerm" value={term} onChange={(e) => onTerm(e.target.value as PaymentTermKey)}>
-              <option value="CONTADO">Contado</option>
-              <option value="CREDITO">Crédito</option>
-            </Select>
-          </Field>
-          <Field
-            label="Días de plazo"
-            name="termDays"
-            required
-            error={errors.termDays}
-            hint={term === "CONTADO" ? "Desde que llegó el correo." : "Desde que llegue la guía en físico."}
-            className="sm:col-span-3"
-          >
-            <Input name="termDays" value={termDays} onChange={(e) => setTermDays(e.target.value)} inputMode="numeric" maxLength={3} invalid={!!errors.termDays} />
-          </Field>
+          {clase === "TRANSPORTE" ? (
+            <p className="rounded-md border border-steel-200 bg-steel-50 px-3 py-2.5 text-sm text-steel-700 sm:col-span-6">
+              <input type="hidden" name="paymentTerm" value="CREDITO" />
+              <input type="hidden" name="termDays" value={PLAZO_TRANSPORTE_DIAS} />
+              Factura de transporte: se paga {PLAZO_TRANSPORTE_DIAS} días después de que llegue la última guía. El viaje
+              aparece en Salidas › Viajes de terceros. Si son varias guías, sepáralas con una barra: T001-120 / T001-121.
+            </p>
+          ) : (
+            <>
+              <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm} className="sm:col-span-3">
+                <Select name="paymentTerm" value={term} onChange={(e) => onTerm(e.target.value as PaymentTermKey)}>
+                  <option value="CONTADO">Contado</option>
+                  <option value="CREDITO">Crédito</option>
+                </Select>
+              </Field>
+              <Field
+                label="Días de plazo"
+                name="termDays"
+                required
+                error={errors.termDays}
+                hint={term === "CONTADO" ? "Desde que llegó el correo." : "Desde que llegue la guía en físico."}
+                className="sm:col-span-3"
+              >
+                <Input name="termDays" value={termDays} onChange={(e) => setTermDays(e.target.value)} inputMode="numeric" maxLength={3} invalid={!!errors.termDays} />
+              </Field>
+            </>
+          )}
           <Field label="Concepto del servicio" name="description" error={errors.description} className="sm:col-span-6">
             <Input name="description" maxLength={250} placeholder="Servicio de transporte Lima - Trujillo" />
           </Field>
+          <div className="sm:col-span-6"><AvisarAceptacion destino={remitente ?? null} /></div>
         </div>
       )}
     </FormModal>

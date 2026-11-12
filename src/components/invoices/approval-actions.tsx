@@ -70,6 +70,9 @@ export type CorreoParaDecidir = {
     pactado: string | null;
     nota: string | null;
     verificadoEl: string | null;
+    /** Sin XML: el importe sin IGV del PDF que escribió quien verificó, y su moneda. */
+    manual?: string | null;
+    manualMoneda?: string | null;
   };
   rejectReason: string | null;
   rejectComment: string | null;
@@ -315,16 +318,23 @@ export function ResumenRechazo({ correo }: { correo: CorreoParaDecidir }) {
  */
 export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
   const c = correo.comprobante;
+  // Sin XML no hay importe leído: lo escribe quien verifica, mirando el PDF.
+  const [importeManual, setImporteManual] = useState(correo.monto.manual ?? "");
+  const [moneda, setMoneda] = useState<"PEN" | "USD">((correo.monto.manualMoneda as "PEN" | "USD" | null) ?? "PEN");
+  const manualValido = importeManual.trim() !== "" && !Number.isNaN(Number(importeManual.replace(/,/g, "")));
   // Lo que se compara es el valor de venta, sin IGV: es el número que se acuerda con el
   // proveedor. Viene propuesto desde la factura para que la tarea sea confirmarlo o
   // corregirlo, no teclearlo de nuevo.
-  const facturadoSinIgv = c ? valorSinIgv(c.subtotal, c.total) : "0.00";
-  const [pactado, setPactado] = useState(correo.monto.pactado ?? facturadoSinIgv);
+  const facturadoSinIgv = c
+    ? valorSinIgv(c.subtotal, c.total)
+    : manualValido ? Number(importeManual.replace(/,/g, "")).toFixed(2) : "0.00";
+  const monedaComp = c?.currency ?? moneda;
+  const [pactado, setPactado] = useState(correo.monto.pactado ?? (c ? facturadoSinIgv : ""));
   const [nota, setNota] = useState(correo.monto.nota ?? "");
   const [aprobar, setAprobar] = useState(false);
 
   const escrito = pactado.trim() !== "" && !Number.isNaN(Number(pactado));
-  const comparacion = escrito && c ? compararMonto(facturadoSinIgv, pactado) : null;
+  const comparacion = escrito && (c || manualValido) ? compararMonto(facturadoSinIgv, pactado) : null;
   const hayDiferencia = !!comparacion && !comparacion.coincide;
   const observado = correo.monto.estado === "OBSERVADO";
 
@@ -356,13 +366,48 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
             <dd className="font-medium">{c ? invoiceNumber(c.series, c.number) : (correo.subject ?? "(sin asunto)")}</dd>
             <dt className="text-steel-500">Proveedor</dt>
             <dd className="font-medium">{c?.supplierName ?? correo.fromName ?? "—"}</dd>
-            <dt className="text-steel-500">Facturado sin IGV</dt>
-            <dd className="font-display text-base font-bold tabular">
-              {c ? formatMoney(facturadoSinIgv, c.currency) : "—"}
-            </dd>
-            <dt className="text-steel-500">Total con IGV</dt>
-            <dd className="tabular text-steel-600">{c ? formatMoney(c.total, c.currency) : "—"}</dd>
+            {c ? (
+              <>
+                <dt className="text-steel-500">Facturado sin IGV</dt>
+                <dd className="font-display text-base font-bold tabular">{formatMoney(facturadoSinIgv, c.currency)}</dd>
+                <dt className="text-steel-500">Total con IGV</dt>
+                <dd className="tabular text-steel-600">{formatMoney(c.total, c.currency)}</dd>
+              </>
+            ) : (
+              <>
+                <dt className="text-steel-500">XML</dt>
+                <dd className="font-semibold text-red-700">No vino: el importe se toma del PDF</dd>
+              </>
+            )}
           </dl>
+
+          {!c && (
+            <div className="grid gap-3 sm:grid-cols-[1fr_7rem]">
+              <Field
+                label="Importe de la factura, sin IGV"
+                name="manualAmount"
+                required
+                error={errors.manualAmount}
+                hint="Lo que dice el PDF como valor de venta (antes del IGV)."
+              >
+                <Input
+                  name="manualAmount"
+                  inputMode="decimal"
+                  value={importeManual}
+                  onChange={(e) => setImporteManual(e.target.value)}
+                  placeholder="1000.00"
+                  invalid={!!errors.manualAmount}
+                  autoFocus
+                />
+              </Field>
+              <Field label="Moneda" name="manualCurrency">
+                <Select name="manualCurrency" value={moneda} onChange={(e) => setMoneda(e.target.value as "PEN" | "USD")}>
+                  <option value="PEN">Soles</option>
+                  <option value="USD">Dólares</option>
+                </Select>
+              </Field>
+            </div>
+          )}
 
           {observado && correo.monto.nota && (
             <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-900">
@@ -375,7 +420,7 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
             name="agreedAmount"
             required
             error={errors.agreedAmount}
-            hint="Viene puesto lo que dice la factura. Si lo acordado fue otro número, corrígelo."
+            hint={c ? "Viene puesto lo que dice la factura. Si lo acordado fue otro número, corrígelo." : "Lo que se acordó por el flete."}
           >
             <Input
               name="agreedAmount"
@@ -384,12 +429,12 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
               onChange={(e) => setPactado(e.target.value)}
               placeholder={facturadoSinIgv}
               invalid={!!errors.agreedAmount}
-              autoFocus
+              autoFocus={!!c}
             />
           </Field>
 
           {/* El veredicto, en el momento: quien revisa no tiene por qué restar de cabeza. */}
-          {comparacion && c && (
+          {comparacion && (
             comparacion.coincide ? (
               <p className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
                 <Check className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
@@ -400,7 +445,7 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
                 <span>
                   El proveedor está cobrando{" "}
-                  <strong>{formatMoney(Math.abs(comparacion.diferencia).toFixed(2), c.currency)}</strong>{" "}
+                  <strong>{formatMoney(Math.abs(comparacion.diferencia).toFixed(2), monedaComp)}</strong>{" "}
                   {comparacion.cobraDeMas ? "de más" : "de menos"} de lo pactado.
                 </span>
               </p>
@@ -600,10 +645,30 @@ export function AceptarModal({ correo, condicion }: {
             <Input name="description" defaultValue={correo.comprobante?.description ?? ""} maxLength={250} />
           </Field>
 
+          <AvisarAceptacion destino={correo.fromAddress} />
+
           <DatosCorreo correo={correo} />
         </div>
       )}
     </FormModal>
+  );
+}
+
+/** La casilla para mandarle al proveedor el aviso de que su comprobante se aceptó. */
+export function AvisarAceptacion({ destino }: { destino: string | null }) {
+  return (
+    <label className="flex items-start gap-2 rounded-md border border-steel-200 px-3 py-2.5 text-sm">
+      <input type="checkbox" name="avisar" defaultChecked={!!destino} disabled={!destino} className="mt-0.5 h-4 w-4" />
+      <span>
+        <Mail className="mr-1 inline h-4 w-4 text-steel-500" aria-hidden />
+        Avisarle al proveedor que se aceptó
+        <span className="block text-xs text-steel-500">
+          {destino
+            ? <>Le llega un correo a <strong>{destino}</strong> con el comprobante y el importe aceptados.</>
+            : "El correo no trae remitente: no hay a quién avisarle."}
+        </span>
+      </span>
+    </label>
   );
 }
 

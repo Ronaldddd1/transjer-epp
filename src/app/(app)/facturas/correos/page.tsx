@@ -15,6 +15,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { TabLinks } from "@/components/ui/tab-links";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
+import { archivosFaltantes } from "@/lib/archivos-correo";
 import { can } from "@/lib/permissions";
 import {
   AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, valorSinIgv,
@@ -117,6 +118,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
       pactado: e.agreedAmount,
       nota: e.amountNote,
       verificadoEl: e.amountCheckedAt?.toISOString() ?? null,
+      manual: e.manualAmount,
+      manualMoneda: e.manualCurrency,
     },
     rejectReason: e.rejectReason,
     rejectComment: e.rejectComment,
@@ -157,6 +160,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         <p className="mb-3 rounded-lg border border-brand-ink/30 bg-brand-soft px-4 py-3 text-sm text-ink-800">
           <strong>{cuentas.porVerificar} comprobante(s)</strong> esperan que se verifique el monto contra lo
           pactado por el flete. Hasta que eso no pase, no se pueden aceptar.
+          {cuentas.sinXml > 0 && <> {cuentas.sinXml} llegaron sin XML: su importe se escribe mirando el PDF.</>}
           {cuentas.observados > 0 && (
             <> <strong>{cuentas.observados}</strong> de ellos ya quedaron observados por una diferencia.</>
           )}
@@ -171,14 +175,13 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
 
       <TabLinks
         name="estado"
-        current={pestaña}
+        current={pestaña === "REVISAR" ? "POR_VERIFICAR" : pestaña}
         base="/facturas/correos"
         params={sp}
         className="mb-3"
         tabs={[
           { value: "POR_VERIFICAR", label: "Por verificar monto", count: cuentas.porVerificar },
           { value: "POR_APROBAR", label: "Por aprobar", count: cuentas.porAprobar },
-          { value: "REVISAR", label: "Por revisar", count: cuentas.revisar },
           { value: "PROCESADO", label: "Aceptados", count: cuentas.aceptados },
           { value: "RECHAZADO", label: "Rechazados", count: cuentas.rechazados },
           { value: "", label: "Todos", count: cuentas.total },
@@ -225,6 +228,12 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
             const c = correo.comprobante;
             const porAprobar = e.status === "POR_APROBAR";
             const sinLeer = e.status === "REVISAR" || e.status === "ERROR";
+            const montoConforme = e.amountStatus === "CONFORME";
+            // Lo que le falta al correo de los tres archivos de un comprobante: factura,
+            // XML y guía. Solo importa mientras está por decidir.
+            const faltan = porAprobar || sinLeer
+              ? archivosFaltantes(correo.archivos, { xmlLegible: !!c, esNotaCredito: c?.docType === "NOTA_CREDITO" })
+              : [];
             const avisoFallido = e.status === "RECHAZADO" && !e.replySentAt;
             return (
               <Tr key={e.id} tone={porAprobar ? "bg-blue-50/60 hover:bg-blue-50" : undefined}>
@@ -248,7 +257,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                   ) : (
                     <>
                       <p className="line-clamp-2 w-52 font-medium">{e.subject ?? "(sin asunto)"}</p>
-                      <p className="text-xs text-steel-500">Sin XML legible</p>
+                      <p className="mt-0.5 inline-block rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800">Sin XML</p>
                     </>
                   )}
                 </Td>
@@ -257,7 +266,22 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                   {c?.supplierRuc && <p className="text-xs text-steel-500">RUC {c.supplierRuc}</p>}
                 </Td>
                 <Td className="whitespace-nowrap text-right font-medium tabular">
-                  {c ? formatMoney(c.total, c.currency) : <span className="text-steel-400">—</span>}
+                  {c ? formatMoney(c.total, c.currency) : e.manualAmount ? (
+                    <span title="Escrito a mano mirando el PDF: el correo no trajo XML">
+                      {formatMoney(e.manualAmount, e.manualCurrency ?? "PEN")}
+                      <span className="block text-xs font-normal text-steel-500">sin IGV, del PDF</span>
+                    </span>
+                  ) : <span className="text-steel-400">—</span>}
+                  {!c && e.manualAmount && e.agreedAmount && (() => {
+                    const { diferencia, coincide, cobraDeMas } = compararMonto(e.manualAmount, e.agreedAmount);
+                    return coincide ? (
+                      <p className="text-xs font-normal text-emerald-700">= lo pactado</p>
+                    ) : (
+                      <p className="text-xs font-semibold text-red-700">
+                        {cobraDeMas ? "+" : "−"} {formatMoney(Math.abs(diferencia).toFixed(2), e.manualCurrency ?? "PEN")}
+                      </p>
+                    );
+                  })()}
                   {/* Lo pactado al lado de lo facturado: la diferencia se ve sin abrir nada. */}
                   {c && e.agreedAmount && (() => {
                     // La comparación es contra el valor de venta, sin IGV: es lo que se pacta.
@@ -274,7 +298,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 xl:table-cell">{formatDateTime(e.receivedAt)}</Td>
                 <Td>
                   <EmailStatusBadge status={e.status} />
-                  {porAprobar && c && (
+                  {(porAprobar || sinLeer) && (
                     <p className={cn(
                       "mt-0.5 text-xs",
                       e.amountStatus === "OBSERVADO" ? "font-semibold text-red-700"
@@ -293,8 +317,23 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                       <MailX className="h-3.5 w-3.5 shrink-0" aria-hidden /> sin avisar
                     </p>
                   )}
-                  {!e.invoiceId && !avisoFallido && e.detail && (
+                  {faltan.length > 0 && (
+                    <ul className="mt-0.5 w-44 text-xs leading-snug text-red-700">
+                      {faltan.map((m) => <li key={m}>{m}</li>)}
+                    </ul>
+                  )}
+                  {!e.invoiceId && !avisoFallido && e.detail && !sinLeer && (
                     <p className="line-clamp-2 w-44 text-xs text-steel-500" title={e.detail}>{e.detail}</p>
+                  )}
+                  {e.status === "ERROR" && e.detail && (
+                    <p className="line-clamp-2 w-44 text-xs text-steel-500" title={e.detail}>{e.detail}</p>
+                  )}
+                  {e.status === "PROCESADO" && e.replyTo && (
+                    e.replySentAt
+                      ? <p className="mt-0.5 text-xs text-emerald-700">Aceptación avisada</p>
+                      : <p className="mt-0.5 flex items-center gap-1 text-xs font-medium text-red-700" title={e.replyError ?? undefined}>
+                          <MailX className="h-3.5 w-3.5 shrink-0" aria-hidden /> aceptación sin avisar
+                        </p>
                   )}
                 </Td>
                 <Td className={cn("sticky right-0 z-10 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]", porAprobar ? "bg-blue-50" : "bg-white")}>
@@ -324,12 +363,20 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                         <RechazarModal correo={correo} />
                       </>
                     )}
-                    {sinLeer && canManage && (
-                      <>
-                        <InvoiceFromEmailModal emailId={e.id} subject={e.subject ?? "(sin asunto)"} suppliers={suppliers} />
-                        {status.configured && <RetryEmailButton id={e.id} subject={e.subject ?? "(sin asunto)"} />}
-                      </>
+                    {/* Sin XML, el mismo camino: primero el monto (escrito mirando el PDF),
+                        después se registra a mano o se rechaza. */}
+                    {sinLeer && canApprove && !montoConforme && <VerificarMontoModal correo={correo} />}
+                    {sinLeer && canManage && montoConforme && (
+                      <InvoiceFromEmailModal
+                        emailId={e.id}
+                        subject={e.subject ?? "(sin asunto)"}
+                        suppliers={suppliers}
+                        remitente={e.fromAddress}
+                        verificado={e.manualAmount ? { importe: e.manualAmount, moneda: e.manualCurrency ?? "PEN" } : null}
+                      />
                     )}
+                    {sinLeer && canApprove && montoConforme && <VerificarMontoModal correo={correo} />}
+                    {sinLeer && canManage && status.configured && <RetryEmailButton id={e.id} subject={e.subject ?? "(sin asunto)"} />}
                     {/* Un correo sin XML legible también se devuelve al proveedor. Antes solo
                         se podía descartar, y descartar no le avisa a nadie: el comprobante
                         desaparecía de la bandeja y el proveedor seguía esperando el pago. */}
@@ -349,7 +396,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         El camino es: se verifica el monto contra lo pactado, después se acepta o se rechaza, y lo
         aceptado pasa a facturas por pagar ·{" "}
         {EMAIL_STATUS_LABEL.POR_APROBAR}: el comprobante se leyó y espera decisión ·{" "}
-        {EMAIL_STATUS_LABEL.REVISAR}: no se pudo leer el XML, se registra a mano o se rechaza igual ·{" "}
+        {EMAIL_STATUS_LABEL.REVISAR}: llegó sin XML legible; el importe se escribe mirando el PDF y después se
+        registra a mano o se rechaza ·{" "}
         {EMAIL_STATUS_LABEL.DESCARTADO}: no era una factura por pagar, o ya estaba registrada (sin avisar al proveedor).
       </p>
 
