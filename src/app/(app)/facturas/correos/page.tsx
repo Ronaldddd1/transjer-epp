@@ -15,7 +15,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { TabLinks } from "@/components/ui/tab-links";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
-import { archivosFaltantes } from "@/lib/archivos-correo";
+import { archivosFaltantes, FALTANTE_CORTO, SIN_ADJUNTOS } from "@/lib/archivos-correo";
 import { can } from "@/lib/permissions";
 import {
   AMOUNT_CHECK_LABEL, cn, compararMonto, EMAIL_STATUS_LABEL, first, formatDateTime, formatMoney, valorSinIgv,
@@ -256,13 +256,13 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                     </>
                   ) : (
                     <>
-                      <p className="line-clamp-2 w-52 font-medium">{e.subject ?? "(sin asunto)"}</p>
+                      <p className="line-clamp-2 w-44 font-medium">{e.subject ?? "(sin asunto)"}</p>
                       <p className="mt-0.5 inline-block rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-800">Sin XML</p>
                     </>
                   )}
                 </Td>
                 <Td>
-                  <p className="line-clamp-2 w-48">{c?.supplierName ?? e.supplierName ?? e.fromName ?? e.fromAddress ?? "—"}</p>
+                  <p className="line-clamp-2 w-44">{c?.supplierName ?? e.supplierName ?? e.fromName ?? e.fromAddress ?? "—"}</p>
                   {c?.supplierRuc && <p className="text-xs text-steel-500">RUC {c.supplierRuc}</p>}
                 </Td>
                 <Td className="whitespace-nowrap text-right font-medium tabular">
@@ -318,9 +318,20 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                     </p>
                   )}
                   {faltan.length > 0 && (
-                    <ul className="mt-0.5 w-44 text-xs leading-snug text-red-700">
-                      {faltan.map((m) => <li key={m}>{m}</li>)}
-                    </ul>
+                    faltan.includes(SIN_ADJUNTOS) ? (
+                      <p className="mt-1 w-40 text-xs font-medium text-red-700">{SIN_ADJUNTOS}</p>
+                    ) : (
+                      <div className="mt-1 w-40" title={faltan.join("\n")}>
+                        <p className="text-xs text-red-700">No se encontró:</p>
+                        <ul className="mt-0.5 flex flex-wrap gap-1">
+                          {faltan.map((m) => (
+                            <li key={m} className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium leading-tight text-red-800 ring-1 ring-inset ring-red-200">
+                              {FALTANTE_CORTO[m] ?? m}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )
                   )}
                   {!e.invoiceId && !avisoFallido && e.detail && !sinLeer && (
                     <p className="line-clamp-2 w-44 text-xs text-steel-500" title={e.detail}>{e.detail}</p>
@@ -337,53 +348,41 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
                   )}
                 </Td>
                 <Td className={cn("sticky right-0 z-10 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.12)]", porAprobar ? "bg-blue-50" : "bg-white")}>
+                  {/* Cuatro lugares fijos, en el mismo orden en todas las filas: ver, lo que
+                      toca hacer ahora, rechazar, y lo de menos uso. Así los botones quedan
+                      uno debajo del otro y no saltan de lugar de una fila a otra. */}
                   <div className="flex items-center justify-end gap-1">
                     <VerComprobanteModal correo={correo} />
-                    {porAprobar && canApprove && (
-                      <>
-                        {/* Una nota de crédito no se "acepta" como factura por pagar: se
-                            aplica a la factura que anula, que es lo único que cabe hacer
-                            con ella. Tampoco pasa por el filtro del monto: no es un flete
-                            que se vaya a pagar, es la anulación de uno. */}
-                        {c?.docType === "NOTA_CREDITO" ? (
-                          <AplicarNotaCreditoModal correo={correo} />
-                        ) : c && e.amountStatus !== "CONFORME" ? (
-                          /* Primero el filtro: hasta que el monto no esté conforme, aceptar
-                             sería reconocer una deuda que nadie comparó con lo pactado. */
-                          <VerificarMontoModal correo={correo} />
-                        ) : (
-                          /* Si ese proveedor ya está registrado, la condición de pago que
-                             se propone es la pactada con él, no la de por defecto. */
-                          <AceptarModal correo={correo} condicion={condicionDe(c?.supplierRuc)} />
-                        )}
-                        {/* Ya verificado, se deja a mano por si hay que corregir lo pactado. */}
-                        {c && e.amountStatus === "CONFORME" && c.docType !== "NOTA_CREDITO" && (
-                          <VerificarMontoModal correo={correo} />
-                        )}
-                        <RechazarModal correo={correo} />
-                      </>
-                    )}
-                    {/* Sin XML, el mismo camino: primero el monto (escrito mirando el PDF),
-                        después se registra a mano o se rechaza. */}
-                    {sinLeer && canApprove && !montoConforme && <VerificarMontoModal correo={correo} />}
-                    {sinLeer && canManage && montoConforme && (
-                      <InvoiceFromEmailModal
-                        emailId={e.id}
-                        subject={e.subject ?? "(sin asunto)"}
-                        suppliers={suppliers}
-                        remitente={e.fromAddress}
-                        verificado={e.manualAmount ? { importe: e.manualAmount, moneda: e.manualCurrency ?? "PEN" } : null}
-                      />
-                    )}
-                    {sinLeer && canApprove && montoConforme && <VerificarMontoModal correo={correo} />}
-                    {sinLeer && canManage && status.configured && <RetryEmailButton id={e.id} subject={e.subject ?? "(sin asunto)"} />}
-                    {/* Un correo sin XML legible también se devuelve al proveedor. Antes solo
-                        se podía descartar, y descartar no le avisa a nadie: el comprobante
-                        desaparecía de la bandeja y el proveedor seguía esperando el pago. */}
-                    {sinLeer && canApprove && <RechazarModal correo={correo} />}
-                    {sinLeer && canManage && (
-                      <DiscardEmailModal id={e.id} subject={e.subject ?? "(sin asunto)"} />
-                    )}
+                    <div className="w-10 2xl:w-44 [&_button]:w-full [&_button]:justify-center [&_button]:whitespace-nowrap [&_span]:whitespace-nowrap">
+                      {porAprobar && canApprove && (
+                        /* Una nota de crédito no se acepta como factura por pagar: se aplica a
+                           la factura que anula. Lo demás pasa primero por el monto. */
+                        c?.docType === "NOTA_CREDITO" ? <AplicarNotaCreditoModal correo={correo} />
+                          : !montoConforme ? <VerificarMontoModal correo={correo} />
+                            : <AceptarModal correo={correo} condicion={condicionDe(c?.supplierRuc)} />
+                      )}
+                      {/* Sin XML, el mismo camino: el monto (escrito mirando el PDF) y después
+                          se registra a mano. */}
+                      {sinLeer && !montoConforme && canApprove && <VerificarMontoModal correo={correo} />}
+                      {sinLeer && montoConforme && canManage && (
+                        <InvoiceFromEmailModal
+                          emailId={e.id}
+                          subject={e.subject ?? "(sin asunto)"}
+                          suppliers={suppliers}
+                          remitente={e.fromAddress}
+                          verificado={e.manualAmount ? { importe: e.manualAmount, moneda: e.manualCurrency ?? "PEN" } : null}
+                        />
+                      )}
+                    </div>
+                    {(porAprobar || sinLeer) && canApprove && <RechazarModal correo={correo} />}
+                    {/* Lo de menos uso, en iconos chicos y siempre en el mismo ancho. */}
+                    <div className="flex w-[4.75rem] items-center justify-end gap-0.5">
+                      {montoConforme && canApprove && (porAprobar ? c?.docType !== "NOTA_CREDITO" : sinLeer) && (
+                        <VerificarMontoModal correo={correo} compacto />
+                      )}
+                      {sinLeer && canManage && status.configured && <RetryEmailButton id={e.id} subject={e.subject ?? "(sin asunto)"} />}
+                      {sinLeer && canManage && <DiscardEmailModal id={e.id} subject={e.subject ?? "(sin asunto)"} />}
+                    </div>
                   </div>
                 </Td>
               </Tr>

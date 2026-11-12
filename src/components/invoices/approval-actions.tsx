@@ -8,7 +8,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
-import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
+import { FORMATO_CONCEPTO, PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
 import { Modal } from "@/components/ui/modal";
 import {
   AMOUNT_CHECK_LABEL, cn, compararMonto,
@@ -316,7 +316,11 @@ export function ResumenRechazo({ correo }: { correo: CorreoParaDecidir }) {
  *
  * Mientras esto no quede conforme, el comprobante no se puede aceptar.
  */
-export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
+export function VerificarMontoModal({ correo, compacto = false }: {
+  correo: CorreoParaDecidir;
+  /** Solo el ícono: para corregir un monto que ya quedó conforme. */
+  compacto?: boolean;
+}) {
   const c = correo.comprobante;
   // Sin XML no hay importe leído: lo escribe quien verifica, mirando el PDF.
   const [importeManual, setImporteManual] = useState(correo.monto.manual ?? "");
@@ -346,7 +350,11 @@ export function VerificarMontoModal({ correo }: { correo: CorreoParaDecidir }) {
       submitVariant={hayDiferencia && !aprobar ? "danger" : undefined}
       size="sm"
       action={(fd) => verifyEmailAmount(correo.id, fd)}
-      trigger={(open) => (
+      trigger={(open) => compacto ? (
+        <Button variant="ghost" size="sm" onClick={open} title="Corregir la verificación del monto" aria-label="Corregir la verificación del monto">
+          <Scale className="h-4 w-4" />
+        </Button>
+      ) : (
         <Button
           variant={observado ? "outline" : "primary"}
           size="sm"
@@ -587,6 +595,12 @@ export function AceptarModal({ correo, condicion }: {
                   {viaje?.leido ? "leídos del concepto · revísalos" : "no se pudieron leer del concepto · complétalos"}
                 </span>
               </p>
+              {!viaje?.leido && (
+                <p className="mb-3 rounded-md bg-steel-50 px-3 py-2 text-xs text-steel-600">
+                  Para que la próxima se lea sola, pídele al proveedor que escriba el concepto así (va también en el
+                  correo de aceptación): <span className="mt-1 block font-mono text-[11px] text-ink">{FORMATO_CONCEPTO}</span>
+                </p>
+              )}
               <div className="grid gap-4 sm:grid-cols-3">
                 <Field label="Fecha del servicio" name="serviceDate" error={errors.serviceDate}>
                   <DateInput name="serviceDate" defaultValue={viaje?.serviceDate ?? ""} invalid={!!errors.serviceDate} />

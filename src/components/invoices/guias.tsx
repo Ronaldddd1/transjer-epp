@@ -53,7 +53,7 @@ export function LlegaronGuiasModal({ invoiceId, factura, guias, compact = false 
       action={(fd) => marcarGuiasLlegadas(invoiceId, fd)}
       trigger={(open) => (
         <Button size="sm" onClick={open} title="Anotar que llegaron las guías" className="whitespace-nowrap">
-          <PackageCheck className="h-4 w-4" /><span className={compact ? "sr-only xl:not-sr-only" : ""}>Llegó la guía</span>
+          <PackageCheck className="h-4 w-4" /><span className={compact ? "sr-only xl:not-sr-only xl:whitespace-nowrap" : "whitespace-nowrap"}>Llegó la guía</span>
         </Button>
       )}
     >

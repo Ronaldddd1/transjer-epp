@@ -9,7 +9,7 @@
  *
  *   npx tsx --conditions=react-server tests/concepto-transporte.test.ts
  */
-import { leerConceptoTransporte, pareceTransporte } from "../src/server/concepto-transporte";
+import { FORMATO_CONCEPTO, leerConceptoTransporte, pareceTransporte } from "../src/server/concepto-transporte";
 
 let fails = 0;
 const check = (n: string, c: boolean, x?: unknown) => {
@@ -64,6 +64,32 @@ function main() {
   const malaFecha = leerConceptoTransporte("TRANSPORTE DE CARGA LIMA - PIURA CON FECHA 31/02/2026 PLACA ABC-123");
   check("una fecha que no existe se descarta", malaFecha.serviceDate === null, malaFecha.serviceDate);
   check("y el resto del concepto se lee igual", malaFecha.plate === "ABC-123", malaFecha.plate);
+
+  // ---------- El cliente no se come la fecha ----------
+  const pegada = leerConceptoTransporte("SERVICIO DE TRANSPORTE CLIENTE TIENDAS PERUANAS FECHA:26/08/2026 PLACA C1A-932");
+  check("el cliente termina donde empieza la fecha", pegada.clientName === "TIENDAS PERUANAS", pegada.clientName);
+  check("y la fecha se lee igual", pegada.serviceDate === "2026-08-26", pegada.serviceDate);
+
+  // ---------- El formato con etiquetas que se les pide a los proveedores ----------
+  const formato = leerConceptoTransporte(FORMATO_CONCEPTO);
+  check("formato: la fecha", formato.serviceDate === "2026-08-26", formato.serviceDate);
+  check("formato: la placa", formato.plate === "C1A-932", formato.plate);
+  check("formato: el origen", formato.originCity === "LIMA", formato.originCity);
+  check("formato: el destino", formato.destinationCity === "PIURA", formato.destinationCity);
+  check("formato: el cliente, con su punto", formato.clientName === "TIENDAS PERUANAS S.A.", formato.clientName);
+  check("formato: la guía de remisión", formato.dispatchNote === "EG03-00000349", formato.dispatchNote);
+  check("formato: la guía transportista", formato.grtNumber === "VT01-007988", formato.grtNumber);
+
+  const desordenado = leerConceptoTransporte(
+    "Flete | cliente: Alicorp S.A.A. | destino: Arequipa | origen: Lima | placa: bbr905 | fecha: 3/11/26",
+  );
+  check("en cualquier orden y en minúsculas",
+    desordenado.clientName === "ALICORP S.A.A." && desordenado.destinationCity === "AREQUIPA"
+    && desordenado.originCity === "LIMA" && desordenado.plate === "BBR-905" && desordenado.serviceDate === "2026-11-03",
+    desordenado);
+  const ciudadCompuesta = leerConceptoTransporte("TRANSPORTE | ORIGEN: CERRO DE PASCO | DESTINO: SAN JUAN DE LURIGANCHO");
+  check("las ciudades de varias palabras quedan enteras",
+    ciudadCompuesta.originCity === "CERRO DE PASCO" && ciudadCompuesta.destinationCity === "SAN JUAN DE LURIGANCHO", ciudadCompuesta);
 
   // ---------- Reconocer que es transporte ----------
   check("reconoce un viaje por el texto", pareceTransporte(REAL));

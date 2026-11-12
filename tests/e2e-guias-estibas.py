@@ -92,9 +92,13 @@ with sync_playwright() as p:
     check("Salidas tiene el botón Viajes de terceros, con cuántas esperan guía",
           boton.count() == 1 and "esperando guía" in boton.inner_text(), boton.inner_text() if boton.count() else "")
     boton.click(); page.wait_for_url(re.compile("vista=terceros")); page.wait_for_timeout(1200)
-    fila = page.locator("tbody tr").filter(has_text=FACT)
+    cabecera = page.locator("thead").inner_text()
+    check("las columnas son las del viaje, sin factura ni pago",
+          all(c in cabecera for c in ["Día de servicio", "Placa", "Transportista", "Cliente", "Origen", "Destino", "Guías"])
+          and "Factura" not in cabecera and "Pago" not in cabecera, cabecera)
+    fila = page.locator("tbody tr").filter(has_text=G1)
     check("la factura aparece como viaje, esperando guía",
-          fila.count() == 1 and "Esperando guía" in fila.inner_text() and PROVEEDOR in fila.inner_text(),
+          fila.count() == 1 and PROVEEDOR in fila.inner_text(),
           fila.inner_text() if fila.count() else page.locator("tbody").inner_text()[:300])
     check("con cada guía por llegar", fila.inner_text().count("por llegar") == 2)
 
@@ -108,16 +112,16 @@ with sync_playwright() as p:
 
     # Llega la última
     page.reload(); page.wait_for_timeout(1200)
-    fila = page.locator("tbody tr").filter(has_text=FACT)
+    fila = page.locator("tbody tr").filter(has_text=G1)
     fila.get_by_role("button", name=re.compile("Llegó la guía|Anotar que llegaron")).click(); page.wait_for_timeout(500)
     page.locator("[role=dialog]").get_by_role("button", name="Anotar llegada").click(); page.wait_for_timeout(2200)
     check("cuando llega la última, vence 15 días después", estado() == f"CREDITO|15|{hoy}|{mas15}", estado())
     check("y deja de figurar como esperando guía",
-          page.locator("tbody tr").filter(has_text=FACT).count() == 0)
+          page.locator("tbody tr").filter(has_text=G1).count() == 0)
     page.goto(f"{BASE}/salidas?vista=terceros&estado=POR_PAGAR"); page.wait_for_timeout(1200)
-    fila = page.locator("tbody tr").filter(has_text=FACT)
-    check("pasa a las de guías completas, con su vencimiento",
-          fila.count() == 1 and "Vence en 15 días" in fila.inner_text(), fila.inner_text() if fila.count() else "")
+    fila = page.locator("tbody tr").filter(has_text=G1)
+    check("pasa a las de guías completas", fila.count() == 1 and fila.inner_text().count("llegó") == 2,
+          fila.inner_text() if fila.count() else "")
 
     # --- En la ficha de la factura ---
     fid = psql(f"select id from supplier_invoices where number = '{SELLO}'")

@@ -30,17 +30,19 @@ Los enlaces viejos a "Por revisar" abren "Por verificar monto".
 
 LOS ARCHIVOS QUE FALTAN
 -----------------------
-Un comprobante completo trae tres archivos: la factura (PDF), el XML y la guía de
-remisión. En cada correo por verificar o por aprobar, debajo del estado, sale en rojo
-lo que falta:
+Un comprobante completo trae cuatro archivos: la factura (PDF), el XML, la guía de
+remisión (del remitente) y la guía transportista. En cada correo por verificar o por
+aprobar, debajo del estado, sale en rojo lo que falta:
 
     No se encontró el XML del comprobante entre los archivos.
     No se encontró la factura (PDF) entre los archivos.
     No se encontró la guía de remisión entre los archivos.
+    No se encontró la guía transportista entre los archivos.
     (o "El correo no trae archivos adjuntos." / "El XML adjunto no se pudo leer.")
 
-Se reconoce cada archivo por su nombre: el de SUNAT (RUC-01-… factura, -09- y -31-
-guías, -07- nota de crédito) o palabras como "guia", "remision". A una nota de crédito
+Se reconoce cada archivo por su nombre: el de SUNAT (RUC-01-… factura, -09- guía de
+remisión, -31- guía transportista, -07- nota de crédito) o palabras: "transportista" o
+"GRT" para la del transportista; "guia", "remision", "remitente" o "GRR" para la otra. A una nota de crédito
 no se le pide guía. Si viene un .zip, no se reclama ni el PDF ni la guía (pueden estar
 adentro).
 
@@ -66,3 +68,44 @@ La pestaña muestra las dos situaciones:
   - En AMARILLO, las que ya la tienen, con el botón "Ver NC" en la fila: muestra el
     número, la fecha, el importe y sus archivos, y abre el PDF sin entrar a la factura.
 El número de la pestaña sigue contando solo las que faltan.
+
+
+EL CONCEPTO DE LA FACTURA: EL FORMATO PARA LOS TRANSPORTISTAS
+-------------------------------------------------------------
+Para que la fecha, la placa, el cliente, el origen, el destino y las guías se lean
+bien (y no queden pegados, como "TIENDAS PERUANAS FECHA:26/08/2026"), se les pide a
+los transportistas escribir el concepto así: cada dato con su etiqueta y dos puntos,
+separados por una barra vertical, en cualquier orden.
+
+    SERVICIO DE TRANSPORTE DE CARGA | FECHA: 26/08/2026 | PLACA: C1A-932 |
+    ORIGEN: LIMA | DESTINO: PIURA | CLIENTE: TIENDAS PERUANAS S.A. |
+    GRR: EG03-00000349 | GRT: VT01-007988
+
+    FECHA     día del servicio, dd/mm/aaaa
+    PLACA     la unidad que hizo el viaje
+    ORIGEN    de dónde salió
+    DESTINO   a dónde llegó
+    CLIENTE   a quién se le hizo el servicio
+    GRR       guía de remisión (del remitente)
+    GRT       guía del transportista
+
+  - Va en el correo de aceptación de cada flete, para que el proveedor lo tenga.
+  - Al aceptar un flete cuyo concepto no se pudo leer, el formulario muestra el formato.
+  - Lo de antes (texto libre) se sigue leyendo como antes; el cliente ya no se come la
+    fecha que viene detrás.
+
+
+VIAJES DE TERCEROS (Salidas)
+----------------------------
+Columnas: Día de servicio, Placa, Transportista, Cliente, Origen, Destino, Guías y
+Acciones. La factura y el pago se ven en Facturas. Si el concepto no trajo la fecha
+del servicio, sale la de emisión con un asterisco.
+
+
+EL BUZÓN, ORDENADO
+------------------
+Las acciones van siempre en el mismo orden y ancho: Ver · lo que toca (Verificar
+monto, Aceptar, Registrar o Aplicar NC) · Rechazar · y en iconos chicos lo de menos
+uso (corregir el monto, reintentar, descartar). Lo que falta del correo sale como
+"No se encontró:" y etiquetas cortas (XML, Factura (PDF), Guía de remisión, Guía
+transportista); la frase completa aparece al pasar el mouse.

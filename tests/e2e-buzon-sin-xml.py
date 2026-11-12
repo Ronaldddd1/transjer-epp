@@ -77,6 +77,7 @@ completo = correo("completo", "POR_APROBAR", COMPLETO, {
 adjunto(completo, "email_id", f"{RUC}-01-{SERIE}-{SELLO}1.xml", "application/xml")
 adjunto(completo, "email_id", f"{RUC}-01-{SERIE}-{SELLO}1.pdf")
 adjunto(completo, "email_id", f"{RUC}-31-EG03-{SELLO}.pdf")
+adjunto(completo, "email_id", f"20100055237-09-T001-{SELLO}.pdf")
 
 # Dos facturas anuladas: una espera la NC, la otra ya la tiene, con su PDF.
 def factura(numero, extra):
@@ -109,11 +110,16 @@ with sync_playwright() as p:
     check("el correo sin XML aparece en Por verificar monto", fila.count() == 1)
     texto = fila.inner_text() if fila.count() else ""
     check("marcado Sin XML", "Sin XML" in texto)
-    check("dice que falta el XML", "No se encontró el XML del comprobante entre los archivos." in texto)
-    check("y la guía de remisión", "No se encontró la guía de remisión entre los archivos." in texto)
-    check("pero no la factura, que sí vino", "No se encontró la factura" not in texto)
+    faltan = fila.locator("li").all_inner_texts() if fila.count() else []
+    check("dice qué no se encontró", "No se encontró:" in texto)
+    check("el XML", "XML" in faltan, faltan)
+    check("la guía de remisión", "Guía de remisión" in faltan, faltan)
+    check("y la guía transportista", "Guía transportista" in faltan, faltan)
+    check("con la frase completa al pasar el mouse",
+          "No se encontró la guía transportista entre los archivos." in (fila.locator("[title*='guía transportista']").first.get_attribute("title") or ""))
+    check("pero no la factura, que sí vino", "Factura (PDF)" not in faltan)
     fila2 = page.locator("tbody tr").filter(has_text=PROVEEDOR).filter(has_text=f"{SERIE}-{SELLO}1")
-    check("el que trae factura, XML y guía no reclama nada", fila2.count() == 1 and "No se encontró" not in fila2.inner_text(),
+    check("el que trae factura, XML y las dos guías no reclama nada", fila2.count() == 1 and "No se encontró" not in fila2.inner_text(),
           fila2.inner_text() if fila2.count() else "")
     check("sin XML todavía no se puede registrar: primero el monto",
           fila.get_by_role("button", name=re.compile("^Registrar")).count() == 0)

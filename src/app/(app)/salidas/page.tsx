@@ -13,7 +13,7 @@ import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
-import { cn, dueInfo, formatDate, formatMoney, invoiceNumber, todayLima, TRIP_DOC_LABEL, type SearchParams } from "@/lib/utils";
+import { cn, formatDate, invoiceNumber, todayLima, TRIP_DOC_LABEL, type SearchParams } from "@/lib/utils";
 import { listarViajesTerceros, readTercerosFiltros, resumenTerceros, type ViajeTercero } from "@/server/invoice-guides";
 import {
   listTripsControl, listTripsDay, readTripFilters, tripClientOptions, tripDriverOptions,
@@ -47,7 +47,6 @@ export default async function SalidasPage({ searchParams }: { searchParams: Sear
     terceros ? listarViajesTerceros(ft) : Promise.resolve([] as ViajeTercero[]),
   ]);
   const puedeGuias = can(user, "invoices.manage") || can(user, "trips.manage");
-  const veFacturas = can(user, "invoices.view");
   const opciones: TripOptions = { vehiculos, conductores, clientes };
   const hoy = todayLima();
 
@@ -108,15 +107,18 @@ export default async function SalidasPage({ searchParams }: { searchParams: Sear
             filters={[
               {
                 type: "select", name: "estado", label: "Mostrar", allLabel: "Esperando guía",
-                options: [{ value: "POR_PAGAR", label: "Guías completas, por pagar" }, { value: "TODAS", label: "Todas" }],
+                options: [{ value: "POR_PAGAR", label: "Guías completas" }, { value: "TODAS", label: "Todas" }],
               },
               { type: "date", name: "desde", label: "Viaje desde" },
               { type: "date", name: "hasta", label: "Hasta" },
             ]}
           />
-          <TablaTerceros viajes={viajes} puedeGuias={puedeGuias} veFacturas={veFacturas} />
+          <TablaTerceros viajes={viajes} puedeGuias={puedeGuias} />
           {viajes.length > 0 && (
-            <p className="mt-3 text-sm text-steel-500">{viajes.length} viaje(s) de terceros.</p>
+            <p className="mt-3 text-sm text-steel-500">
+              {viajes.length} viaje(s) de terceros.
+              {viajes.some((v) => !v.serviceDate) && " * Sin fecha de servicio en el concepto: es la fecha de emisión de la factura."}
+            </p>
           )}
         </>
       ) : f.vista === "dia" ? (
@@ -244,80 +246,53 @@ function TablaSalidas({ filas, opciones, puedeEditar, conFecha }: {
   );
 }
 
-function TablaTerceros({ viajes, puedeGuias, veFacturas }: { viajes: ViajeTercero[]; puedeGuias: boolean; veFacturas: boolean }) {
+function TablaTerceros({ viajes, puedeGuias }: { viajes: ViajeTercero[]; puedeGuias: boolean }) {
+  // Lo que se mira aquí es el viaje: qué unidad, qué día, para quién y de dónde a dónde,
+  // y si ya llegaron sus guías. La factura y el pago se ven en Facturas.
   return (
     <TableShell>
       <thead>
         <tr>
-          <Th>Viaje</Th>
+          <Th>Día de servicio</Th>
+          <Th>Placa</Th>
           <Th>Transportista</Th>
-          <Th>Cliente y ruta</Th>
-          <Th>Factura</Th>
+          <Th>Cliente</Th>
+          <Th>Origen</Th>
+          <Th>Destino</Th>
           <Th>Guías</Th>
-          <Th>Pago</Th>
           {puedeGuias && <Th className="text-right">Acciones</Th>}
         </tr>
       </thead>
       <tbody>
         {viajes.length === 0 && (
-          <EmptyRow colSpan={puedeGuias ? 7 : 6} title="No hay viajes de terceros con esos filtros" />
+          <EmptyRow colSpan={puedeGuias ? 8 : 7} title="No hay viajes de terceros con esos filtros" />
         )}
         {viajes.map((v) => {
           const factura = invoiceNumber(v.series, v.number);
-          const due = dueInfo(v.payDueDate, v.hoy);
-          const ruta = [v.originCity, v.destinationCity].filter(Boolean).join(" → ");
+          const falta = <span className="text-steel-400">—</span>;
           return (
             <Tr key={v.id}>
-              <Td className="whitespace-nowrap tabular">{formatDate(v.serviceDate ?? v.issueDate)}</Td>
-              <Td>
-                <span className="font-semibold">{v.supplierName}</span>
-                <p className="text-xs text-steel-500">{v.plate ? `Placa ${v.plate}` : "sin placa"}</p>
-              </Td>
-              <Td>
-                {v.clientName ?? <span className="text-steel-400">sin cliente</span>}
-                {ruta && <p className="text-xs text-steel-500">{ruta}</p>}
-              </Td>
-              <Td className="whitespace-nowrap">
-                {veFacturas
-                  ? <Link href={`/facturas/${v.id}`} className="font-semibold tabular hover:underline">{factura}</Link>
-                  : <span className="font-semibold tabular">{factura}</span>}
-                {veFacturas && <p className="text-xs text-steel-500 tabular">{formatMoney(v.total, v.currency)}</p>}
-              </Td>
-              <Td className="min-w-[12rem]"><GuiasChips guias={v.guias} legado={v.guideReceivedAt} /></Td>
-              <Td className="whitespace-nowrap">
-                {v.status === "PAGADA" ? (
-                  <span className="inline-block rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                    Pagada{v.paidAt ? ` el ${formatDate(v.paidAt)}` : ""}
-                  </span>
-                ) : v.payDueDate ? (
-                  <>
-                    <span className={cn(
-                      "inline-block rounded px-2 py-0.5 text-xs font-semibold",
-                      due.state === "VENCIDA" ? "bg-red-100 text-red-800"
-                        : due.state === "HOY" || due.state === "PRONTO" ? "bg-amber-100 text-amber-900"
-                          : "bg-sky-100 text-sky-900",
-                    )}>{due.label}</span>
-                    <p className="text-xs text-steel-500">el {formatDate(v.payDueDate)}</p>
-                  </>
-                ) : (
-                  <span className="inline-block rounded bg-steel-100 px-2 py-0.5 text-xs font-semibold text-steel-700">
-                    Esperando guía
+              <Td className="whitespace-nowrap tabular">
+                {v.serviceDate ? formatDate(v.serviceDate) : (
+                  <span className="text-steel-500" title="El concepto no trae la fecha del servicio: se muestra la de emisión">
+                    {formatDate(v.issueDate)}*
                   </span>
                 )}
               </Td>
+              <Td className="whitespace-nowrap font-semibold tabular">{v.plate ?? falta}</Td>
+              <Td className="max-w-[14rem]"><span className="line-clamp-2">{v.supplierName}</span></Td>
+              <Td className="max-w-[14rem]"><span className="line-clamp-2">{v.clientName ?? falta}</span></Td>
+              <Td className="whitespace-nowrap">{v.originCity ?? falta}</Td>
+              <Td className="whitespace-nowrap">{v.destinationCity ?? falta}</Td>
+              <Td className="min-w-[12rem]"><GuiasChips guias={v.guias} legado={v.guideReceivedAt} /></Td>
               {puedeGuias && (
                 <Td>
-                  {v.guias.length > 0 && v.status !== "ANULADA" && (
-                    <div className="flex items-center justify-end gap-1">
+                  <div className="flex items-center justify-end gap-1">
+                    {v.guias.length > 0 && v.status !== "ANULADA" && (
                       <LlegaronGuiasModal invoiceId={v.id} factura={factura} guias={v.guias} compact />
-                      <AgregarGuiaModal invoiceId={v.id} factura={factura} />
-                    </div>
-                  )}
-                  {v.guias.length === 0 && v.status === "PENDIENTE" && (
-                    <div className="flex items-center justify-end">
-                      <AgregarGuiaModal invoiceId={v.id} factura={factura} />
-                    </div>
-                  )}
+                    )}
+                    {v.status !== "ANULADA" && <AgregarGuiaModal invoiceId={v.id} factura={factura} />}
+                  </div>
                 </Td>
               )}
             </Tr>

@@ -81,6 +81,48 @@ function limpiarNombre(texto: string): string {
   return /\.[A-Z0-9]\.$/.test(sinBordes) ? sinBordes : sinBordes.replace(/\.+$/, "").trim();
 }
 
+/**
+ * El formato que se les pide a los proveedores: cada dato con su etiqueta y dos puntos,
+ * separados por una barra vertical, en cualquier orden.
+ *
+ *   SERVICIO DE TRANSPORTE DE CARGA | FECHA: 26/08/2026 | PLACA: C1A-932 |
+ *   ORIGEN: LIMA | DESTINO: PIURA | CLIENTE: TIENDAS PERUANAS S.A. |
+ *   GRR: EG03-00000349 | GRT: VT01-007988
+ *
+ * Con etiquetas no hay que adivinar dónde termina el cliente o cuál es el destino: cada
+ * valor va desde su etiqueta hasta la siguiente (o hasta la barra).
+ */
+export { FORMATO_CONCEPTO } from "@/lib/guias";
+
+const ETIQUETAS: [keyof ViajeLeido, string][] = [
+  ["serviceDate", "FECHA(?:\\s+(?:DE(?:L)?\\s+)?SERVICIO)?"],
+  ["plate", "PLACAS?"],
+  ["originCity", "ORIGEN"],
+  ["destinationCity", "DESTINO"],
+  ["clientName", "CLIENTE"],
+  ["dispatchNote", "GRR|GUIA\\s+(?:DE\\s+)?REMITENTE|GUIA\\s+DE\\s+REMISION(?:\\s+REMITENTE)?"],
+  ["grtNumber", "GRT|GUIA\\s+(?:DEL?\\s+)?TRANSPORTISTA"],
+];
+
+/** Los datos escritos con su etiqueta ("ORIGEN: LIMA"). Solo cuentan los que llevan dos puntos. */
+function leerEtiquetas(t: string): Partial<Record<keyof ViajeLeido, string>> {
+  const todas = new RegExp(`(?:^|[|\\s])(${ETIQUETAS.map(([, r]) => `(?:${r})`).join("|")})\\s*:`, "g");
+  const marcas: { campo: keyof ViajeLeido; desde: number; valorDesde: number }[] = [];
+  for (const m of t.matchAll(todas)) {
+    const etiqueta = m[1];
+    const campo = ETIQUETAS.find(([, r]) => new RegExp(`^(?:${r})$`).test(etiqueta))?.[0];
+    if (!campo) continue;
+    marcas.push({ campo, desde: m.index!, valorDesde: m.index! + m[0].length });
+  }
+  const valores: Partial<Record<keyof ViajeLeido, string>> = {};
+  marcas.forEach((m, i) => {
+    const hasta = i + 1 < marcas.length ? marcas[i + 1].desde : t.length;
+    const valor = t.slice(m.valorDesde, hasta).split("|")[0];
+    if (!(m.campo in valores)) valores[m.campo] = valor.trim();
+  });
+  return valores;
+}
+
 export function leerConceptoTransporte(concepto: string | null | undefined): ViajeLeido {
   if (!concepto) return { ...VACIO };
   const t = normalizar(concepto);
@@ -101,13 +143,13 @@ export function leerConceptoTransporte(concepto: string | null | undefined): Via
   const transportista = t.match(/(?:S\s*\/\s*G\s*\/\s*R\s*\/\s*T\s*\/\s*E|\bGRTE?\b|\bG\.?R\.?T\.?)\s*:?\s*([A-Z0-9]{2,6}\s*-?\s*\d{1,10})/);
   if (transportista) salida.grtNumber = guia(transportista[1]);
 
-  const remitente = t.match(/(?:S\s*\/\s*G\s*\/\s*R\s*\/\s*E\s*\/\s*T|\bGRET?\b|\bG\.?R\.?E\.?)\s*:?\s*([A-Z0-9]{2,6}\s*-?\s*\d{1,10})/);
+  const remitente = t.match(/(?:S\s*\/\s*G\s*\/\s*R\s*\/\s*E\s*\/\s*T|\bGRET?\b|\bGRR\b|\bG\.?R\.?E\.?)\s*:?\s*([A-Z0-9]{2,6}\s*-?\s*\d{1,10})/);
   if (remitente) salida.dispatchNote = guia(remitente[1]);
 
   // ---------- Cliente ----------
   // Va desde la palabra CLIENTE hasta lo siguiente que se reconoce (la placa, una guía o
   // el final). Sin ese tope, el nombre del cliente se tragaría el resto de la línea.
-  const cliente = t.match(/CLIENTE\s*:?\s*(.+?)(?=\s+(?:CON\s+PLACA|PLACAS?\b|S\s*\/\s*G\s*\/\s*R|G\.?R\.?[TE]|CON\s+FECHA)|$)/);
+  const cliente = t.match(/CLIENTE\s*:?\s*(.+?)(?=\s*\||\s+(?:CON\s+PLACA|PLACAS?\b|S\s*\/\s*G\s*\/\s*R|G\.?R\.?[TER]|CON\s+FECHA|FECHA\b|ORIGEN\b|DESTINO\b|GUIA\b)|$)/);
   if (cliente) {
     const nombre = limpiarNombre(cliente[1]);
     if (nombre.length > 1) salida.clientName = nombre.slice(0, 120);
@@ -132,6 +174,24 @@ export function leerConceptoTransporte(concepto: string | null | undefined): Via
       salida.destinationCity = partes[1].slice(0, 120);
     }
   }
+
+  // ---------- Lo escrito con etiqueta manda ----------
+  // Si el proveedor usó el formato (ORIGEN:, DESTINO:, CLIENTE:…), esos valores valen más
+  // que lo adivinado del texto libre.
+  const e = leerEtiquetas(t);
+  if (e.serviceDate) {
+    const f = e.serviceDate.match(/(\d{1,2})\s*[/.-]\s*(\d{1,2})\s*[/.-]\s*(\d{2,4})/);
+    if (f) salida.serviceDate = fechaIso(f[1], f[2], f[3]) ?? salida.serviceDate;
+  }
+  if (e.plate) {
+    const pl = e.plate.match(/([A-Z0-9]{3})\s*-?\s*([A-Z0-9]{3})/);
+    if (pl) salida.plate = normalizePlate(`${pl[1]}${pl[2]}`);
+  }
+  if (e.originCity && limpiar(e.originCity).length > 1) salida.originCity = limpiar(e.originCity).slice(0, 80);
+  if (e.destinationCity && limpiar(e.destinationCity).length > 1) salida.destinationCity = limpiar(e.destinationCity).slice(0, 120);
+  if (e.clientName && limpiarNombre(e.clientName).length > 1) salida.clientName = limpiarNombre(e.clientName).slice(0, 120);
+  if (e.dispatchNote && /\d/.test(e.dispatchNote)) salida.dispatchNote = guia(e.dispatchNote.split(/\s+(?=[A-Z]{3,}\b)/)[0]);
+  if (e.grtNumber && /\d/.test(e.grtNumber)) salida.grtNumber = guia(e.grtNumber.split(/\s+(?=[A-Z]{3,}\b)/)[0]);
 
   return salida;
 }

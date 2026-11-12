@@ -22,6 +22,7 @@ import {
 import { testImapConnection } from "@/server/imap";
 import { readMailboxConfig } from "@/server/mailbox-config";
 import { ingestMessage, syncMailbox } from "@/server/invoice-ingest";
+import { FORMATO_CONCEPTO } from "@/server/concepto-transporte";
 import { parsedOf, registerApprovedEmail, registerRejectedEmail } from "@/server/invoice-approval";
 import { insertInvoice } from "@/server/invoice-service";
 import { sendMail, verifySmtp } from "@/server/mailer";
@@ -307,6 +308,7 @@ async function avisarAceptacion(
     total: formatMoney(factura.total, factura.currency),
     transporte: factura.transporte,
     plazoDias: PLAZO_TRANSPORTE_DIAS,
+    formatoConcepto: FORMATO_CONCEPTO,
   });
   const envio = await sendMail({
     to: destino,

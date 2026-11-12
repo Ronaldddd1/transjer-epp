@@ -274,6 +274,8 @@ export function acceptanceEmailBody(datos: {
   transporte: boolean;
   plazoDias?: number;
   empresa?: string;
+  /** El formato del concepto que se les pide para los próximos fletes. */
+  formatoConcepto?: string;
 }): string {
   const empresa = datos.empresa?.trim() || "Transjer Operador Logístico S.A.C.";
   const saludo = datos.proveedor ? `Estimados señores de ${datos.proveedor}:` : "Estimados señores:";
@@ -285,6 +287,12 @@ export function acceptanceEmailBody(datos: {
     datos.transporte
       ? `El pago se programa ${datos.plazoDias ?? 15} días después de que recibamos en físico las guías de remisión del servicio. Les agradeceremos hacerlas llegar a nuestra oficina.`
       : null,
+    datos.transporte && datos.formatoConcepto ? "" : null,
+    datos.transporte && datos.formatoConcepto
+      ? "Para registrar sus próximas facturas sin errores, les pedimos escribir el concepto con este formato (cada dato con su etiqueta, separados por una barra vertical):"
+      : null,
+    datos.transporte && datos.formatoConcepto ? "" : null,
+    datos.transporte && datos.formatoConcepto ? datos.formatoConcepto : null,
     "",
     "Gracias por su atención.",
     "",

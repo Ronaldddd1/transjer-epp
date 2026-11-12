@@ -54,3 +54,13 @@ export function vencimientoPorGuias(guias: GuiaEstado[], receptionYmd: string) {
       : null,
   };
 }
+
+/**
+ * El formato del concepto que se les pide a los transportistas en sus facturas: cada dato
+ * con su etiqueta, separados por una barra vertical, en cualquier orden. Así el sistema lo
+ * lee sin adivinar (ver server/concepto-transporte.ts). GRR es la guía de remisión del
+ * remitente; GRT, la del transportista.
+ */
+export const FORMATO_CONCEPTO =
+  "SERVICIO DE TRANSPORTE DE CARGA | FECHA: 26/08/2026 | PLACA: C1A-932 | ORIGEN: LIMA | DESTINO: PIURA"
+  + " | CLIENTE: TIENDAS PERUANAS S.A. | GRR: EG03-00000349 | GRT: VT01-007988";
