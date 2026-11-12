@@ -12,7 +12,7 @@ import "dotenv/config";
 import { and, eq, sql } from "drizzle-orm";
 import { db } from "../src/db";
 import {
-  auditLogs, invoiceAttachments, invoiceEmails, supplierInvoices, suppliers, users,
+  auditLogs, invoiceAttachments, invoiceEmails, invoiceGuides, supplierInvoices, suppliers, users,
 } from "../src/db/schema";
 import { REJECT_REASON_LABEL, rejectionEmailBody } from "../src/lib/utils";
 import { leerConceptoTransporte } from "../src/server/concepto-transporte";
@@ -160,9 +160,15 @@ async function main() {
     check("la guía del transportista se guarda aparte de la del remitente",
       transporte?.grtNumber === "VT01-007988" && transporte?.dispatchNote === "EG03-00000349", transporte);
 
-    // El correo llegó el 3 de octubre: 15 días después es el 18.
-    check("la fecha límite se cuenta desde que llegó el correo",
-      transporte?.payDueDate === "2026-10-18", transporte?.payDueDate);
+    // Un flete se paga 15 días después de que llega la última guía: mientras tanto, no
+    // tiene fecha de pago, y nace con sus dos guías (la del transportista y la del remitente).
+    check("un flete queda a crédito, esperando sus guías, sin fecha de pago",
+      transporte?.paymentTerm === "CREDITO" && transporte?.payDueDate === null, transporte?.payDueDate);
+    const guiasFlete = await db.select().from(invoiceGuides).where(eq(invoiceGuides.invoiceId, aceptadoFlete.invoiceId));
+    check("con sus dos guías por llegar",
+      guiasFlete.length === 2 && guiasFlete.every((g) => g.receivedAt === null)
+      && guiasFlete.some((g) => g.number === "VT01-007988" && g.kind === "TRANSPORTISTA")
+      && guiasFlete.some((g) => g.number === "EG03-00000349" && g.kind === "REMITENTE"), guiasFlete);
   }
 
   // Un servicio corriente, en cambio, vence al día siguiente y no lleva datos de viaje.

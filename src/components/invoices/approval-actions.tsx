@@ -8,6 +8,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
+import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
 import { Modal } from "@/components/ui/modal";
 import {
   AMOUNT_CHECK_LABEL, cn, compararMonto,
@@ -522,7 +523,7 @@ export function AceptarModal({ correo, condicion }: {
             required
             error={errors.serviceType}
             hint={tipo === "TRANSPORTE"
-              ? "Un flete se paga a 15 días de recibida la factura."
+              ? "Un flete se paga 15 días después de que llegue la última guía."
               : "Un servicio corriente se paga al contado."}
           >
             <Select name="serviceType" value={tipo} onChange={(e) => cambiarTipo(e.target.value as InvoiceServiceTypeKey)}>
@@ -567,6 +568,15 @@ export function AceptarModal({ correo, condicion }: {
             </div>
           )}
 
+          {tipo === "TRANSPORTE" ? (
+            <p className="rounded-md border border-steel-200 bg-steel-50 px-3 py-2.5 text-sm text-steel-700">
+              <input type="hidden" name="paymentTerm" value="CREDITO" />
+              <input type="hidden" name="termDays" value={PLAZO_TRANSPORTE_DIAS} />
+              Al aceptarla, el viaje aparece en <strong>Salidas › Viajes de terceros</strong> con sus guías por llegar.
+              Se paga <strong>{PLAZO_TRANSPORTE_DIAS} días después de que llegue la última guía</strong>.
+              Si son varias, escríbelas separadas por una barra: T001-120 / T001-121.
+            </p>
+          ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Condición de pago" name="paymentTerm" required error={errors.paymentTerm}>
               <Select name="paymentTerm" value={term} onChange={(e) => cambiarTerm(e.target.value as PaymentTermKey)}>
@@ -584,6 +594,7 @@ export function AceptarModal({ correo, condicion }: {
               <Input name="termDays" value={termDays} onChange={(e) => setTermDays(e.target.value)} inputMode="numeric" maxLength={3} invalid={!!errors.termDays} />
             </Field>
           </div>
+          )}
 
           <Field label="Concepto" name="description" error={errors.description} hint="Lo que viene del comprobante. Cámbialo si no dice gran cosa.">
             <Input name="description" defaultValue={correo.comprobante?.description ?? ""} maxLength={250} />

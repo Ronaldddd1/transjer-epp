@@ -177,6 +177,8 @@ export async function attendanceWeek(lunes: string, f: { q?: string; area?: stri
   const trabajadores = await db.select({
     employeeId: employees.id,
     nombre: sql<string>`concat_ws(' ', ${employees.firstName}, ${employees.lastName})`,
+    firstName: employees.firstName,
+    lastName: employees.lastName,
     dni: employees.dni,
     area: employees.area,
   })

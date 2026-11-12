@@ -20,6 +20,7 @@ import {
 import { estadoFlota, listFleet } from "./document-queries";
 import { listMaintenance, readMaintenanceFilters } from "./maintenance-queries";
 import { attendanceMonth, attendanceWeek, listAttendanceDay, lunesDe, readAttendanceFilters } from "./attendance-queries";
+import { asistenciaSemanaXlsx, nombreArchivoSemana } from "./attendance-excel";
 import { listProvinceClients, readProvinceFilters } from "./province-queries";
 import { listTripsControl, listTripsDay, readTripFilters } from "./trip-queries";
 import { MODULOS } from "@/lib/permissions";
@@ -39,6 +40,11 @@ export type TableExport = {
   title: string;
   permission: Permission;
   build: (sp: SearchParamsRecord) => Promise<Report[]>;
+  /**
+   * Para las tablas cuyo Excel tiene un formato propio (la asistencia semanal sale como la
+   * hoja de TransJer). El CSV y el PDF siguen saliendo de build.
+   */
+  xlsx?: (sp: SearchParamsRecord) => Promise<{ body: Buffer; filename: string }>;
 };
 
 const money = (v: string | number | null | undefined) => (v === null || v === undefined || v === "" ? "" : Number(v));
@@ -597,9 +603,10 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "cliente", header: "Cliente destinatario", width: 32 },
           { key: "ubicacion", header: "Ubicación", width: 38 },
           { key: "telefono", header: "Número del cliente", width: 16 },
-          { key: "estibador", header: "Estibador", width: 24 },
-          { key: "telefonoEstiba", header: "Número del estibador", width: 18 },
+          { key: "estibador", header: "Estiba más barata", width: 24 },
+          { key: "telefonoEstiba", header: "Número", width: 18 },
           { key: "costo", header: "Costo por tonelada", width: 16, align: "right" as const },
+          { key: "otras", header: "Otras estibas", width: 48 },
           { key: "observaciones", header: "Observaciones", width: 40 },
           { key: "estado", header: "Estado", width: 14 },
         ],
@@ -611,6 +618,11 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           estibador: texto(c.stevedoreName),
           telefonoEstiba: texto(c.stevedorePhone),
           costo: c.costPerTon ? `S/ ${c.costPerTon}` : "",
+          // Las demás, en una celda: "Nombre · 976… · S/ 40.00".
+          otras: c.estibas
+            .filter((e) => !(e.name === c.stevedoreName && e.phone === c.stevedorePhone && e.costPerTon === c.costPerTon))
+            .map((e) => [e.name, e.phone, e.costPerTon ? `S/ ${e.costPerTon}` : null].filter(Boolean).join(" · "))
+            .join("\n"),
           observaciones: texto(c.notes),
           estado: c.active ? "Vigente" : "Dado de baja",
         })),
@@ -1172,6 +1184,13 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
   "asistencia-semana": {
     title: "Asistencia semanal",
     permission: "attendance.view",
+    // El Excel sale con el formato de la hoja de asistencia de TransJer.
+    async xlsx(sp) {
+      const f = readAttendanceFilters(sp);
+      const pedida = typeof sp.semana === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.semana) ? sp.semana : todayLima();
+      const semana = await attendanceWeek(lunesDe(pedida), { q: f.q, area: f.area });
+      return { body: await asistenciaSemanaXlsx(semana), filename: nombreArchivoSemana(semana.lunes) };
+    },
     async build(sp) {
       const f = readAttendanceFilters(sp);
       const pedida = typeof sp.semana === "string" && /^\d{4}-\d{2}-\d{2}$/.test(sp.semana) ? sp.semana : todayLima();

@@ -639,14 +639,60 @@ export const loginSchema = z.object({
  * teléfono del estibador aparece recién cuando se hace el primer viaje— y exigirlo todo de
  * entrada llevaría a inventar datos o a no registrar nada.
  */
+/** Una estiba del cliente de provincia. Puede haber varias para comparar precios. */
+const estibaSchema = z.object({
+  name: optionalText(120),
+  phone: telefono,
+  costPerTon: optionalMoney("El costo por tonelada"),
+  notes: optionalText(250),
+});
+export type EstibaInput = z.infer<typeof estibaSchema>;
+export const MAXIMO_ESTIBAS = 10;
+
+/**
+ * Las estibas del formulario. Vienen como filas repetidas (estiba_nombre, estiba_telefono,
+ * estiba_costo, estiba_nota); una fila vacía se ignora. Los errores salen con el número de
+ * fila, para marcar la casilla exacta.
+ */
+export function leerEstibas(formData: FormData): { estibas: EstibaInput[]; errores: Record<string, string> } {
+  const col = (k: string) => formData.getAll(k).map((v) => (typeof v === "string" ? v.trim() : ""));
+  const nombres = col("estiba_nombre"), telefonos = col("estiba_telefono"), costos = col("estiba_costo"), notas = col("estiba_nota");
+  const filas = Math.max(nombres.length, telefonos.length, costos.length, notas.length);
+  const estibas: EstibaInput[] = [];
+  const errores: Record<string, string> = {};
+  for (let i = 0; i < filas; i++) {
+    const crudo = { name: nombres[i] ?? "", phone: telefonos[i] ?? "", costPerTon: costos[i] ?? "", notes: notas[i] ?? "" };
+    if (!crudo.name && !crudo.phone && !crudo.costPerTon && !crudo.notes) continue;
+    const r = estibaSchema.safeParse(crudo);
+    if (!r.success) {
+      for (const issue of r.error.issues) {
+        const campo = { name: "nombre", phone: "telefono", costPerTon: "costo", notes: "nota" }[String(issue.path[0])] ?? "costo";
+        errores[`estiba_${campo}_${i}`] ??= issue.message;
+      }
+      continue;
+    }
+    if (!r.data.name && !r.data.phone && !r.data.costPerTon) {
+      errores[`estiba_nombre_${i}`] = "Escribe al menos el nombre, el número o el costo";
+      continue;
+    }
+    estibas.push(r.data);
+  }
+  if (estibas.length > MAXIMO_ESTIBAS) errores.estibas = `Hasta ${MAXIMO_ESTIBAS} estibas por cliente.`;
+  return { estibas, errores };
+}
+
+/** La más barata con precio; si ninguna tiene precio, la primera. */
+export function estibaPrincipal<T extends { costPerTon: string | null }>(estibas: T[]): T | null {
+  const conPrecio = estibas.filter((e) => e.costPerTon !== null);
+  if (conPrecio.length) return conPrecio.reduce((a, b) => (Number(b.costPerTon) < Number(a.costPerTon) ? b : a));
+  return estibas[0] ?? null;
+}
+
 export const provinceClientSchema = z.object({
   province: requiredText("La provincia", 80),
   clientName: requiredText("El cliente destinatario", 160),
   location: optionalText(250),
   clientPhone: telefono,
-  stevedoreName: optionalText(120),
-  stevedorePhone: telefono,
-  costPerTon: optionalMoney("El costo por tonelada"),
   notes: optionalText(1000),
 });
 

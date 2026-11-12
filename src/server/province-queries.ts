@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, count, eq, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, inArray, or, sql, type SQL } from "drizzle-orm";
 import { db } from "@/db";
-import { provinceClients } from "@/db/schema";
+import { provinceClients, provinceClientStevedores } from "@/db/schema";
 import { first, type SearchParamsRecord } from "@/lib/utils";
 
 /**
@@ -41,6 +41,9 @@ function condiciones(f: ProvinceFilters): SQL | undefined {
         sql`upper(coalesce(${provinceClients.location}, '')) like upper(${like(f.q)})`,
         sql`coalesce(${provinceClients.clientPhone}, '') like ${like(f.q)}`,
         sql`upper(coalesce(${provinceClients.stevedoreName}, '')) like upper(${like(f.q)})`,
+        // Cualquiera de sus estibas, por nombre o por número.
+        sql`exists (select 1 from province_client_stevedores e where e.province_client_id = "province_clients"."id"
+          and (upper(coalesce(e.name, '')) like upper(${like(f.q)}) or coalesce(e.phone, '') like ${like(f.q)}))`,
       )
       : undefined,
   );
@@ -60,14 +63,33 @@ const columnas = {
   updatedAt: provinceClients.updatedAt,
 };
 
+export type Estiba = { id: string; name: string | null; phone: string | null; costPerTon: string | null; notes: string | null };
+
+/** Las estibas de varios clientes, en el orden en que se anotaron. */
+export async function estibasDeClientes(ids: string[]): Promise<Map<string, Estiba[]>> {
+  const mapa = new Map<string, Estiba[]>();
+  if (!ids.length) return mapa;
+  const filas = await db.select({
+    id: provinceClientStevedores.id, clienteId: provinceClientStevedores.provinceClientId,
+    name: provinceClientStevedores.name, phone: provinceClientStevedores.phone,
+    costPerTon: provinceClientStevedores.costPerTon, notes: provinceClientStevedores.notes,
+  }).from(provinceClientStevedores)
+    .where(inArray(provinceClientStevedores.provinceClientId, ids))
+    .orderBy(asc(provinceClientStevedores.position));
+  for (const { clienteId, ...e } of filas) mapa.set(clienteId, [...(mapa.get(clienteId) ?? []), e]);
+  return mapa;
+}
+
 export async function listProvinceClients(f: ProvinceFilters, limit = 50, offset = 0) {
   const where = condiciones(f);
-  const [rows, [total]] = await Promise.all([
+  const [filas, [total]] = await Promise.all([
     db.select(columnas).from(provinceClients).where(where)
       .orderBy(asc(provinceClients.province), asc(provinceClients.clientName))
       .limit(limit).offset(offset),
     db.select({ total: count() }).from(provinceClients).where(where),
   ]);
+  const estibas = await estibasDeClientes(filas.map((r) => r.id));
+  const rows = filas.map((r) => ({ ...r, estibas: estibas.get(r.id) ?? [] }));
   return { rows, total: total?.total ?? 0 };
 }
 

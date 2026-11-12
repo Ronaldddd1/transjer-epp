@@ -190,6 +190,20 @@
       "when": 1794300000000,
       "tag": "0026_pago_masivo_detracciones",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1794400000000,
+      "tag": "0027_varias_estibas",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1794500000000,
+      "tag": "0028_guias_de_facturas",
+      "breakpoints": true
     }
   ]
 }

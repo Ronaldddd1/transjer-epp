@@ -486,6 +486,28 @@ export const invoiceEmails = pgTable("invoice_emails", {
 ]);
 
 /**
+ * Las guías de una factura de transporte. Puede haber varias (la del transportista, la del
+ * remitente, una por tramo). Cuando llega la última en físico, empieza a correr el plazo:
+ * la factura vence 15 días después.
+ */
+export const invoiceGuides = pgTable("invoice_guides", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  invoiceId: uuid("invoice_id").notNull().references((): AnyPgColumn => supplierInvoices.id, { onDelete: "cascade" }),
+  kind: varchar("kind", { length: 14 }).notNull().default("TRANSPORTISTA").$type<"TRANSPORTISTA" | "REMITENTE">(),
+  /** Puede faltar: se sabe que hay una guía por llegar aunque no se sepa su número. */
+  number: varchar("number", { length: 40 }),
+  receivedAt: date("received_at"),
+  receivedBy: uuid("received_by").references(() => users.id, { onDelete: "set null" }),
+  notes: varchar("notes", { length: 250 }),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  ...timestamps,
+}, (t) => [
+  index("invoice_guides_invoice_idx").on(t.invoiceId),
+  uniqueIndex("invoice_guides_number_unique").on(t.invoiceId, sql`upper(btrim(${t.number}))`).where(sql`${t.number} is not null`),
+  check("invoice_guides_kind_valid", sql`${t.kind} in ('TRANSPORTISTA', 'REMITENTE')`),
+]);
+
+/**
  * Un lote de pago masivo de detracciones (Depósitos Masivos de SUNAT).
  *
  * Al generarlo se arma el archivo TXT y sus detracciones pasan a "En proceso". Cuando se
@@ -844,6 +866,26 @@ export const provinceClients = pgTable("province_clients", {
 }, (t) => [
   index("province_clients_province_idx").on(t.province),
   check("province_clients_cost_positive", sql`${t.costPerTon} is null or ${t.costPerTon} >= 0`),
+]);
+
+/**
+ * Las estibas de cada cliente de provincia. Puede haber varias: para comparar lo que cobra
+ * cada una por tonelada y tener a quién llamar si la de siempre no puede. Las columnas de
+ * estiba de province_clients quedan con la más barata, por compatibilidad.
+ */
+export const provinceClientStevedores = pgTable("province_client_stevedores", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  provinceClientId: uuid("province_client_id").notNull().references(() => provinceClients.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 120 }),
+  phone: varchar("phone", { length: 40 }),
+  costPerTon: numeric("cost_per_ton", { precision: 12, scale: 2 }),
+  notes: varchar("notes", { length: 250 }),
+  position: integer("position").notNull().default(0),
+  ...timestamps,
+}, (t) => [
+  index("province_client_stevedores_client_idx").on(t.provinceClientId, t.position),
+  check("province_client_stevedores_cost_positive", sql`${t.costPerTon} is null or ${t.costPerTon} >= 0`),
+  check("province_client_stevedores_something", sql`${t.name} is not null or ${t.phone} is not null or ${t.costPerTon} is not null`),
 ]);
 
 /**

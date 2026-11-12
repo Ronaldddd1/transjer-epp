@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
+import { PLAZO_TRANSPORTE_DIAS } from "@/lib/guias";
 import {
   computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_THRESHOLD, formatDate,
   formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL, todayLima,
@@ -188,6 +189,30 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
             <DateInput name="dueDate" defaultValue={invoice?.dueDate ?? ""} invalid={!!errors.dueDate} />
           </Field>
 
+          {clase === "TRANSPORTE" ? (
+            /* La regla del transporte: 15 días desde que llega la última guía. No se elige. */
+            <div className="rounded-lg border border-steel-200 bg-steel-50 p-4 sm:col-span-6">
+              <input type="hidden" name="paymentTerm" value="CREDITO" />
+              <input type="hidden" name="termDays" value={PLAZO_TRANSPORTE_DIAS} />
+              <p className="text-sm text-steel-700">
+                <strong className="text-ink">Factura de transporte:</strong> se paga {PLAZO_TRANSPORTE_DIAS} días después de
+                que llegue en físico la última de sus guías. Las guías salen de los campos de guía de abajo, y se marcan
+                como llegadas en Salidas › Viajes de terceros o en la ficha de la factura.
+              </p>
+              {!invoice && (
+                <Field
+                  label="Las guías ya llegaron el"
+                  name="guideReceivedAt"
+                  error={errors.guideReceivedAt}
+                  hint="Solo si ya están en la oficina. Si no, déjalo vacío."
+                  className="mt-3 max-w-xs"
+                >
+                  <DateInput name="guideReceivedAt" value={guide} onChange={(v) => setGuide(v ?? "")} max={todayLima()} invalid={!!errors.guideReceivedAt} />
+                </Field>
+              )}
+            </div>
+          ) : (
+          <>
           {/* Condición de pago: contado corre desde el correo, crédito desde la guía en físico. */}
           <div className="rounded-lg border border-steel-200 bg-steel-50 p-4 sm:col-span-6">
             <div className="grid gap-4 sm:grid-cols-6">
@@ -232,6 +257,8 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
               )}
             </p>
           </div>
+          </>
+          )}
 
           <Field label="Moneda" name="currency" required error={errors.currency} className="sm:col-span-2">
             <Select name="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>

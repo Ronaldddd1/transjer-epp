@@ -13,7 +13,7 @@ import { first, todayLima, type SearchParamsRecord } from "@/lib/utils";
 const isYmd = (v: string | undefined) => !!v && /^\d{4}-\d{2}-\d{2}$/.test(v);
 
 export type TripFilters = {
-  vista: "dia" | "control";
+  vista: "dia" | "control" | "terceros";
   dia: string;
   /** PENDIENTE | LIQUIDADO | "" (todas). En el control arranca en PENDIENTE. */
   estado: string;
@@ -23,7 +23,8 @@ export type TripFilters = {
 };
 
 export function readTripFilters(sp: SearchParamsRecord): TripFilters {
-  const vista = first(sp.vista) === "control" ? "control" : "dia";
+  const pedida = first(sp.vista);
+  const vista = pedida === "control" ? "control" : pedida === "terceros" ? "terceros" : "dia";
   const dia = first(sp.dia);
   const estado = first(sp.estado);
   return {

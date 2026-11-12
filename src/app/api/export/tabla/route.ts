@@ -29,10 +29,20 @@ export async function GET(req: NextRequest) {
   }
 
   const formato = sp.format ?? "xlsx";
-  const reports = await definicion.build(sp);
+  // Un Excel con formato propio no necesita armar las tablas genéricas.
+  const reports = formato === "xlsx" && definicion.xlsx ? [] : await definicion.build(sp);
   const filtros = describeTableFilters(sp);
   const nombre = `transjer-${tabla}-${todayLima()}`;
 
+  if (formato === "xlsx" && definicion.xlsx) {
+    const propio = await definicion.xlsx(sp);
+    return new NextResponse(new Uint8Array(propio.body), {
+      headers: {
+        "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "Content-Disposition": `attachment; filename="${propio.filename}"; filename*=UTF-8''${encodeURIComponent(propio.filename)}`,
+      },
+    });
+  }
   if (formato === "xlsx") {
     const body = await toXlsx(reports, filtros, user.name);
     return new NextResponse(new Uint8Array(body), {

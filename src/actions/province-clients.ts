@@ -3,11 +3,11 @@
 import { and, eq, ne, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { provinceClients } from "@/db/schema";
+import { provinceClients, provinceClientStevedores } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { provinceClientSchema } from "@/lib/validations";
+import { estibaPrincipal, leerEstibas, provinceClientSchema, type EstibaInput } from "@/lib/validations";
 
 /**
  * El directorio de clientes de provincia.
@@ -42,17 +42,60 @@ async function sinRepetir(province: string, clientName: string, excluirId?: stri
   }
 }
 
+/**
+ * Lee la ficha y sus estibas. Las columnas de estiba de la ficha guardan la principal (la
+ * más barata), para lo que todavía las lee directo.
+ */
+function leerFicha(formData: FormData) {
+  const data = provinceClientSchema.parse(formToObject(formData));
+  const { estibas, errores } = leerEstibas(formData);
+  const principal = estibaPrincipal(estibas);
+  return {
+    data: {
+      ...data,
+      stevedoreName: principal?.name ?? null,
+      stevedorePhone: principal?.phone ?? null,
+      costPerTon: principal?.costPerTon ?? null,
+    },
+    estibas,
+    errores,
+  };
+}
+
+type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+async function guardarEstibas(tx: Tx, clienteId: string, estibas: EstibaInput[]) {
+  await tx.delete(provinceClientStevedores).where(eq(provinceClientStevedores.provinceClientId, clienteId));
+  if (estibas.length) {
+    await tx.insert(provinceClientStevedores).values(estibas.map((e, i) => ({ ...e, provinceClientId: clienteId, position: i })));
+  }
+}
+
+async function estibasDe(clienteId: string) {
+  return db.select({
+    name: provinceClientStevedores.name, phone: provinceClientStevedores.phone,
+    costPerTon: provinceClientStevedores.costPerTon, notes: provinceClientStevedores.notes,
+  }).from(provinceClientStevedores).where(eq(provinceClientStevedores.provinceClientId, clienteId))
+    .orderBy(provinceClientStevedores.position);
+}
+
 export async function createProvinceClient(formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("provinceClients.manage");
-    const data = provinceClientSchema.parse(formToObject(formData));
+    const { data, estibas, errores } = leerFicha(formData);
+    if (Object.keys(errores).length) return { ok: false, message: errores.estibas ?? "Revisa las estibas marcadas.", fieldErrors: errores };
     await sinRepetir(data.province, data.clientName);
 
-    const [row] = await db.insert(provinceClients).values({ ...data, createdBy: user.id }).returning();
-    await logAudit({
-      user, action: "CREAR", module: "CLIENTES_PROVINCIA", recordId: row.id,
-      description: `${user.name} registró a ${row.clientName} (${row.province}) en los clientes de provincia.`,
-      newData: row,
+    const row = await db.transaction(async (tx) => {
+      const [nuevo] = await tx.insert(provinceClients).values({ ...data, createdBy: user.id }).returning();
+      await guardarEstibas(tx, nuevo.id, estibas);
+      await logAudit({
+        user, action: "CREAR", module: "CLIENTES_PROVINCIA", recordId: nuevo.id,
+        description: `${user.name} registró a ${nuevo.clientName} (${nuevo.province}) en los clientes de provincia`
+          + (estibas.length ? `, con ${estibas.length} estiba(s).` : "."),
+        newData: { ...nuevo, estibas },
+      }, tx);
+      return nuevo;
     });
 
     revalidatePath("/", "layout");
@@ -65,16 +108,22 @@ export async function createProvinceClient(formData: FormData): Promise<ActionRe
 export async function updateProvinceClient(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("provinceClients.manage");
-    const data = provinceClientSchema.parse(formToObject(formData));
+    const { data, estibas, errores } = leerFicha(formData);
+    if (Object.keys(errores).length) return { ok: false, message: errores.estibas ?? "Revisa las estibas marcadas.", fieldErrors: errores };
     const before = await cargar(id);
+    const estibasAntes = await estibasDe(id);
     await sinRepetir(data.province, data.clientName, id);
 
-    const [row] = await db.update(provinceClients).set(data)
-      .where(eq(provinceClients.id, id)).returning();
-    await logAudit({
-      user, action: "EDITAR", module: "CLIENTES_PROVINCIA", recordId: id,
-      description: `${user.name} actualizó la ficha de ${row.clientName} (${row.province}).`,
-      oldData: before, newData: row,
+    const row = await db.transaction(async (tx) => {
+      const [actualizado] = await tx.update(provinceClients).set({ ...data, updatedAt: new Date() })
+        .where(eq(provinceClients.id, id)).returning();
+      await guardarEstibas(tx, id, estibas);
+      await logAudit({
+        user, action: "EDITAR", module: "CLIENTES_PROVINCIA", recordId: id,
+        description: `${user.name} actualizó la ficha de ${actualizado.clientName} (${actualizado.province}).`,
+        oldData: { ...before, estibas: estibasAntes }, newData: { ...actualizado, estibas },
+      }, tx);
+      return actualizado;
     });
 
     revalidatePath("/", "layout");

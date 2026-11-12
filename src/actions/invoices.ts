@@ -1,9 +1,9 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
-import { invoiceAdvances, invoiceAttachments, supplierInvoices, suppliers } from "@/db/schema";
+import { invoiceAdvances, invoiceAttachments, invoiceGuides, supplierInvoices, suppliers } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
@@ -13,6 +13,7 @@ import {
   assertNoDuplicate, customerWarning, deleteAttachment, destinoCanonico, detractionFields, findDuplicate,
   findOrCreateSupplier, insertInvoice, parseFirstXml, saveAttachment, type ReadFile,
 } from "@/server/invoice-service";
+import { agregarGuiasEscritas, aplicarReglaGuias, crearGuiasIniciales } from "@/server/invoice-guides";
 import { guardarVoucher, leerVoucher } from "@/server/payment-proof";
 import { activeDriver, maxBytesFor } from "@/server/storage";
 
@@ -44,6 +45,26 @@ export async function setGuideReceived(id: string, formData: FormData): Promise<
     if (before.status === "ANULADA") throw new BusinessError("La factura está anulada.");
     if (before.paymentTerm !== "CREDITO") {
       throw new BusinessError("Solo las facturas a crédito esperan la entrega de la guía. Esta es al contado.");
+    }
+
+    // Una factura de transporte con su lista de guías: se marcan como llegadas las que
+    // faltaban, y el plazo sale de la regla de las guías.
+    const [{ cuantas }] = await db.select({ cuantas: count() }).from(invoiceGuides).where(eq(invoiceGuides.invoiceId, id));
+    if (cuantas > 0 && before.serviceType === "TRANSPORTE") {
+      const conGuias = await db.transaction(async (tx) => {
+        await tx.update(invoiceGuides).set({ receivedAt: guideReceivedAt, receivedBy: user.id, updatedAt: new Date() })
+          .where(and(eq(invoiceGuides.invoiceId, id), isNull(invoiceGuides.receivedAt)));
+        if (notes) await tx.update(supplierInvoices).set({ notes }).where(eq(supplierInvoices.id, id));
+        const row = (await aplicarReglaGuias(tx, id))!;
+        await logAudit({
+          user, action: "EDITAR", module: "FACTURAS", recordId: id,
+          description: `${user.name} anotó que llegaron las guías de la factura ${label(row)} el ${formatDate(guideReceivedAt)}. Vence el ${formatDate(row.payDueDate)}.`,
+          oldData: before, newData: row,
+        }, tx);
+        return row;
+      });
+      revalidatePath("/", "layout");
+      return { ok: true, message: `Guías anotadas. La factura ${label(conGuias)} vence el ${formatDate(conGuias.payDueDate)}.` };
     }
 
     const after = await db.transaction(async (tx) => {
@@ -147,11 +168,23 @@ export async function updateInvoice(id: string, formData: FormData): Promise<Act
           }),
         })
         .where(eq(supplierInvoices.id, id)).returning();
+      // Las guías: al pasar a transporte nace con las suyas; si ya las tenía, se agregan las
+      // que se hayan escrito nuevas. Y el plazo queda según la regla de las guías.
+      let final = row;
+      if (row.serviceType === "TRANSPORTE" && row.docType !== "NOTA_CREDITO") {
+        const [{ cuantas }] = await tx.select({ cuantas: count() }).from(invoiceGuides).where(eq(invoiceGuides.invoiceId, id));
+        if (cuantas === 0 && before.serviceType !== "TRANSPORTE") {
+          await crearGuiasIniciales(tx, id, data, user.id);
+        } else if (cuantas > 0) {
+          await agregarGuiasEscritas(tx, id, data, user.id);
+        }
+        final = (await aplicarReglaGuias(tx, id)) ?? row;
+      }
       await logAudit({
         user, action: "EDITAR", module: "FACTURAS", recordId: id,
-        description: `${user.name} modificó la factura ${label(row)}.`, oldData: before, newData: row,
+        description: `${user.name} modificó la factura ${label(final)}.`, oldData: before, newData: final,
       }, tx);
-      return row;
+      return final;
     });
     revalidatePath("/", "layout");
     return { ok: true, message: `Factura ${label(after)} actualizada correctamente.` };

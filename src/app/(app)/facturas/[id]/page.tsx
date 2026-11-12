@@ -7,6 +7,7 @@ import {
   AdvanceModal, CreditNoteModal, GuideReceivedModal, InvoiceReasonModal, PayInvoiceModal,
   RemoveAdvanceButton, RestoreInvoiceButton,
 } from "@/components/invoices/invoice-actions";
+import { GuiasPanel } from "@/components/invoices/guias";
 import { InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
 import { Badge, DetractionBadge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { DetractionModal } from "@/components/invoices/detraction-actions";
@@ -23,6 +24,7 @@ import {
   getClientOptions, getInvoice, getInvoiceEmail, getSupplierOptions, listInvoiceAdvances,
   listInvoiceAttachments,
 } from "@/server/invoice-queries";
+import { guiasDeFacturas } from "@/server/invoice-guides";
 import { maxBytesFor } from "@/server/storage";
 
 export const metadata: Metadata = { title: "Detalle de factura" };
@@ -46,13 +48,16 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
   const invoice = await getInvoice(id);
   if (!invoice) notFound();
 
-  const [attachments, advances, email, suppliers, clients] = await Promise.all([
+  const [attachments, advances, email, suppliers, clients, guiasMapa] = await Promise.all([
     listInvoiceAttachments(id),
     listInvoiceAdvances(id),
     getInvoiceEmail(id),
     can(user, "invoices.manage") ? getSupplierOptions() : Promise.resolve([]),
     can(user, "invoices.manage") ? getClientOptions() : Promise.resolve([]),
+    guiasDeFacturas([id]),
   ]);
+  const guias = guiasMapa.get(id) ?? [];
+  const esTransporte = invoice.serviceType === "TRANSPORTE" && invoice.docType !== "NOTA_CREDITO";
 
   const canManage = can(user, "invoices.manage");
   const canPay = can(user, "invoices.pay");
@@ -110,7 +115,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               originCity: invoice.originCity, destinationCity: invoice.destinationCity,
               volumeM3: invoice.volumeM3, weightTn: invoice.weightTn, advances: invoice.advances,
             }} clients={clients} />}
-            {canManage && editable && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && (
+            {canManage && editable && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && guias.length === 0 && (
               <GuideReceivedModal invoice={ref} />
             )}
             {canManage && invoice.status === "PENDIENTE" && <InvoiceReasonModal invoice={ref} action="observe" />}
@@ -144,9 +149,18 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
       {invoice.status === "PENDIENTE" && invoice.paymentTerm === "CREDITO" && !invoice.guideReceivedAt && (
         <p className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
-          Esta factura es a crédito y todavía no tiene fecha de pago: el plazo de {invoice.termDays} día(s)
-          empieza a correr recién cuando el proveedor entregue la guía de remisión en físico.
-          {canManage && " Usa el botón «Anotar guía» cuando la traiga."}
+          {guias.length > 0 ? (
+            <>
+              Esta factura de transporte todavía no tiene fecha de pago: vence {invoice.termDays} días después de que
+              llegue la última de sus guías. Anótalas en el recuadro «Guías» cuando lleguen.
+            </>
+          ) : (
+            <>
+              Esta factura es a crédito y todavía no tiene fecha de pago: el plazo de {invoice.termDays} día(s)
+              empieza a correr recién cuando el proveedor entregue la guía de remisión en físico.
+              {canManage && " Usa el botón «Anotar guía» cuando la traiga."}
+            </>
+          )}
         </p>
       )}
 
@@ -233,6 +247,20 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               </div>
             )}
           </Panel>
+
+          {esTransporte && (
+            <Panel title="Guías">
+              <div className="px-4 py-3">
+                <GuiasPanel
+                  invoiceId={invoice.id}
+                  factura={invoiceNumber(invoice.series, invoice.number)}
+                  guias={guias}
+                  puedeEditar={(canManage || can(user, "trips.manage")) && invoice.status !== "ANULADA"}
+                  pagada={invoice.status === "PAGADA"}
+                />
+              </div>
+            </Panel>
+          )}
 
           {tieneServicio && (
             <Panel title="Servicio de transporte">

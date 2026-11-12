@@ -80,7 +80,7 @@ export default async function ProvinceClientsPage({ searchParams }: { searchPara
             <Th>Provincia</Th>
             <Th className="hidden lg:table-cell">Ubicación</Th>
             <Th>Contacto</Th>
-            <Th>Estiba</Th>
+            <Th>Estibas</Th>
             <Th className="text-right">Costo por tonelada</Th>
             <Th className="hidden 2xl:table-cell">Observaciones</Th>
             {canManage && <Th className="text-right">Acciones</Th>}
@@ -111,20 +111,28 @@ export default async function ProvinceClientsPage({ searchParams }: { searchPara
                   </a>
                 ) : <span className="text-steel-400">sin número</span>}
               </Td>
-              <Td className="whitespace-nowrap">
-                {c.stevedoreName || c.stevedorePhone ? (
-                  <>
-                    <p className="text-sm">{c.stevedoreName ?? "—"}</p>
-                    {c.stevedorePhone && (
-                      <a href={`tel:${c.stevedorePhone.replace(/\s/g, "")}`} className="text-xs text-steel-500 hover:underline">
-                        {c.stevedorePhone}
-                      </a>
-                    )}
-                  </>
+              <Td>
+                {c.estibas.length ? (
+                  <ul className="grid gap-1.5">
+                    {c.estibas.map((e) => {
+                      const barata = c.estibas.length > 1 && e.costPerTon !== null && e.costPerTon === masBarata(c.estibas);
+                      return (
+                        <li key={e.id} className="text-sm leading-tight">
+                          <span className={barata ? "font-semibold" : undefined}>{e.name ?? "Sin nombre"}</span>
+                          {e.costPerTon && <span className="tabular text-steel-600"> · {formatMoney(e.costPerTon, "PEN")}/t</span>}
+                          {barata && <Badge tone="green" className="ml-1.5">La más barata</Badge>}
+                          {e.phone && (
+                            <a href={`tel:${e.phone.replace(/\s/g, "")}`} className="block text-xs text-steel-500 hover:underline">{e.phone}</a>
+                          )}
+                          {e.notes && <span className="block text-xs text-steel-500">{e.notes}</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
                 ) : <span className="text-steel-400">sin estibador</span>}
               </Td>
               <Td className="whitespace-nowrap text-right font-medium tabular">
-                {c.costPerTon ? formatMoney(c.costPerTon, "PEN") : <span className="font-normal text-brand-ink">falta el precio</span>}
+                {rangoPrecio(c.estibas) ?? <span className="font-normal text-brand-ink">falta el precio</span>}
               </Td>
               <Td className="hidden max-w-[22rem] 2xl:table-cell">
                 <span className="line-clamp-2 text-xs text-steel-500">{c.notes ?? "—"}</span>
@@ -137,6 +145,7 @@ export default async function ProvinceClientsPage({ searchParams }: { searchPara
                         id: c.id, province: c.province, clientName: c.clientName, location: c.location,
                         clientPhone: c.clientPhone, stevedoreName: c.stevedoreName,
                         stevedorePhone: c.stevedorePhone, costPerTon: c.costPerTon, notes: c.notes,
+                        estibas: c.estibas,
                       }}
                       provincias={provincias}
                       variant="icon"
@@ -172,4 +181,20 @@ export default async function ProvinceClientsPage({ searchParams }: { searchPara
       <Pagination basePath="/clientes-provincia" searchParams={sp} page={page} pageSize={pageSize} total={total} />
     </>
   );
+}
+
+/** El precio más bajo entre las estibas que tienen precio. */
+function masBarata(estibas: { costPerTon: string | null }[]) {
+  const precios = estibas.map((e) => e.costPerTon).filter((p): p is string => p !== null);
+  return precios.length ? precios.reduce((a, b) => (Number(b) < Number(a) ? b : a)) : null;
+}
+
+/** "S/ 35.00", o "S/ 30.00 – S/ 45.00" cuando hay varias con precios distintos. */
+function rangoPrecio(estibas: { costPerTon: string | null }[]) {
+  const precios = estibas.map((e) => e.costPerTon).filter((p): p is string => p !== null).map(Number);
+  if (!precios.length) return null;
+  const min = Math.min(...precios), max = Math.max(...precios);
+  return min === max
+    ? formatMoney(min.toFixed(2), "PEN")
+    : `${formatMoney(min.toFixed(2), "PEN")} – ${formatMoney(max.toFixed(2), "PEN")}`;
 }

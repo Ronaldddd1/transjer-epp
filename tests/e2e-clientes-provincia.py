@@ -70,9 +70,9 @@ with sync_playwright() as p:
     page.fill("input[name=clientName]", CLIENTE)
     page.fill("input[name=location]", "Av. Mesones Muro 1250, frente al grifo")
     page.fill("input[name=clientPhone]", "976543210")
-    page.fill("input[name=stevedoreName]", "Don Lucho")
-    page.fill("input[name=stevedorePhone]", "912345678")
-    page.fill("input[name=costPerTon]", "35")
+    page.locator("input[name=estiba_nombre]").first.fill("Don Lucho")
+    page.locator("input[name=estiba_telefono]").first.fill("912345678")
+    page.locator("input[name=estiba_costo]").first.fill("35")
     page.fill("textarea[name=notes]", "Recibe hasta las 5 p.m.")
     enviar(page, "Registrar cliente")
 
@@ -116,7 +116,7 @@ with sync_playwright() as p:
     fila = page.get_by_role("row").filter(has_text=CLIENTE).first
     fila.get_by_role("button", name="Editar").click()
     page.wait_for_timeout(700)
-    page.fill("input[name=costPerTon]", "42.50")
+    page.locator("input[name=estiba_costo]").first.fill("42.50")
     enviar(page, "Guardar cambios")
     check("el precio corregido queda guardado",
           psql(f"select cost_per_ton from province_clients where client_name = '{CLIENTE}'") == "42.50")

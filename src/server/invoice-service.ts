@@ -12,6 +12,7 @@ import {
   computePayDueDate, DEFAULT_TERM_DAYS, detractionFor, DETRACTION_RATE, invoiceNumber,
   normalizeSupplierName, type InvoiceServiceTypeKey,
 } from "@/lib/utils";
+import { aplicarReglaGuias, crearGuiasIniciales } from "./invoice-guides";
 import { putFile, removeFile, safeName } from "./storage";
 import { detectAttachmentKind, parseSunatXml, XmlParseError, type ParsedInvoice } from "./sunat-xml";
 
@@ -217,6 +218,13 @@ export async function insertInvoice(
     createdBy: user?.id ?? null,
     isDemo: extra.isDemo ?? false,
   }).returning();
+
+  // Una factura de transporte nace con sus guías por llegar: aparece en Salidas > Viajes de
+  // terceros, y se paga 15 días después de que llegue la última.
+  if (invoice.serviceType === "TRANSPORTE" && invoice.docType !== "NOTA_CREDITO") {
+    await crearGuiasIniciales(tx, invoice.id, input, user?.id ?? null);
+    return (await aplicarReglaGuias(tx, invoice.id)) ?? invoice;
+  }
   return invoice;
 }
 

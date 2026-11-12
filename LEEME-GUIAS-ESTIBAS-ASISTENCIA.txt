@@ -1,0 +1,57 @@
+GUÍAS DE TRANSPORTE, VIAJES DE TERCEROS, VARIAS ESTIBAS Y EXCEL DE ASISTENCIA
+============================================================================
+
+ANTES DE SUBIR
+--------------
+Lleva dos migraciones nuevas (además de la 0026 del pago masivo, si todavía no la
+corriste). En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0027_varias_estibas        las estibas de cada cliente de provincia (la que ya
+                               tenía cada cliente pasa a ser la primera de su lista)
+    0028_guias_de_facturas     las guías de cada factura de transporte
+
+Las dos solo agregan: no borran datos.
+
+
+FACTURAS DE TRANSPORTE Y SUS GUÍAS
+----------------------------------
+Al aceptar (desde Correos) o registrar una factura de TRANSPORTE:
+  - Nace con sus guías por llegar: una por cada número escrito en "Guía del
+    transportista" y "Guía del remitente". Si son varias, se escriben separadas
+    por una barra: T001-120 / T001-121. Si no hay número, queda una guía "sin
+    número" por llegar.
+  - Ya no se elige la condición de pago: se paga 15 DÍAS DESPUÉS DE QUE LLEGUE LA
+    ÚLTIMA GUÍA en físico. Mientras falte alguna, no tiene fecha de pago.
+
+Las guías se anotan como llegadas en:
+  - Flota > Salidas y liquidación > "Viajes de terceros" (botón "Llegó la guía").
+  - La ficha de la factura, recuadro "Guías": ahí también se agrega una guía que
+    faltaba, se quita una mal escrita o se deshace una llegada anotada por error.
+Lo puede hacer quien maneja Facturas o quien maneja Salidas. Todo queda en auditoría.
+
+VIAJES DE TERCEROS (Salidas y liquidación)
+  Tercer botón arriba. Cada factura de transporte es un viaje: fecha, transportista,
+  placa, cliente, ruta, factura, sus guías (llegada o por llegar) y el pago:
+  "Esperando guía", "Vence en N días" o "Pagada". Filtro: esperando guía (por
+  defecto), guías completas por pagar, o todas.
+
+Las facturas que ya estaban registradas NO cambian su fecha de pago. Aparecen en
+Viajes de terceros; si a una se le agrega una guía, desde ahí pasa a la regla nueva.
+
+
+CLIENTES DE PROVINCIA: VARIAS ESTIBAS
+-------------------------------------
+En la ficha del cliente, "Agregar otra estiba" (hasta 10): nombre, número, costo
+por tonelada y una nota. La más barata se marca sola. La tabla muestra todas, con el
+rango de precios, y la búsqueda encuentra al cliente por cualquiera de sus estibas.
+El Excel trae la más barata y, en otra columna, las demás.
+
+
+ASISTENCIA: EL EXCEL DE LA SEMANA
+---------------------------------
+"Descargar semana" sale ahora con el formato de la hoja ASISTENCIA_TRANSJER:
+el mes y los días en amarillo arriba, NOMBRES (nombres en A, apellidos en B), y
+en cada día lo que hizo en mayúsculas; las faltas dicen NO TRABAJO en rojo; los
+justificados, el motivo. Se llama "ASISTENCIA TRANSJER NOV 02-08 2026.xlsx".

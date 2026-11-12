@@ -255,17 +255,35 @@ with sync_playwright() as p:
     check("y en ella se ve lo marcado hoy", "Vino" in semana.locator("tbody").inner_text()
           or "Faltó" in semana.locator("tbody").inner_text())
 
-    # La semana se descarga en Excel, con la tabla y el detalle por día.
+    # La semana se descarga en Excel con el formato de la hoja de asistencia de TransJer.
     with page.expect_download(timeout=60000) as dl:
         page.evaluate("""() => { const a = document.createElement('a');
             a.href = '/api/export/tabla?tabla=asistencia-semana&format=xlsx'; a.download = '';
             document.body.appendChild(a); a.click(); }""")
     from openpyxl import load_workbook
     import io
+    check("el archivo se llama como la hoja de TransJer", dl.value.suggested_filename.startswith("ASISTENCIA TRANSJER"),
+          dl.value.suggested_filename)
     libro = load_workbook(io.BytesIO(open(dl.value.path(), "rb").read()))
-    check("la semana se descarga en Excel con sus dos hojas", len(libro.sheetnames) == 2, libro.sheetnames)
-    encabezados = " ".join(str(c.value) for fila in libro.worksheets[0].iter_rows(max_row=8) for c in fila if c.value)
-    check("y trae de lunes a domingo", "Lunes" in encabezados and "Domingo" in encabezados, encabezados[:300])
+    hoja = libro.worksheets[0]
+    check("sale en una sola hoja, con el formato de TransJer", len(libro.sheetnames) == 1, libro.sheetnames)
+    dias_fila = [hoja.cell(1, c).value for c in range(3, 10)]
+    check("arriba el mes, y de lunes a domingo", hoja["A1"].value in
+          ("ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO", "JULIO", "AGOSTO", "SETIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE")
+          or " - " in str(hoja["A1"].value), hoja["A1"].value)
+    check("los días en la primera fila", dias_fila == ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"], dias_fila)
+    check("NOMBRES y los números de los días en la segunda", hoja["A2"].value == "NOMBRES"
+          and all(isinstance(hoja.cell(2, c).value, int) for c in range(3, 10)))
+    check("la cabecera en amarillo, unida en A:B", hoja["A1"].fill.fgColor.rgb == "FFFFFF00"
+          and "A1:B1" in [str(r) for r in hoja.merged_cells.ranges] and "A2:B2" in [str(r) for r in hoja.merged_cells.ranges])
+    filas = {(str(hoja.cell(r, 1).value), str(hoja.cell(r, 2).value)): r for r in range(3, hoja.max_row + 1)}
+    check("cada trabajador con sus nombres en A y apellidos en B", any(k[0] == "ANA" for k in filas), list(filas)[:5])
+    fila_ana_xl = next((r for k, r in filas.items() if k[0] == "ANA"), None)
+    check("y en el día, lo que hizo, en mayúsculas",
+          fila_ana_xl is not None and any(hoja.cell(fila_ana_xl, c).value == "DESCARGA DE MERCADERÍA" for c in range(3, 10)),
+          [hoja.cell(fila_ana_xl, c).value for c in range(3, 10)] if fila_ana_xl else None)
+    rojas = [hoja.cell(r, c) for r in range(3, hoja.max_row + 1) for c in range(3, 10) if hoja.cell(r, c).value == "NO TRABAJO"]
+    check("las faltas dicen NO TRABAJO, en rojo", all(c.fill.fgColor.rgb == "FFFF0000" for c in rojas))
 
     semana.get_by_role("link", name="← Anterior").click()
     page.wait_for_timeout(1500)
