@@ -18,10 +18,11 @@ Las dos solo agregan: no borran datos.
 FACTURAS DE TRANSPORTE Y SUS GUÍAS
 ----------------------------------
 Al aceptar (desde Correos) o registrar una factura de TRANSPORTE:
-  - Nace con sus guías por llegar: una por cada número escrito en "Guía del
-    transportista" y "Guía del remitente". Si son varias, se escriben separadas
-    por una barra: T001-120 / T001-121. Si no hay número, queda una guía "sin
-    número" por llegar.
+  - Nace con la guía transportista DEL PROVEEDOR por llegar (la que viene en su XML;
+    la GRT del concepto es la de TransJer y no se le pide). Si son varias, se escriben
+    separadas por una barra: T001-120 / T001-121. Si no hay número, queda una guía
+    "sin número" por llegar. La guía del remitente se guarda como dato, pero no queda
+    por llegar.
   - Ya no se elige la condición de pago: se paga 15 DÍAS DESPUÉS DE QUE LLEGUE LA
     ÚLTIMA GUÍA en físico. Mientras falte alguna, no tiene fecha de pago.
 

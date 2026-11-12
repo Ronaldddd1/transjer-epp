@@ -290,7 +290,7 @@ export function InvoiceFormModal({ suppliers, invoice, clients = [] }: { supplie
             </p>
           ) : null}
 
-          <Field label="Guía de remisión (GRT)" name="grtNumber" error={errors.grtNumber} hint="Ejemplo: T001-000123" className="sm:col-span-3">
+          <Field label="Guía transportista del proveedor (GRT)" name="grtNumber" error={errors.grtNumber} hint="Ejemplo: T001-000123" className="sm:col-span-3">
             <Input name="grtNumber" defaultValue={invoice?.grtNumber ?? ""} maxLength={40} />
           </Field>
           <Field label="Fecha del servicio" name="serviceDate" error={errors.serviceDate} className="sm:col-span-3">

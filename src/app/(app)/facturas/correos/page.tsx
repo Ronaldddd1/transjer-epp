@@ -16,7 +16,7 @@ import { TabLinks } from "@/components/ui/tab-links";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import {
-  archivosFaltantes, FALTA_GUIA, FALTA_GUIA_TRANSPORTISTA, FALTANTE_CORTO, SIN_ADJUNTOS,
+  archivosFaltantes, FALTA_GUIA_TRANSPORTISTA, FALTANTE_CORTO, SIN_ADJUNTOS,
 } from "@/lib/archivos-correo";
 import { can } from "@/lib/permissions";
 import {
@@ -237,18 +237,16 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
               ? archivosFaltantes(correo.archivos, {
                 xmlLegible: !!c,
                 esNotaCredito: c?.docType === "NOTA_CREDITO",
-                // Las guías que nombra la factura: así se reconocen por su número aunque el
-                // archivo se llame de cualquier manera.
+                // La guía del proveedor es la que trae su XML; la GRT del concepto es la de
+                // TransJer y no se le pide.
                 guias: {
-                  remision: [c?.grtNumber, correo.viaje?.dispatchNote],
-                  transportista: [correo.viaje?.grtNumber],
+                  delProveedor: [c?.grtNumber],
+                  nuestras: [correo.viaje?.grtNumber],
                 },
               })
               : [];
             // El número de la guía que falta, cuando la factura lo dice.
-            const numeroDe = (m: string) =>
-              m === FALTA_GUIA ? (c?.grtNumber ?? correo.viaje?.dispatchNote ?? null)
-                : m === FALTA_GUIA_TRANSPORTISTA ? (correo.viaje?.grtNumber ?? null) : null;
+            const numeroDe = (m: string) => (m === FALTA_GUIA_TRANSPORTISTA ? (c?.grtNumber ?? null) : null);
             const avisoFallido = e.status === "RECHAZADO" && !e.replySentAt;
             return (
               <Tr key={e.id} tone={porAprobar ? "bg-blue-50/60 hover:bg-blue-50" : undefined}>

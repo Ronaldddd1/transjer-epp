@@ -136,7 +136,7 @@ export function DatosComprobante({ correo }: { correo: CorreoParaDecidir }) {
         <Dato label="RUC">{c.supplierRuc}</Dato>
         <Dato label="Emitida">{formatDate(c.issueDate)}</Dato>
         <Dato label="Vence">{c.dueDate ? formatDate(c.dueDate) : "—"}</Dato>
-        <Dato label="Guía de remisión">{c.grtNumber ?? "—"}</Dato>
+        <Dato label="Guía transportista">{c.grtNumber ?? "—"}</Dato>
         <Dato label="Subtotal">{importe(c.subtotal)}</Dato>
         <Dato label="IGV">{importe(c.igv)}</Dato>
         <Dato label="Emitida a">{c.customerRuc ?? "—"}</Dato>
@@ -617,8 +617,15 @@ export function AceptarModal({ correo, condicion }: {
                 <Field label="Destino" name="destinationCity" error={errors.destinationCity}>
                   <Input name="destinationCity" defaultValue={viaje?.destinationCity ?? ""} maxLength={120} />
                 </Field>
-                <Field label="Guía del transportista" name="grtNumber" error={errors.grtNumber}>
-                  <Input name="grtNumber" defaultValue={viaje?.grtNumber ?? correo.comprobante?.grtNumber ?? ""} maxLength={40} />
+                <Field
+                  label="Guía transportista del proveedor"
+                  name="grtNumber"
+                  error={errors.grtNumber}
+                  hint="La que emite el proveedor (viene en el XML). Es la que tiene que entregar."
+                >
+                  {/* La GRT que aparece en el concepto es la de TransJer, no la del proveedor:
+                      por eso se propone la del XML. */}
+                  <Input name="grtNumber" defaultValue={correo.comprobante?.grtNumber?.replace(/\s*-\s*/g, "-") ?? ""} maxLength={40} />
                 </Field>
                 <Field label="Guía del remitente" name="dispatchNote" error={errors.dispatchNote} className="sm:col-span-3">
                   <Input name="dispatchNote" defaultValue={viaje?.dispatchNote ?? ""} maxLength={40} />

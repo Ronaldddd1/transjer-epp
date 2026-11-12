@@ -143,9 +143,11 @@ async function main() {
   const [conViaje] = await db.select().from(invoiceEmails).where(eq(invoiceEmails.id, flete.id));
 
   const leido = leerConceptoTransporte(parsedOf(conViaje)?.description);
+  // Como lo manda el formulario: los datos del viaje salen del concepto, pero la guía
+  // transportista es la del proveedor (la del XML). La GRT del concepto es la de TransJer.
   const aceptadoFlete = await db.transaction((tx) => registerApprovedEmail(tx, conViaje, quien, {
     serviceType: "TRANSPORTE",
-    viaje: leido,
+    viaje: { ...leido, grtNumber: parsedOf(conViaje)?.grtNumber ?? null },
   }));
   check("un flete se acepta igual", aceptadoFlete.ok === true, aceptadoFlete);
   if (aceptadoFlete.ok) {
@@ -157,18 +159,17 @@ async function main() {
     check("y el destino", transporte?.destinationCity === "LOCAL", transporte?.destinationCity);
     check("la fecha del servicio es la del concepto, no la del correo",
       transporte?.serviceDate === "2026-10-13", transporte?.serviceDate);
-    check("la guía del transportista se guarda aparte de la del remitente",
-      transporte?.grtNumber === "VT01-007988" && transporte?.dispatchNote === "EG03-00000349", transporte);
+    check("la guía transportista es la del proveedor; la del remitente se guarda aparte",
+      transporte?.grtNumber === "T001-999" && transporte?.dispatchNote === "EG03-00000349", transporte);
 
-    // Un flete se paga 15 días después de que llega la última guía: mientras tanto, no
-    // tiene fecha de pago, y nace con sus dos guías (la del transportista y la del remitente).
+    // Un flete se paga 15 días después de que llega la guía del proveedor: mientras tanto
+    // no tiene fecha de pago. Solo esa queda por llegar; la del remitente no se le pide.
     check("un flete queda a crédito, esperando sus guías, sin fecha de pago",
       transporte?.paymentTerm === "CREDITO" && transporte?.payDueDate === null, transporte?.payDueDate);
     const guiasFlete = await db.select().from(invoiceGuides).where(eq(invoiceGuides.invoiceId, aceptadoFlete.invoiceId));
-    check("con sus dos guías por llegar",
-      guiasFlete.length === 2 && guiasFlete.every((g) => g.receivedAt === null)
-      && guiasFlete.some((g) => g.number === "VT01-007988" && g.kind === "TRANSPORTISTA")
-      && guiasFlete.some((g) => g.number === "EG03-00000349" && g.kind === "REMITENTE"), guiasFlete);
+    check("con la guía transportista del proveedor por llegar, y solo esa",
+      guiasFlete.length === 1 && guiasFlete[0].receivedAt === null
+      && guiasFlete[0].number === "T001-999" && guiasFlete[0].kind === "TRANSPORTISTA", guiasFlete);
   }
 
   // Un servicio corriente, en cambio, vence al día siguiente y no lleva datos de viaje.

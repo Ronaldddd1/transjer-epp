@@ -80,7 +80,8 @@ adjunto(completo, "email_id", f"{RUC}-31-EG03-{SELLO}.pdf")
 adjunto(completo, "email_id", f"20100055237-09-T001-{SELLO}.pdf")
 
 # El caso real de E001-30: la guía viene como …-31-EG03-75.pdf y la factura la nombra
-# "EG03 - 75"; el concepto nombra además la GRTE VT01-8407, que no vino.
+# "EG03 - 75". El concepto nombra la GRTE VT01-8407, que es la guía de TransJer: esa
+# no se le pide al proveedor.
 caso = correo("caso30", "POR_APROBAR", f"FACTURA E001-30 OSCAR {SELLO}", {
     "docType": "FACTURA", "series": "E001", "number": f"30{SELLO}", "issueDate": "2026-11-12", "currency": "PEN",
     "subtotal": "650.00", "igv": "117.00", "total": "767.00", "supplierRuc": RUC, "supplierName": PROVEEDOR,
@@ -125,7 +126,7 @@ with sync_playwright() as p:
     faltan = fila.locator("li").all_inner_texts() if fila.count() else []
     check("dice qué no se encontró", "No se encontró:" in texto)
     check("el XML", "XML" in faltan, faltan)
-    check("la guía de remisión", "Guía de remisión" in faltan, faltan)
+    check("ya no se pide aparte la guía de remisión", not any(t.startswith("Guía de remisión") for t in faltan), faltan)
     check("y la guía transportista", "Guía transportista" in faltan, faltan)
     check("con la frase completa al pasar el mouse",
           "No se encontró la guía transportista entre los archivos." in (fila.locator("[title*='guía transportista']").first.get_attribute("title") or ""))
@@ -135,10 +136,8 @@ with sync_playwright() as p:
           fila2.inner_text() if fila2.count() else "")
     fila30 = page.locator("tbody tr").filter(has_text=f"E001-30{SELLO}")
     chips30 = fila30.locator("li").all_inner_texts() if fila30.count() else []
-    check("la guía EG03-75 se reconoce por su número: no se reclama la guía de remisión",
-          not any(t.startswith("Guía de remisión") for t in chips30), chips30)
-    check("solo falta la del transportista que nombra el concepto, con su número",
-          chips30 == ["Guía transportista VT01-8407"], chips30)
+    check("la guía del proveedor EG03-75 se reconoce por su número, y la VT01-8407 de TransJer no se pide: no falta nada",
+          fila30.count() == 1 and chips30 == [] and "No se encontró" not in fila30.inner_text(), chips30)
     check("sin XML todavía no se puede registrar: primero el monto",
           fila.get_by_role("button", name=re.compile("^Registrar")).count() == 0)
 

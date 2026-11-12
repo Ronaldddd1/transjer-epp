@@ -4,7 +4,7 @@
  *   npx tsx tests/archivos-correo.test.ts
  */
 import {
-  archivosFaltantes, clasificarArchivo, FALTA_FACTURA, FALTA_GUIA, FALTA_GUIA_TRANSPORTISTA, FALTA_XML, SIN_ADJUNTOS, XML_ILEGIBLE,
+  archivosFaltantes, clasificarArchivo, FALTA_FACTURA, FALTA_GUIA_TRANSPORTISTA, FALTA_XML, SIN_ADJUNTOS, XML_ILEGIBLE,
 } from "../src/lib/archivos-correo";
 import { acceptanceEmailBody } from "../src/lib/utils";
 
@@ -29,38 +29,39 @@ check("un comprimido", clasificarArchivo({ filename: "comprobantes.zip" }) === "
 check("una foto de la factura", clasificarArchivo({ filename: "IMG_2041.jpg" }) === "COMPROBANTE");
 check("una hoja de cálculo no cuenta", clasificarArchivo({ filename: "detalle.xlsx" }) === "OTRO");
 
-// --- Lo que falta ---
+// --- Lo que falta: factura, XML y la guía transportista del proveedor ---
 check("completo, nada",
-  igual(archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf", "x-09-T001-1.pdf", "x-31-EG03-1.pdf"), { xmlLegible: true }), []));
-check("sin la del transportista, se dice",
-  igual(archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf", "x-09-T001-1.pdf"), { xmlLegible: true }), [FALTA_GUIA_TRANSPORTISTA]));
-check("sin la del remitente, se dice",
-  igual(archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf", "x-31-EG03-1.pdf"), { xmlLegible: true }), [FALTA_GUIA]));
+  igual(archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf", "x-31-EG03-1.pdf"), { xmlLegible: true }), []));
+check("sin guía, se dice que falta la guía transportista",
+  igual(archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf"), { xmlLegible: true }), [FALTA_GUIA_TRANSPORTISTA]));
+check("ya no se pide aparte la guía de remisión",
+  !archivosFaltantes(a("x-01-F001-1.xml", "x-01-F001-1.pdf", "x-31-EG03-1.pdf"), { xmlLegible: true }).some((m) => m.includes("remisión")));
+check("una guía nombrada a mano sirve", igual(archivosFaltantes(a("f.xml", "factura.pdf", "guia.pdf"), { xmlLegible: true }), []));
 check("sin archivos", igual(archivosFaltantes([], { xmlLegible: false }), [SIN_ADJUNTOS]));
-check("solo el PDF: faltan XML y las dos guías",
-  igual(archivosFaltantes(a("factura.pdf"), { xmlLegible: false }), [FALTA_XML, FALTA_GUIA, FALTA_GUIA_TRANSPORTISTA]));
+check("solo el PDF: faltan XML y la guía",
+  igual(archivosFaltantes(a("factura.pdf"), { xmlLegible: false }), [FALTA_XML, FALTA_GUIA_TRANSPORTISTA]));
 check("el XML que no se pudo leer se dice distinto",
-  igual(archivosFaltantes(a("malo.xml", "factura.pdf", "guia.pdf", "grt.pdf"), { xmlLegible: false }), [XML_ILEGIBLE]));
-check("solo la guía de remisión: faltan XML, factura y la del transportista",
-  igual(archivosFaltantes(a("guia remision.pdf"), { xmlLegible: false }), [FALTA_XML, FALTA_FACTURA, FALTA_GUIA_TRANSPORTISTA]));
+  igual(archivosFaltantes(a("malo.xml", "factura.pdf", "grt.pdf"), { xmlLegible: false }), [XML_ILEGIBLE]));
+check("solo la guía: faltan XML y factura",
+  igual(archivosFaltantes(a("guia remision.pdf"), { xmlLegible: false }), [FALTA_XML, FALTA_FACTURA]));
 check("una nota de crédito no pide guía",
   igual(archivosFaltantes(a("x-07-E001-1.xml", "x-07-E001-1.pdf"), { xmlLegible: true, esNotaCredito: true }), []));
 check("un comprimido puede traer todo: no se reclama PDF ni guía",
   igual(archivosFaltantes(a("todo.zip"), { xmlLegible: true }), []));
 
-// --- Reconocer la guía por su número (el caso de E001-30) ---
+// --- El caso de E001-30: su guía EG03-75 vino; la VT01-8407 del concepto es de TransJer ---
 const caso = a("10408642391-31-EG03-75.pdf", "FACTURAE001-3010408642391.XML", "FACTURAE001-3010408642391.pdf");
-check("la guía que nombra la factura (EG03 - 75) se reconoce por su número",
-  !archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }).includes(FALTA_GUIA),
-  archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }));
-check("y si el concepto nombra otra del transportista que no vino, solo esa falta",
-  igual(archivosFaltantes(caso, { xmlLegible: true, guias: { remision: ["EG03 - 75"], transportista: ["VT01-8407"] } }), [FALTA_GUIA_TRANSPORTISTA]));
+const guias30 = { delProveedor: ["EG03 - 75"], nuestras: ["VT01-8407"] };
+check("con la guía del proveedor (la del XML), no falta nada",
+  igual(archivosFaltantes(caso, { xmlLegible: true, guias: guias30 }), []), archivosFaltantes(caso, { xmlLegible: true, guias: guias30 }));
+check("la guía de TransJer del concepto no se le pide",
+  !archivosFaltantes(a("f.xml", "f.pdf", "EG03-75.pdf"), { xmlLegible: true, guias: guias30 }).length);
+check("si solo viene la guía de TransJer, falta la del proveedor",
+  igual(archivosFaltantes(a("f.xml", "f.pdf", "Guia VT01-8407.pdf"), { xmlLegible: true, guias: guias30 }), [FALTA_GUIA_TRANSPORTISTA]));
 check("con ceros delante también cruza",
-  !archivosFaltantes(a("guia EG03-00000075.pdf", "f.pdf", "grt.pdf"), { xmlLegible: true, guias: { remision: ["EG03-75"], transportista: [] } }).includes(FALTA_GUIA));
-check("el mismo número en las dos cuenta como la del transportista",
-  igual(archivosFaltantes(a("x-01-F001-1.pdf", "VT01-8407.pdf"), { xmlLegible: true, guias: { remision: ["VT01-8407"], transportista: ["VT01-8407"] } }), [FALTA_GUIA]));
+  igual(archivosFaltantes(a("f.xml", "f.pdf", "EG03-00000075.pdf"), { xmlLegible: true, guias: guias30 }), []));
 check("el PDF de la guía no cuenta como la factura",
-  archivosFaltantes(a("EG03-75.pdf"), { xmlLegible: true, guias: { remision: ["EG03-75"], transportista: [] } }).includes(FALTA_FACTURA));
+  archivosFaltantes(a("EG03-75.pdf"), { xmlLegible: true, guias: guias30 }).includes(FALTA_FACTURA));
 
 // --- El aviso de aceptación ---
 const cuerpo = acceptanceEmailBody({ comprobante: "F001-12", proveedor: "RYK LOGISTICS SAC", total: "S/ 1,180.00", transporte: true });

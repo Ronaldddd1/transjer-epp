@@ -30,21 +30,22 @@ Los enlaces viejos a "Por revisar" abren "Por verificar monto".
 
 LOS ARCHIVOS QUE FALTAN
 -----------------------
-Un comprobante completo trae cuatro archivos: la factura (PDF), el XML, la guía de
-remisión (del remitente) y la guía transportista. En cada correo por verificar o por
-aprobar, debajo del estado, sale en rojo lo que falta:
+Lo que tiene que mandar el proveedor son tres archivos: la factura (PDF), el XML y SU
+guía transportista (la que emite él). En cada correo por verificar o por aprobar,
+debajo del estado, sale lo que falta:
 
-    No se encontró el XML del comprobante entre los archivos.
-    No se encontró la factura (PDF) entre los archivos.
-    No se encontró la guía de remisión entre los archivos.
-    No se encontró la guía transportista entre los archivos.
-    (o "El correo no trae archivos adjuntos." / "El XML adjunto no se pudo leer.")
+    No se encontró: XML · Factura (PDF) · Guía transportista EG03-75
+    (o "El correo no trae archivos adjuntos." / "XML legible" si el XML no se pudo leer)
 
-Se reconoce cada archivo por su nombre: el de SUNAT (RUC-01-… factura, -09- guía de
-remisión, -31- guía transportista, -07- nota de crédito) o palabras: "transportista" o
-"GRT" para la del transportista; "guia", "remision", "remitente" o "GRR" para la otra. A una nota de crédito
-no se le pide guía. Si viene un .zip, no se reclama ni el PDF ni la guía (pueden estar
-adentro).
+La guía del proveedor se reconoce primero por su número: el XML dice cuál es (por
+ejemplo EG03 - 75) y si llega un archivo con ese número en el nombre, es esa, se
+llame como se llame. Si no se puede cruzar, vale cualquier archivo que por su nombre
+sea una guía (código 31 o 09 de SUNAT, o "guia", "remision", "transportista", "GRT").
+
+La GRT que aparece en el concepto (por ejemplo "SEGUN GRTE VT01-8407") es la guía de
+TransJer: no se le pide al proveedor, y un archivo con ese número no cuenta como la
+suya. A una nota de crédito no se le pide guía. Si viene un .zip, no se reclama ni el
+PDF ni la guía (pueden estar adentro).
 
 
 AVISO DE ACEPTACIÓN AL PROVEEDOR

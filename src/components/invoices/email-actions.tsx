@@ -155,7 +155,7 @@ export function InvoiceFromEmailModal({ emailId, subject, suppliers, remitente, 
               <option value="SERVICIO">Servicio</option>
             </Select>
           </Field>
-          <Field label="Guía de remisión (GRT)" name="grtNumber" error={errors.grtNumber} className="sm:col-span-3">
+          <Field label="Guía transportista del proveedor (GRT)" name="grtNumber" error={errors.grtNumber} className="sm:col-span-3">
             <Input name="grtNumber" maxLength={40} />
           </Field>
           {clase === "TRANSPORTE" ? (

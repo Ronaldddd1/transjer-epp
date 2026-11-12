@@ -18,9 +18,10 @@ export function recepcionYmd(row: { receivedAt: Date | null; createdAt: Date }) 
 }
 
 /**
- * Las guías con las que nace una factura de transporte: las que se escribieron (o leyeron
- * del XML) en guía del transportista y guía del remitente. Si no hay ningún número, queda
- * una guía sin número: así igual figura que falta traerla.
+ * Las guías con las que nace una factura de transporte: la guía transportista que emite el
+ * proveedor (la que tiene que entregar). La del remitente no se le pide: se guarda en la
+ * factura como dato, pero no queda "por llegar". Si no hay número, queda una guía sin
+ * número: así igual figura que falta traerla.
  */
 export async function crearGuiasIniciales(
   tx: Tx,
@@ -28,10 +29,8 @@ export async function crearGuiasIniciales(
   datos: { grtNumber?: string | null; dispatchNote?: string | null; guideReceivedAt?: string | null },
   userId: string | null,
 ) {
-  const filas: { kind: GuiaTipo; number: string | null }[] = [
-    ...separarGuias(datos.grtNumber).map((n) => ({ kind: "TRANSPORTISTA" as const, number: n })),
-    ...separarGuias(datos.dispatchNote).map((n) => ({ kind: "REMITENTE" as const, number: n })),
-  ];
+  const filas: { kind: GuiaTipo; number: string | null }[] =
+    separarGuias(datos.grtNumber).map((n) => ({ kind: "TRANSPORTISTA" as const, number: n }));
   // Un mismo número en los dos campos es una sola guía.
   const unicas = filas.filter((f, i) => filas.findIndex((g) => g.number === f.number) === i);
   const aCrear = unicas.length ? unicas : [{ kind: "TRANSPORTISTA" as const, number: null }];
@@ -55,10 +54,7 @@ export async function agregarGuiasEscritas(
   const actuales = await tx.select({ id: invoiceGuides.id, number: invoiceGuides.number, receivedAt: invoiceGuides.receivedAt })
     .from(invoiceGuides).where(eq(invoiceGuides.invoiceId, invoiceId));
   const ya = new Set(actuales.map((g) => g.number?.toUpperCase()).filter(Boolean));
-  const nuevas = [
-    ...separarGuias(datos.grtNumber).map((n) => ({ kind: "TRANSPORTISTA" as const, number: n })),
-    ...separarGuias(datos.dispatchNote).map((n) => ({ kind: "REMITENTE" as const, number: n })),
-  ].filter((g, i, arr) => !ya.has(g.number) && arr.findIndex((x) => x.number === g.number) === i);
+  const nuevas = separarGuias(datos.grtNumber).map((n) => ({ kind: "TRANSPORTISTA" as const, number: n })).filter((g, i, arr) => !ya.has(g.number) && arr.findIndex((x) => x.number === g.number) === i);
   if (!nuevas.length) return;
   // Si solo había la guía sin número y todavía no llegó, la primera escrita ocupa su lugar.
   const sinNumero = actuales.find((g) => !g.number && !g.receivedAt);
