@@ -28,6 +28,15 @@ const INICIO: NavItem = { href: "/dashboard", label: "Dashboard", icon: LayoutDa
 
 const SECTIONS: NavSection[] = [
   {
+    // Las personas van primero: quién trabaja aquí y, debajo, quién vino cada día.
+    id: "rrhh",
+    label: "Recursos Humanos",
+    items: [
+      { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
+      { href: "/asistencia", label: "Asistencia", icon: CalendarCheck, permission: "attendance.view" },
+    ],
+  },
+  {
     // Movimientos ya no tiene entrada propia: las entradas, salidas y ajustes se hacen
     // desde cada producto del inventario, y su historial se abre desde ahí.
     id: "almacen",
@@ -37,15 +46,6 @@ const SECTIONS: NavSection[] = [
       { href: "/entregas", label: "Entrega de EPP", icon: HardHat, permission: "deliveries.view" },
       { href: "/entregas/resumen", label: "Resumen de EPP", icon: ClipboardCheck, permission: "deliveries.view" },
       { href: "/devoluciones", label: "Devolución de EPP", icon: Undo2, permission: "deliveries.view" },
-    ],
-  },
-  {
-    // Las personas, aparte de las cosas: quién trabaja aquí y quién vino cada día.
-    id: "rrhh",
-    label: "Recursos Humanos",
-    items: [
-      { href: "/asistencia", label: "Asistencia", icon: CalendarCheck, permission: "attendance.view" },
-      { href: "/trabajadores", label: "Trabajadores", icon: Users, permission: "employees.view" },
     ],
   },
   {
@@ -156,6 +156,14 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
   const alternar = (id: string, abiertaAhora: boolean) =>
     setTocadas((c) => ({ ...c, [id]: !abiertaAhora }));
 
+  /** Los contadores de aviso de cada entrada (stock bajo, devoluciones, etc.). */
+  const contador = (href: string) =>
+    href === "/inventario" ? lowStockCount
+      : href === "/devoluciones" ? pendingReturns
+        : href === "/detracciones" ? pendingDetractions
+          : href === "/facturas" ? pendingInvoices
+            : 0;
+
   const link = (item: NavItem) => {
     // "/entregas/resumen" cuelga de "/entregas", así que el padre no debe marcarse activo
     // cuando la que está abierta es la hija: si no, se encenderían las dos.
@@ -218,6 +226,12 @@ export function AppShell({ user, lowStockCount, pendingInvoices = 0, pendingDetr
                 <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !abierta && "-rotate-90")} aria-hidden />
                 <span className="flex-1 text-left">{s.label}</span>
                 {!abierta && enSeccion(s) && <span className="h-1.5 w-1.5 rounded-full bg-brand" aria-hidden />}
+                {/* Plegada, la sección no esconde sus avisos: suma los contadores de adentro. */}
+                {!abierta && s.items.reduce((n, i) => n + contador(i.href), 0) > 0 && (
+                  <span className="rounded bg-brand px-1.5 text-xs font-bold normal-case tracking-normal text-ink" title="Avisos dentro de esta sección">
+                    {s.items.reduce((n, i) => n + contador(i.href), 0)}
+                  </span>
+                )}
               </button>
               {abierta && <div className="mt-1 grid gap-0.5">{s.items.map(link)}</div>}
             </div>

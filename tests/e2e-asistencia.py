@@ -307,6 +307,9 @@ with sync_playwright() as p:
     # --- Dirección y contacto de emergencia ---
     page.get_by_role("button", name="Editar").first.click()
     page.wait_for_timeout(800)
+    # Al editar también se piden todos los datos: el sembrado no tiene teléfono ni ingreso.
+    page.fill("input[name=phone]", "912345678")
+    page.locator("#hireDate").fill("05/01/2026")
     page.fill("input[name=address]", f"Av. Los Álamos {SELLO}")
     page.fill("input[name=emergencyContactName]", "María Prueba")
     page.fill("input[name=emergencyContactPhone]", "987654321")

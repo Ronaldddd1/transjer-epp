@@ -219,6 +219,29 @@ with sync_playwright() as p:
     check("se ve la nota sin entrar a la factura", "E001-71" in d.inner_text() and "500.00" in d.inner_text())
     enlace = d.get_by_role("link", name=re.compile("Abrir el PDF")).get_attribute("href")
     check("y su PDF se abre", page.evaluate("(u) => fetch(u).then((r) => r.status)", enlace) == 200, enlace)
+    page.keyboard.press("Escape"); page.wait_for_timeout(300)
+
+    # --- Adjuntar la NC directo desde la fila que la espera ---
+    os.makedirs("/tmp/e2e-files", exist_ok=True)
+    nota_pdf = "/tmp/e2e-files/nota.pdf"
+    open(nota_pdf, "wb").write(b"%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n% " + b"r" * (12 * 1024) + b"\n%%EOF")
+    f_espera = page.locator("tbody tr").filter(has_text=f"F001-9{SELLO}")
+    boton = f_espera.get_by_role("button", name=re.compile("Adjuntar NC"))
+    check("la que espera la NC tiene el botón Adjuntar NC", boton.count() == 1)
+    check("y la que ya la tiene, no", f_con.get_by_role("button", name=re.compile("Adjuntar NC")).count() == 0)
+    boton.click(); page.wait_for_timeout(600)
+    d = page.locator("[role=dialog]")
+    page.set_input_files("[role=dialog] input[name=files]", nota_pdf)
+    d.locator("input[name=creditNoteNumber]").fill("E001-90")
+    d.get_by_role("button", name="Registrar y anular la factura").click(); page.wait_for_timeout(2500)
+    check("la nota queda registrada y la factura deja de esperarla",
+          psql(f"select credit_note_number || '|' || awaiting_credit_note from supplier_invoices where id = '{espera}'") == "E001-90|false")
+    check("con su archivo en la factura", psql(f"select count(*) from invoice_attachments where invoice_id = '{espera}' and filename = 'nota.pdf'") == "1")
+    page.reload(); page.wait_for_timeout(1500)
+    f_espera = page.locator("tbody tr").filter(has_text=f"F001-9{SELLO}")
+    check("la fila pasa a amarillo", "bg-amber-50" in (f_espera.get_attribute("class") or ""))
+    f_espera.get_by_role("button", name=re.compile("Ver la nota de crédito")).click(); page.wait_for_timeout(500)
+    check("y Ver NC muestra el archivo que se adjuntó", "nota.pdf" in page.locator("[role=dialog]").inner_text())
 
     check("sin errores de JavaScript", not errores, errores[:3])
     nav.close()

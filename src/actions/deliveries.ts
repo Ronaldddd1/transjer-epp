@@ -1,5 +1,6 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db } from "@/db";
@@ -42,6 +43,8 @@ export async function createDelivery(formData: FormData): Promise<ActionResult> 
         movementId: movement.id,
         quantity: data.quantity,
         size: product.size,
+        unitPrice: product.unitPrice,
+        batchId: randomUUID(),
         deliveryDate: data.deliveryDate,
         reason: data.reason,
         notes: data.notes,
@@ -96,6 +99,7 @@ export async function createBulkDelivery(formData: FormData): Promise<ActionResu
       throw new BusinessError("Escribe la cantidad de al menos un EPP.");
     }
 
+    const lote = randomUUID();
     const entregados = await db.transaction(async (tx) => {
       const [employee] = await tx.select().from(employees).where(eq(employees.id, data.employeeId));
       if (!employee || !employee.active) throw new BusinessError("El trabajador no existe o está desactivado.");
@@ -120,6 +124,8 @@ export async function createBulkDelivery(formData: FormData): Promise<ActionResu
           movementId: movement.id,
           quantity: pedido.quantity,
           size: product.size,
+          unitPrice: product.unitPrice,
+          batchId: lote,
           deliveryDate: data.deliveryDate,
           reason: data.reason,
           notes: data.notes,
@@ -144,6 +150,11 @@ export async function createBulkDelivery(formData: FormData): Promise<ActionResu
     return {
       ok: true,
       message: `Entrega registrada: ${entregados.length} EPP, ${unidades} unidad(es).`,
+      descargas: [{
+        href: `/api/epp/cargo/${data.employeeId}?lote=${lote}`,
+        label: "Descargar cargo de entrega para firmar",
+        detalle: "Lo que recibe, con el precio de cada EPP y el compromiso de devolverlo al retirarse.",
+      }],
     };
   } catch (e) {
     return toActionError(e);

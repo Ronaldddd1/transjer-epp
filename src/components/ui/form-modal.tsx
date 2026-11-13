@@ -28,7 +28,7 @@ export function FormModal({ trigger, title, description, submitLabel, submitVari
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formKey, setFormKey] = useState(0);
   const [pending, start] = useTransition();
-  const { notify } = useToast();
+  const { notify, ofrecer } = useToast();
   const router = useRouter();
   const formId = useId();
 
@@ -47,6 +47,8 @@ export function FormModal({ trigger, title, description, submitLabel, submitVari
       const res = await action(fd);
       if (res.ok) {
         notify("success", res.message);
+        // Si la acción dejó un documento para firmar, se ofrece en su propia ventana.
+        if (res.descargas?.length) ofrecer({ title, message: res.message, descargas: res.descargas });
         setOpen(false);
         setErrors({});
         setFormKey((k) => k + 1);

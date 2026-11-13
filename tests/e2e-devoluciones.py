@@ -50,6 +50,10 @@ def sembrar():
     emp = psql(f"select id from employees where dni = '{DNI}'")
     admin = psql("select id from users order by created_at limit 1")
     productos = psql("select id from products where active order by name limit 2").splitlines()
+    # Precios conocidos: el acta los tiene que traer.
+    precios_antes = {p.strip(): psql(f"select coalesce(unit_price::text, 'null') from products where id = '{p.strip()}'") for p in productos}
+    for pid, precio in zip(productos, ("25.00", "40.00")):
+        ejecutar(f"update products set unit_price = {precio} where id = '{pid.strip()}'")
     for pid, cant in zip(productos, (2, 1)):
         pid = pid.strip()
         # Reposición previa: la prueba no debe depender del stock que haya quedado.
@@ -67,7 +71,7 @@ def sembrar():
             f"from inventory_movements m join products p on p.id = m.product_id "
             f"where m.employee_id = '{emp}' and m.product_id = '{pid}' and m.type = 'SALIDA' "
             f"and not exists (select 1 from epp_deliveries d where d.movement_id = m.id) limit 1")
-    return emp, [p.strip() for p in productos]
+    return emp, [p.strip() for p in productos], precios_antes
 
 
 def boton_modal(page, etiqueta):
@@ -87,7 +91,7 @@ def enviar(page, etiqueta, timeout=15000):
 
 def main():
     limpiar()
-    emp, productos = sembrar()
+    emp, productos, precios_antes = sembrar()
     nombres = [psql(f"select name from products where id = '{p}'") for p in productos]
 
     with sync_playwright() as pw:
@@ -128,6 +132,10 @@ def main():
         # --- Registrar el cese ---
         page.click("button:has-text('Registrar cese')"); page.wait_for_timeout(600)
         check("el modal avisa cuánto EPP tiene antes de cesarlo", "3 unidad(es)" in page.content())
+        tabla_cese = page.locator("[data-testid=tabla-cese]")
+        check("y muestra la tabla de lo que tiene que devolver",
+              tabla_cese.count() == 1 and nombres[0] in tabla_cese.inner_text() and nombres[1] in tabla_cese.inner_text())
+        check("con el precio y el valor total (2×25 + 1×40 = 90)", "90.00" in tabla_cese.inner_text(), tabla_cese.inner_text()[-80:])
         cese = page.locator("input#terminatedAt")
         check("la fecha de cese se precarga en día/mes/año", len(cese.input_value()) == 10, cese.input_value())
         page.fill("input[name=terminationReason]", "Renuncia (prueba)")
@@ -149,31 +157,54 @@ def main():
         # --- El dashboard también avisa ---
         page.goto(f"{BASE}/dashboard"); page.wait_for_timeout(900)
         check("el dashboard avisa del EPP sin devolver", "sin devolver" in page.content())
-        check("el menú marca el pendiente con un contador",
-              page.locator("a[href='/devoluciones'] span.bg-brand").count() > 0)
+        # Recursos Humanos va primero y abierta; Almacén, plegada, suma sus avisos en el título.
+        check("el menú marca el pendiente con un contador (en Almacén, aunque esté plegada)",
+              page.locator("nav[aria-label=Principal] button:has-text('Almacén') span.bg-brand").count() > 0
+              or page.locator("a[href='/devoluciones'] span.bg-brand").count() > 0)
 
-        # --- Registrar la devolución ---
+        # --- Registrar la devolución: una tabla con todo lo que tiene ---
         page.goto(f"{BASE}/devoluciones"); page.wait_for_timeout(900)
         page.locator("tr", has_text="Cesante").first.locator("button:has-text('Devolver')").click()
         page.wait_for_timeout(600)
-        check("el modal solo ofrece lo que tiene a su cargo",
-              page.locator("select[name=productId] option").count() == 2,
-              page.locator("select[name=productId] option").count())
+        tabla = page.locator("[data-testid=tabla-devolucion]")
+        check("el modal es una tabla con lo que tiene a su cargo",
+              tabla.locator("tbody tr").count() == 2, tabla.locator("tbody tr").count())
+        check("cada fila trae su precio", "25.00" in tabla.inner_text() and "40.00" in tabla.inner_text(), tabla.inner_text()[:200])
         check("el motivo se precarga con el cese", page.input_value("input[name=reason]") == "Cese del trabajador")
-        check("la cantidad se precarga con lo pendiente", page.input_value("input[name=quantity]") in ("1", "2"),
-              page.input_value("input[name=quantity]"))
+        check("las cantidades se precargan con lo pendiente (devolución completa)",
+              page.input_value(f"input[name=cantidad_{productos[0]}]") == "2"
+              and page.input_value(f"input[name=cantidad_{productos[1]}]") == "1")
+        check("y lo dice: devolución completa", "Devolución completa" in page.locator("[data-testid=tipo-devolucion]").inner_text())
+
+        # Devuelve solo el primero: pasa a ser parcial.
+        page.fill(f"input[name=cantidad_{productos[1]}]", "0")
+        page.wait_for_timeout(200)
+        tipo = page.locator("[data-testid=tipo-devolucion]").inner_text()
+        check("al dejar uno en cero, se vuelve parcial", "Devolución parcial" in tipo and "le quedan 1" in tipo, tipo)
 
         stock_antes = int(psql(f"select stock from products where id = '{productos[0]}'"))
-        page.select_option("select[name=productId]", value=productos[0])
-        page.wait_for_timeout(400)
-        page.fill("input[name=quantity]", "2")
-        page.select_option("select[name=condition]", "REUTILIZABLE")
-        enviar(page, "Registrar devolución")
+        page.select_option(f"select[name=estado_{productos[0]}]", "REUTILIZABLE")
+        boton_modal(page, "Registrar devolución").click()
+        page.wait_for_selector("[data-testid=form-listo]", timeout=15000)
+        check("al registrar, el modal ofrece el acta para firmar",
+              page.locator("a:has-text('Descargar acta de devolución')").count() == 1)
+        with page.expect_download() as bajada:
+            page.click("a:has-text('Descargar acta de devolución')")
+        pdf = open(bajada.value.path(), "rb").read()
+        check("el acta es un PDF", pdf[:4] == b"%PDF")
+        check("dice que la devolución es PARCIAL", b"DEVOLUCI" in pdf and b"N PARCIAL" in pdf)
+        check("trae el precio del EPP devuelto y lo que queda pendiente",
+              b"25.00" in pdf and b"50.00" in pdf and b"EPP pendiente de devoluci" in pdf and b"40.00" in pdf)
+        check("el nombre del archivo dice parcial", "parcial" in bajada.value.suggested_filename, bajada.value.suggested_filename)
+        boton_modal(page, "Cerrar").click()
+        page.wait_for_selector("div.fixed.inset-0.z-50", state="detached", timeout=10000)
 
         stock_despues = int(psql(f"select stock from products where id = '{productos[0]}'"))
         check("lo reutilizable vuelve al stock", stock_despues == stock_antes + 2, f"{stock_antes} → {stock_despues}")
         check("la devolución queda con su movimiento vinculado",
               psql(f"select count(*) from epp_returns where employee_id = '{emp}' and movement_id is not null") == "1")
+        check("y con el precio con que se entregó",
+              psql(f"select unit_price from epp_returns where employee_id = '{emp}' and product_id = '{productos[0]}'") == "25.00")
 
         page.goto(f"{BASE}/devoluciones"); page.wait_for_timeout(900)
         fila = page.locator("tr", has_text="Cesante").first
@@ -182,7 +213,9 @@ def main():
 
         # --- Lo que no devolvió exige explicación ---
         fila.locator("button:has-text('Devolver')").click(); page.wait_for_timeout(600)
-        page.select_option("select[name=condition]", "NO_DEVUELTO")
+        check("la tabla ya solo trae lo que falta",
+              page.locator("[data-testid=tabla-devolucion] tbody tr").count() == 1)
+        page.select_option(f"select[name=estado_{productos[1]}]", "NO_DEVUELTO")
         page.wait_for_timeout(300)
         boton_modal(page, "Registrar devolución").click()
         page.wait_for_timeout(1500)
@@ -191,9 +224,28 @@ def main():
 
         stock_antes = int(psql(f"select stock from products where id = '{productos[1]}'"))
         page.fill("textarea[name=notes]", "Se perdió en obra (prueba)")
-        enviar(page, "Registrar devolución")
+        boton_modal(page, "Registrar devolución").click()
+        # Con esto ya no le queda nada: sale de la lista, pero el acta sigue ofreciéndose.
+        page.wait_for_selector("[data-testid=form-listo]", timeout=15000)
+        with page.expect_download() as bajada:
+            page.click("a:has-text('Descargar acta de devolución')")
+        pdf = open(bajada.value.path(), "rb").read()
+        check("el acta con algo no devuelto no se marca completa", b"N PARCIAL" in pdf and b"No devuelvo" in pdf)
+        boton_modal(page, "Cerrar").click()
+        page.wait_for_timeout(600)
         stock_despues = int(psql(f"select stock from products where id = '{productos[1]}'"))
         check("lo no devuelto no suma stock", stock_despues == stock_antes, f"{stock_antes} → {stock_despues}")
+        check("cada devolución tiene su lote",
+              psql(f"select count(distinct batch_id) from epp_returns where employee_id = '{emp}'") == "2")
+
+        # --- En la ficha: el acta de cada devolución y el cargo de cada entrega ---
+        page.goto(f"{BASE}/trabajadores/{emp}"); page.wait_for_timeout(900)
+        check("la ficha enlaza un acta por devolución", page.locator("a:has-text('Acta de devolución del')").count() == 2)
+        enlace_cargo = page.locator("a[title='Cargo de esta entrega, para firmar']")
+        check("y el cargo de la entrega (las de antes de los lotes, por fecha)", enlace_cargo.count() == 1, enlace_cargo.count())
+        respuesta = page.evaluate("async (u) => { const r = await fetch(u); return [r.status, (await r.text()).slice(0, 4)]; }",
+                                  enlace_cargo.first.get_attribute("href"))
+        check("el cargo de una entrega vieja también se descarga", respuesta == [200, "%PDF"], respuesta)
 
         page.goto(f"{BASE}/devoluciones"); page.wait_for_timeout(900)
         pendiente = page.locator("table").first.inner_text()
@@ -239,6 +291,10 @@ def main():
 
         check("ninguna pantalla lanzó errores de JavaScript", not errores, errores[:3])
         ctx.close(); nav.close()
+
+    # Los precios de los productos de prueba vuelven a como estaban.
+    for pid, precio in precios_antes.items():
+        ejecutar(f"update products set unit_price = {precio} where id = '{pid}'")
 
     print("\nTodo en orden." if not fails else f"\n{len(fails)} comprobación(es) fallaron: {fails}")
     return 1 if fails else 0

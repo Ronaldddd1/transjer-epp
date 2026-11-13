@@ -10,6 +10,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { Field, Input, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
+import { ImageInput } from "@/components/ui/image-input";
 import { VoucherField } from "@/components/ui/voucher-field";
 import { formatMoney, saldoAPagar, todayLima } from "@/lib/utils";
 
@@ -268,7 +269,12 @@ export function InvoiceReasonModal({ invoice, action, compact = false }: { invoi
  * Se deja editable igual, para que quien la registra vea el número que está confirmando en
  * vez de aceptar a ciegas lo que el formulario rellenó solo.
  */
-export function CreditNoteModal({ invoice, compact = false }: { invoice: InvoiceRef; compact?: boolean }) {
+export function CreditNoteModal({ invoice, compact = false, etiqueta }: {
+  invoice: InvoiceRef;
+  compact?: boolean;
+  /** El texto del botón, si no es "Nota de crédito" (en la lista: "Adjuntar NC"). */
+  etiqueta?: string;
+}) {
   return (
     <FormModal
       title="Registrar la nota de crédito"
@@ -277,9 +283,15 @@ export function CreditNoteModal({ invoice, compact = false }: { invoice: Invoice
       size="sm"
       action={(fd) => registerCreditNote(invoice.id, fd)}
       trigger={(open) => (
-        <Button variant="outline" size={compact ? "sm" : "md"} onClick={open} title="Registrar la nota de crédito">
+        <Button
+          variant={etiqueta ? "primary" : "outline"}
+          size={compact ? "sm" : "md"}
+          onClick={open}
+          title={`Adjuntar la nota de crédito de ${docLabel(invoice)}`}
+          className="whitespace-nowrap"
+        >
           <FileMinus2 className="h-4 w-4" />
-          <span className={compact ? "sr-only 2xl:not-sr-only" : ""}>Nota de crédito</span>
+          <span className={compact && !etiqueta ? "sr-only 2xl:not-sr-only" : ""}>{etiqueta ?? "Nota de crédito"}</span>
         </Button>
       )}
     >
@@ -291,13 +303,20 @@ export function CreditNoteModal({ invoice, compact = false }: { invoice: Invoice
             <strong className="text-ink">{formatMoney(invoice.total, invoice.currency)}</strong>.
           </p>
           <Field
+            label="Archivos de la nota (PDF y XML)"
+            name="files"
+            error={errors.files}
+            hint="Si adjuntas el XML de la nota, el número, la fecha y el importe se leen solos."
+          >
+            <ImageInput id={`nc-files-${invoice.id}`} name="files" multiple accept=".pdf,.xml,.zip,.png,.jpg,.jpeg" />
+          </Field>
+          <Field
             label="Número de la nota de crédito"
             name="creditNoteNumber"
-            required
             error={errors.creditNoteNumber}
-            hint="Tal como viene en el comprobante del proveedor."
+            hint="Tal como viene en el comprobante del proveedor. Con el XML adjunto, se puede dejar vacío."
           >
-            <Input name="creditNoteNumber" maxLength={40} placeholder="NC-01" invalid={!!errors.creditNoteNumber} autoFocus />
+            <Input name="creditNoteNumber" maxLength={40} placeholder="E001-71" invalid={!!errors.creditNoteNumber} />
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Fecha de la nota" name="creditNoteDate" error={errors.creditNoteDate}>

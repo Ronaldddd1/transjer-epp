@@ -60,7 +60,7 @@ export async function getCategoryOptions(includeInactive = false) {
 }
 
 export async function getProductOptions() {
-  return db.select({ id: products.id, code: products.code, name: products.name, size: products.size, stock: products.stock, unit: products.unit })
+  return db.select({ id: products.id, code: products.code, name: products.name, size: products.size, stock: products.stock, unit: products.unit, unitPrice: products.unitPrice })
     .from(products).where(eq(products.active, true)).orderBy(asc(products.name));
 }
 
@@ -113,6 +113,7 @@ export async function listProducts(opts: { q?: string; categoryId?: string; stat
   const query = db.select({
     id: products.id, code: products.code, name: products.name, categoryId: products.categoryId, categoryName: categories.name,
     description: products.description, brand: products.brand, size: products.size, color: products.color, unit: products.unit,
+    unitPrice: products.unitPrice,
     stock: products.stock, minimumStock: products.minimumStock, notes: products.notes, updatedAt: products.updatedAt, isDemo: products.isDemo,
     ingresado, entregado,
   }).from(products).innerJoin(categories, eq(products.categoryId, categories.id)).where(where).orderBy(order, asc(products.code)).$dynamic();
@@ -174,6 +175,7 @@ export async function listDeliveries(f: ReportFilters, limit?: number, offset = 
   const base = db.select({
     id: eppDeliveries.id, deliveryDate: eppDeliveries.deliveryDate, createdAt: eppDeliveries.createdAt,
     quantity: eppDeliveries.quantity, size: eppDeliveries.size, reason: eppDeliveries.reason, notes: eppDeliveries.notes,
+    batchId: eppDeliveries.batchId, unitPrice: eppDeliveries.unitPrice,
     employeeId: employees.id, employeeName: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
     dni: employees.dni, position: employees.position, area: employees.area,
     productCode: products.code, productName: products.name, categoryName: categories.name, userName: users.name,
@@ -369,13 +371,17 @@ export async function employeeHoldings(employeeId: string) {
       categoryName: categories.name,
       size: products.size,
       unit: products.unit,
+      // El precio con que se le entregó la última vez (el que firmó); si no hay, el actual.
+      unitPrice: sql<string | null>`coalesce((select d2.unit_price from epp_deliveries d2
+        where d2.employee_id = ${employeeId} and d2.product_id = ${products.id} and d2.voided_at is null and d2.unit_price is not null
+        order by d2.delivery_date desc, d2.created_at desc limit 1), ${products.unitPrice})::text`,
       entregado: sql<number>`coalesce(sum(${eppDeliveries.quantity}), 0)::int`,
       ultima: sql<string>`max(${eppDeliveries.deliveryDate})::text`,
     }).from(eppDeliveries)
       .innerJoin(products, eq(eppDeliveries.productId, products.id))
       .innerJoin(categories, eq(products.categoryId, categories.id))
       .where(and(eq(eppDeliveries.employeeId, employeeId), isNull(eppDeliveries.voidedAt)))
-      .groupBy(products.id, products.code, products.name, categories.name, products.size, products.unit),
+      .groupBy(products.id, products.code, products.name, categories.name, products.size, products.unit, products.unitPrice),
 
     db.select({
       productId: eppReturns.productId,
@@ -481,7 +487,8 @@ export async function listPendingReturns(opts: { q?: string; includeActive?: boo
 }
 
 export type PendingItemRow = {
-  employeeId: string; productId: string; productName: string; size: string | null; unit: string; pendiente: number;
+  employeeId: string; productId: string; productCode: string; productName: string; size: string | null; unit: string;
+  unitPrice: string | null; pendiente: number;
 };
 
 /**
@@ -498,9 +505,13 @@ export async function pendingReturnItems(opts: { includeActive?: boolean } = {})
     select
       p.employee_id as "employeeId",
       pr.id as "productId",
+      pr.code as "productCode",
       pr.name as "productName",
       pr.size,
       pr.unit,
+      coalesce((select d2.unit_price from epp_deliveries d2
+        where d2.employee_id = p.employee_id and d2.product_id = p.product_id and d2.voided_at is null and d2.unit_price is not null
+        order by d2.delivery_date desc, d2.created_at desc limit 1), pr.unit_price)::text as "unitPrice",
       p.q as pendiente
     from pendiente p
     join employees emp on emp.id = p.employee_id
@@ -546,6 +557,7 @@ export async function listReturns(f: ReportFilters, limit?: number, offset = 0) 
   const base = db.select({
     id: eppReturns.id, returnDate: eppReturns.returnDate, quantity: eppReturns.quantity,
     size: eppReturns.size, condition: eppReturns.condition, reason: eppReturns.reason, notes: eppReturns.notes,
+    batchId: eppReturns.batchId, unitPrice: eppReturns.unitPrice,
     employeeId: employees.id, employeeName: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
     dni: employees.dni, position: employees.position, area: employees.area,
     terminatedAt: employees.terminatedAt,

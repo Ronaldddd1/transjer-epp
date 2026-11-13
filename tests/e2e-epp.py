@@ -78,6 +78,10 @@ with sync_playwright() as p:
     m.locator("input[name=categoryName]").fill("protección de MANOS")
     m.locator("#initialStock").fill("12")
     m.locator("#minimumStock").fill("4")
+    # Sin precio no se registra: va en el cargo que firma el trabajador.
+    m.get_by_role("button", name="Registrar EPP").click()
+    expect(m.get_by_text("El precio unitario es obligatorio")).to_be_visible()
+    m.locator("#unitPrice").fill("18.50")
     m.get_by_role("button", name="Registrar EPP").click()
     toast(page, "correctamente")
     assert psql("select stock from products where code='REG-001'") == "12"
@@ -85,7 +89,8 @@ with sync_playwright() as p:
                 "where pr.code='REG-001' and mv.type='ENTRADA'") == "1"
     assert psql("select c.name from products p join categories c on c.id = p.category_id where p.code='REG-001'") == "Protección de manos"
     assert psql("select count(*) from categories") == categorias_antes, "escribir una categoría existente no debe crear otra"
-    ok("Inventario: el stock inicial queda registrado como entrada")
+    assert psql("select unit_price from products where code='REG-001'") == "18.50"
+    ok("Inventario: el stock inicial queda registrado como entrada, con su precio unitario")
 
     # 4. Salida y tope de stock
     prod = psql("select id from products where code='REG-001'")
@@ -115,10 +120,24 @@ with sync_playwright() as p:
     assert "2 Guante de prueba de regresión" in m.inner_text(), m.inner_text()[:300]
     m.get_by_role("button", name="Registrar entrega").click()
     toast(page, "Entrega registrada")
+    # El modal se queda abierto con el cargo para firmar.
+    enlace = m.get_by_role("link", name=re.compile("Descargar cargo de entrega"))
+    expect(enlace).to_be_visible()
+    with page.expect_download() as bajada:
+        enlace.click()
+    pdf = open(bajada.value.path(), "rb").read()
+    assert pdf[:4] == b"%PDF", pdf[:20]
+    assert b"CARGO DE ENTREGA" in pdf and b"18.50" in pdf and b"37.00" in pdf, "el cargo trae precio e importe"
+    assert b"DEVOLVERLOS A LA EMPRESA" in pdf, "el cargo dice que se devuelve al retirarse"
+    m.locator("button:text-is('Cerrar')").click()
+    assert psql("select d.unit_price from epp_deliveries d join products p on p.id = d.product_id "
+                "where p.code='REG-001' order by d.created_at desc limit 1") == "18.50"
+    assert psql("select batch_id is not null from epp_deliveries d join products p on p.id = d.product_id "
+                "where p.code='REG-001' order by d.created_at desc limit 1") == "t"
     assert psql("select stock from products where code='REG-001'") == "10"
     assert psql("select stock from products where id = '%s'" % otro) == stock_otro
     expect(page.get_by_role("row").filter(has_text="Guante de prueba de regresión")).to_be_visible()
-    ok("Entrega: descuenta solo lo escrito y queda en el historial del trabajador")
+    ok("Entrega: descuenta solo lo escrito, queda en el historial y ofrece el cargo con precios para firmar")
 
     # 5b. El inventario explica el stock: ingresado − entregado
     page.goto(BASE + "/inventario?q=REG-001")

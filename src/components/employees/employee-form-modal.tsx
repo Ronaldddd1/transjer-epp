@@ -25,6 +25,7 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
   return (
     <FormModal
       title={editing ? "Editar trabajador" : "Nuevo trabajador"}
+      description="Todos los datos son obligatorios, salvo las observaciones."
       submitLabel={editing ? "Guardar cambios" : "Registrar trabajador"}
       size="lg"
       action={(fd) => (editing ? updateEmployee(employee.id, fd) : createEmployee(fd))}
@@ -43,8 +44,8 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
           <Field label="DNI" name="dni" required error={errors.dni}>
             <Input name="dni" inputMode="numeric" maxLength={12} defaultValue={employee?.dni} invalid={!!errors.dni} />
           </Field>
-          <Field label="Fecha de ingreso" name="hireDate" error={errors.hireDate}>
-            <DateInput name="hireDate" defaultValue={employee?.hireDate ?? ""} />
+          <Field label="Fecha de ingreso" name="hireDate" required error={errors.hireDate}>
+            <DateInput name="hireDate" defaultValue={employee?.hireDate ?? ""} required invalid={!!errors.hireDate} />
           </Field>
           <Field label="Nombres" name="firstName" required error={errors.firstName}>
             <Input name="firstName" defaultValue={employee?.firstName} invalid={!!errors.firstName} maxLength={80} />
@@ -60,11 +61,11 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
             <Input name="area" list="area-options" defaultValue={employee?.area} invalid={!!errors.area} maxLength={80} />
             <datalist id="area-options">{areaList.map((a) => <option key={a} value={a} />)}</datalist>
           </Field>
-          <Field label="Teléfono" name="phone" error={errors.phone}>
+          <Field label="Teléfono" name="phone" required error={errors.phone}>
             <Input name="phone" type="tel" inputMode="tel" defaultValue={employee?.phone ?? ""} maxLength={20} invalid={!!errors.phone} />
           </Field>
-          <Field label="Dirección" name="address" error={errors.address} className="sm:col-span-2">
-            <Input name="address" defaultValue={employee?.address ?? ""} maxLength={200}
+          <Field label="Dirección" name="address" required error={errors.address} className="sm:col-span-2">
+            <Input name="address" defaultValue={employee?.address ?? ""} maxLength={200} invalid={!!errors.address}
               placeholder="Av. Los Álamos 123, San Martín de Porres" />
           </Field>
 
@@ -78,17 +79,17 @@ export function EmployeeFormModal({ employee, areas = [], variant = "full" }: { 
           <fieldset className="sm:col-span-2 rounded-md border border-steel-200 px-3 pb-3 pt-2">
             <legend className="px-1 text-sm font-semibold text-ink">Contacto de emergencia</legend>
             <div className="grid gap-4 sm:grid-cols-3">
-              <Field label="Nombre" name="emergencyContactName" error={errors.emergencyContactName}>
-                <Input name="emergencyContactName" defaultValue={employee?.emergencyContactName ?? ""} maxLength={120} />
+              <Field label="Nombre" name="emergencyContactName" required error={errors.emergencyContactName}>
+                <Input name="emergencyContactName" defaultValue={employee?.emergencyContactName ?? ""} maxLength={120} invalid={!!errors.emergencyContactName} />
               </Field>
-              <Field label="Teléfono" name="emergencyContactPhone" error={errors.emergencyContactPhone}>
+              <Field label="Teléfono" name="emergencyContactPhone" required error={errors.emergencyContactPhone}>
                 <Input name="emergencyContactPhone" type="tel" inputMode="tel"
                   defaultValue={employee?.emergencyContactPhone ?? ""} maxLength={20}
                   invalid={!!errors.emergencyContactPhone} />
               </Field>
-              <Field label="Qué es suyo" name="emergencyContactRelation" error={errors.emergencyContactRelation}
+              <Field label="Parentesco" name="emergencyContactRelation" required error={errors.emergencyContactRelation}
                 hint="Esposa, hijo, hermano…">
-                <Input name="emergencyContactRelation" defaultValue={employee?.emergencyContactRelation ?? ""} maxLength={40} />
+                <Input name="emergencyContactRelation" defaultValue={employee?.emergencyContactRelation ?? ""} maxLength={40} invalid={!!errors.emergencyContactRelation} />
               </Field>
             </div>
           </fieldset>

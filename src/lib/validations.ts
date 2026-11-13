@@ -36,6 +36,15 @@ const intField = (label: string, min = 0, max?: number) => {
 };
 const ymd = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Fecha inválida");
 
+/** Precio en soles con hasta dos decimales: "25", "25.5", "1,250.00". */
+const precio = (label: string) =>
+  z.string({ required_error: required(label) })
+    .trim()
+    .min(1, required(label))
+    .transform((v) => v.replace(/\s/g, "").replace(/^S\/\.?/i, "").replace(/,/g, ""))
+    .refine((v) => /^\d{1,9}(\.\d{1,2})?$/.test(v), `${label} debe ser un importe válido, por ejemplo 25.50`)
+    .transform((v) => Number(v).toFixed(2));
+
 export const productBaseSchema = z.object({
   name: requiredText("El nombre", 150),
   /**
@@ -49,6 +58,8 @@ export const productBaseSchema = z.object({
   size: optionalText(20),
   color: optionalText(40),
   unit: requiredText("La unidad de medida", 30),
+  /** Va en el cargo que firma el trabajador: lo que vale lo que se lleva. */
+  unitPrice: precio("El precio unitario"),
   minimumStock: intField("El stock mínimo"),
   notes: optionalText(1000),
 });
@@ -98,20 +109,33 @@ export const categorySchema = z.object({
   description: optionalText(500),
 });
 
+/** Teléfono obligatorio: al menos 7 dígitos, con espacios, guiones o el +51 si se quiere. */
+const telefonoObligatorio = (label: string) =>
+  requiredText(label, 20)
+    .refine((v) => /^[\d +()-]+$/.test(v), "Teléfono inválido")
+    .refine((v) => v.replace(/\D/g, "").length >= 7, "El teléfono debe tener al menos 7 dígitos");
+
+/**
+ * La ficha del trabajador, completa.
+ *
+ * Todos los datos son obligatorios (salvo las observaciones): el teléfono, la dirección y
+ * el contacto de emergencia son los que nadie llena "después" y faltan justo el día que
+ * hacen falta.
+ */
 export const employeeSchema = z.object({
   dni: z.string().trim().regex(/^\d{8,12}$/, "El DNI debe tener entre 8 y 12 dígitos"),
   firstName: requiredText("Los nombres", 80),
   lastName: requiredText("Los apellidos", 80),
   position: requiredText("El cargo", 80),
   area: requiredText("El área", 80),
-  phone: z.string().trim().regex(/^[\d +()-]{0,20}$/, "Teléfono inválido").optional().transform((v) => (v ? v : null)),
-  hireDate: ymd.optional().or(z.literal("")).transform((v) => (v ? v : null)),
-  address: optionalText(200),
+  phone: telefonoObligatorio("El teléfono"),
+  hireDate: z.string({ required_error: required("La fecha de ingreso") }).trim()
+    .min(1, required("La fecha de ingreso")).pipe(ymd),
+  address: requiredText("La dirección", 200),
   /** A quién avisar si le pasa algo: nombre, teléfono y qué es suyo. */
-  emergencyContactName: optionalText(120),
-  emergencyContactPhone: z.string().trim().regex(/^[\d +()-]{0,20}$/, "Teléfono inválido")
-    .optional().transform((v) => (v ? v : null)),
-  emergencyContactRelation: optionalText(40),
+  emergencyContactName: requiredText("El nombre del contacto de emergencia", 120),
+  emergencyContactPhone: telefonoObligatorio("El teléfono del contacto de emergencia"),
+  emergencyContactRelation: requiredText("El parentesco", 40),
   notes: optionalText(1000),
 });
 
@@ -168,6 +192,18 @@ export const eppReturnSchema = z.object({
   }
 });
 
+
+/**
+ * Devolución de varios EPP de una vez (la tabla del modal).
+ *
+ * Cada fila llega como `cantidad_<productId>` y `estado_<productId>`; aquí van los datos
+ * comunes a toda el acta.
+ */
+export const bulkReturnSchema = z.object({
+  returnDate: ymd,
+  reason: requiredText("El motivo", 120),
+  notes: optionalText(1000),
+});
 
 // --------------------------------------------------------------------------
 // Facturas de proveedores

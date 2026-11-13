@@ -9,7 +9,7 @@ import { Field, Input, Select, Textarea } from "@/components/ui/field";
 import { DateInput } from "@/components/ui/date-field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { ProductOption } from "@/components/inventory/movement-modal";
-import { cn } from "@/lib/utils";
+import { cn, formatMoney } from "@/lib/utils";
 
 export type EmployeeOption = { id: string; dni: string; firstName: string; lastName: string; position: string; area: string };
 
@@ -57,6 +57,8 @@ export function DeliveryModal({ employees, products, today, userName, employeeId
     .filter(({ n }) => Number.isFinite(n) && n > 0);
   const unidades = elegidos.reduce((s, { n }) => s + n, 0);
   const excedidos = elegidos.filter(({ p, n }) => n > p.stock);
+  const valor = elegidos.reduce((s, { p, n }) => s + Number(p.unitPrice ?? 0) * n, 0);
+  const sinPrecio = elegidos.filter(({ p }) => p.unitPrice == null);
 
   const escribir = (id: string, valor: string) => {
     setCantidades((c) => ({ ...c, [id]: valor.replace(/[^\d]/g, "") }));
@@ -124,13 +126,14 @@ export function DeliveryModal({ employees, products, today, userName, employeeId
                 <thead className="sticky top-0 z-10 bg-steel-50">
                   <tr>
                     <th className="border-b border-steel-200 px-3 py-2 text-[13px] font-semibold text-steel-600">EPP</th>
+                    <th className="border-b border-steel-200 px-3 py-2 text-right text-[13px] font-semibold text-steel-600">P. unit.</th>
                     <th className="border-b border-steel-200 px-3 py-2 text-right text-[13px] font-semibold text-steel-600">Stock</th>
                     <th className="w-28 border-b border-steel-200 px-3 py-2 text-right text-[13px] font-semibold text-steel-600">Cantidad</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visibles.length === 0 && (
-                    <tr><td colSpan={3} className="px-3 py-8 text-center text-steel-500">
+                    <tr><td colSpan={4} className="px-3 py-8 text-center text-steel-500">
                       {products.length === 0 ? "No hay EPP registrados todavía." : "Ningún EPP coincide con la búsqueda."}
                     </td></tr>
                   )}
@@ -143,6 +146,9 @@ export function DeliveryModal({ employees, products, today, userName, employeeId
                         <td className="px-3 py-2">
                           <p className="font-medium">{p.name}{p.size ? <span className="text-steel-500"> · Talla {p.size}</span> : null}</p>
                           <p className="text-xs text-steel-500">{p.code}</p>
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-2 text-right tabular text-steel-600">
+                          {p.unitPrice != null ? formatMoney(p.unitPrice) : <span className="text-xs text-amber-700">sin precio</span>}
                         </td>
                         <td className={cn("px-3 py-2 text-right tabular", p.stock === 0 ? "text-red-600" : "text-steel-600")}>
                           {p.stock === 0 ? "agotado" : p.stock}
@@ -178,7 +184,15 @@ export function DeliveryModal({ employees, products, today, userName, employeeId
                 ? `No hay tanto stock de ${excedidos.map(({ p }) => p.name).join(", ")}.`
                 : elegidos.length === 0
                   ? "Todavía no has puesto ninguna cantidad."
-                  : `Se entregarán ${elegidos.length} EPP · ${unidades} unidad(es): ${elegidos.map(({ p, n }) => `${n} ${p.name}`).join(", ")}.`}
+                  : `Se entregarán ${elegidos.length} EPP · ${unidades} unidad(es) · ${formatMoney(valor)}: ${elegidos.map(({ p, n }) => `${n} ${p.name}`).join(", ")}.`}
+            </p>
+            {sinPrecio.length > 0 && (
+              <p className="mt-1 text-sm text-amber-700">
+                {sinPrecio.map(({ p }) => p.name).join(", ")} no tiene precio: en el cargo saldrá sin valor. Ponle precio desde Inventario.
+              </p>
+            )}
+            <p className="mt-1 text-xs text-steel-500">
+              Al registrar, se ofrece el cargo de entrega para que el trabajador lo firme.
             </p>
           </div>
 

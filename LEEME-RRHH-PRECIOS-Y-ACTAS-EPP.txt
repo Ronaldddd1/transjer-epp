@@ -1,0 +1,78 @@
+RECURSOS HUMANOS PRIMERO, PRECIO DE LOS EPP, CARGO Y ACTA PARA FIRMAR, FICHA COMPLETA
+====================================================================================
+
+ANTES DE SUBIR
+--------------
+Lleva una migración nueva (0030). Si todavía no corriste la 0026 a la 0029, van todas
+juntas. En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0030_precios_y_actas_epp   el precio unitario de cada EPP, y el precio y el lote de
+                               cada entrega y devolución (para armar el cargo y el acta)
+
+Solo agrega: no borra datos.
+
+
+EL MENÚ
+-------
+Recursos Humanos es ahora la primera sección (debajo del Dashboard): Trabajadores y,
+debajo, Asistencia. Cuando una sección está plegada, su título muestra la suma de sus
+avisos (por ejemplo, Almacén con los cesados que deben EPP y el stock bajo), para que
+ningún aviso quede escondido.
+
+
+PRECIO UNITARIO DE LOS EPP
+--------------------------
+  - "Nuevo EPP" y "Editar" piden el precio unitario en soles (obligatorio).
+  - Inventario muestra la columna "P. unit." y el Excel la trae. Los EPP que ya estaban
+    salen "Sin precio": edítalos y pónselo (sin precio, en el cargo salen sin valor).
+  - Cada entrega guarda el precio de ese día: si después cambia, el cargo firmado no cambia.
+
+
+ENTREGA: EL CARGO PARA FIRMAR
+-----------------------------
+Al registrar una entrega se abre una ventana con "Descargar cargo de entrega para
+firmar" (PDF). Trae:
+  - Los datos del trabajador, la fecha, el motivo y quién entrega.
+  - Cada EPP con código, talla, cantidad, precio unitario e importe, y el total.
+  - El compromiso: usarlos, cuidarlos y DEVOLVERLOS A LA EMPRESA CUANDO SE RETIRE
+    (cese, renuncia, despido o fin de contrato).
+  - Firma del trabajador con recuadro para la huella, y firma de quien entrega.
+
+En la ficha del trabajador:
+  - Cada entrega del historial tiene su botón "Cargo" para volver a bajarlo.
+  - "Cargo de EPP" (arriba) baja todo lo que tiene a su cargo hoy: sirve para hacer
+    firmar a los que recibieron EPP antes de que existiera el cargo.
+
+
+CESE Y DEVOLUCIÓN: LA TABLA Y EL ACTA
+-------------------------------------
+  - "Registrar cese" muestra la tabla de lo que tiene que devolver: EPP, cantidad,
+    precio y valor, con el total.
+  - "Registrar devolución" es ahora una tabla con todo lo que tiene a su cargo: en cada
+    fila, cuánto devuelve y en qué estado (Reutilizable, Descartado, No lo devolvió).
+    Abre con todo marcado (devolución completa); si se baja una cantidad, abajo dice
+    "Devolución parcial" y cuánto le queda.
+  - Al registrar se ofrece "Descargar acta de devolución para firmar" (PDF), que dice
+    arriba DEVOLUCIÓN COMPLETA o DEVOLUCIÓN PARCIAL, lista lo que entrega con su estado y
+    precio, lo que no devolvió y cuánto vale, y la tabla de lo que queda pendiente.
+  - Es completa solo si no le queda nada a su cargo Y todo volvió (si algo se marcó "No
+    lo devolvió", el acta sale parcial).
+  - En la ficha, cada devolución tiene su "Acta de devolución del dd/mm/aaaa".
+  - Las devoluciones de antes de este cambio también sacan su acta (agrupadas por día).
+
+
+NUEVO TRABAJADOR: TODOS LOS DATOS OBLIGATORIOS
+----------------------------------------------
+DNI, nombres, apellidos, cargo, área, fecha de ingreso, teléfono (al menos 7 dígitos),
+dirección y el contacto de emergencia (nombre, teléfono y parentesco). Solo las
+observaciones son opcionales. Vale también al editar: si a un trabajador antiguo le
+falta algún dato, para guardar cambios hay que completarlo.
+
+
+A TENER EN CUENTA
+-----------------
+El cargo dice que los precios son el valor de cada equipo, pero NO incluye una
+autorización de descuento por planilla si no lo devuelve. Si la quieren, conviene que
+la redacte o revise su asesor laboral; se agrega en una línea.

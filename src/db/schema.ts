@@ -106,6 +106,8 @@ export const products = pgTable("products", {
   size: varchar("size", { length: 20 }),
   color: varchar("color", { length: 40 }),
   unit: varchar("unit", { length: 30 }).notNull().default("Unidad"),
+  /** Precio unitario en soles. Va en el cargo que firma el trabajador al recibirlo. */
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
   stock: integer("stock").notNull().default(0),
   minimumStock: integer("minimum_stock").notNull().default(0),
   notes: text("notes"),
@@ -117,6 +119,7 @@ export const products = pgTable("products", {
   index("products_active_name_idx").on(t.active, t.name),
   check("products_stock_non_negative", sql`${t.stock} >= 0`),
   check("products_min_stock_non_negative", sql`${t.minimumStock} >= 0`),
+  check("products_unit_price_non_negative", sql`${t.unitPrice} is null or ${t.unitPrice} >= 0`),
 ]);
 
 export const employees = pgTable("employees", {
@@ -211,6 +214,10 @@ export const eppDeliveries = pgTable("epp_deliveries", {
   movementId: uuid("movement_id").notNull().unique().references(() => inventoryMovements.id),
   quantity: integer("quantity").notNull(),
   size: varchar("size", { length: 20 }),
+  /** El precio del EPP el día de la entrega: el que figura en el cargo firmado. */
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+  /** Lo entregado de una sola vez comparte lote, y va junto en el mismo cargo. */
+  batchId: uuid("batch_id"),
   deliveryDate: date("delivery_date").notNull(),
   reason: varchar("reason", { length: 120 }).notNull(),
   userId: uuid("user_id").notNull().references(() => users.id),
@@ -226,6 +233,7 @@ export const eppDeliveries = pgTable("epp_deliveries", {
   index("deliveries_employee_date_idx").on(t.employeeId, t.deliveryDate),
   index("deliveries_product_idx").on(t.productId),
   index("deliveries_date_idx").on(t.deliveryDate),
+  index("deliveries_batch_idx").on(t.batchId),
 ]);
 
 /**
@@ -245,6 +253,10 @@ export const eppReturns = pgTable("epp_returns", {
   size: varchar("size", { length: 20 }),
   returnDate: date("return_date").notNull(),
   condition: returnConditionEnum("condition").notNull(),
+  /** El precio con el que se le entregó: el que figura en el acta de devolución. */
+  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }),
+  /** Lo devuelto de una sola vez comparte lote, y va junto en la misma acta. */
+  batchId: uuid("batch_id"),
   /** Solo existe cuando el EPP volvió reutilizable y por tanto regresó al stock. */
   movementId: uuid("movement_id").unique().references(() => inventoryMovements.id),
   reason: varchar("reason", { length: 120 }).notNull(),
@@ -257,6 +269,7 @@ export const eppReturns = pgTable("epp_returns", {
   index("returns_employee_idx").on(t.employeeId, t.returnDate),
   index("returns_product_idx").on(t.productId),
   index("returns_date_idx").on(t.returnDate),
+  index("returns_batch_idx").on(t.batchId),
 ]);
 
 

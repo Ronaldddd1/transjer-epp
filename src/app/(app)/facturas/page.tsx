@@ -1,7 +1,7 @@
 import { AlertTriangle, CalendarClock, FileClock, Mail, MapPin, Eye } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { AdvanceModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
+import { AdvanceModal, CreditNoteModal, PayInvoiceModal } from "@/components/invoices/invoice-actions";
 import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
 import { VerNotaCreditoModal } from "@/components/invoices/nota-credito";
@@ -271,6 +271,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                     )}
                     {/* Observar salió de la fila: se usa poco y ocupaba el ancho que hacía
                         falta para lo que sí se mira. Sigue estando dentro de Ver. */}
+                    {/* La que espera la NC: se adjunta desde aquí, sin entrar a la factura. */}
+                    {canManage && i.awaitingCreditNote && !i.creditNoteNumber && i.status !== "PAGADA" && (
+                      <CreditNoteModal invoice={ref} compact etiqueta="Adjuntar NC" />
+                    )}
                     {i.creditNoteNumber && (
                       <VerNotaCreditoModal
                         factura={{ id: i.id, label: invoiceNumber(i.series, i.number), currency: i.currency }}

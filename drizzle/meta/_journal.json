@@ -211,6 +211,13 @@
       "when": 1794600000000,
       "tag": "0029_monto_sin_xml",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794700000000,
+      "tag": "0030_precios_y_actas_epp",
+      "breakpoints": true
     }
   ]
 }

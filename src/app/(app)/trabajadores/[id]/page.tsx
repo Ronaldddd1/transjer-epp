@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, FileDown } from "lucide-react";
 import type { Metadata } from "next";
 import { ExportTable } from "@/components/ui/export-table";
 import Link from "next/link";
@@ -15,7 +15,7 @@ import { Panel } from "@/components/ui/page-header";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { cn, documentStatus, formatDate, todayLima } from "@/lib/utils";
+import { cn, documentStatus, formatDate, formatMoney, todayLima } from "@/lib/utils";
 import { listDocumentsFor } from "@/server/document-queries";
 import { attendanceFor } from "@/server/attendance-queries";
 import {
@@ -57,9 +57,21 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   const pendientes = holdings.filter((h) => h.pendiente > 0);
   const unidadesPendientes = pendientes.reduce((s, h) => s + h.pendiente, 0);
   const itemsPendientes = pendientes.map((h) => ({
-    productId: h.productId, productName: h.productName, size: h.size, unit: h.unit, pendiente: h.pendiente,
+    productId: h.productId, productCode: h.productCode, productName: h.productName, size: h.size, unit: h.unit,
+    unitPrice: h.unitPrice, pendiente: h.pendiente,
   }));
   const debeEpp = !!employee.terminatedAt && unidadesPendientes > 0;
+
+  // Los papeles para firmar: un cargo por cada entrega (lo registrado de una vez) y un acta
+  // por cada devolución. El enlace va en la primera fila de cada grupo.
+  const verPapeles = can(user, "deliveries.view");
+  const grupo = (r: { batchId: string | null; fecha: string }) => (r.batchId ? `lote=${r.batchId}` : `fecha=${r.fecha}`);
+  const primeraDeGrupo = <T,>(filas: T[], clave: (f: T) => string) => {
+    const vistos = new Set<string>();
+    return filas.map((f) => { const k = clave(f); const nueva = !vistos.has(k); vistos.add(k); return nueva; });
+  };
+  const cargoPrimera = primeraDeGrupo(rows, (r) => (r.voidedAt ? `anulada-${r.id}` : grupo({ batchId: r.batchId, fecha: r.deliveryDate })));
+  const actaPrimera = primeraDeGrupo(devoluciones.rows, (d) => grupo({ batchId: d.batchId, fecha: d.returnDate }));
 
   return (
     <>
@@ -101,10 +113,20 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
               employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, hireDate: employee.hireDate }}
               pendiente={unidadesPendientes}
               tipos={pendientes.length}
+              items={itemsPendientes}
             />
           )}
           {canManage && employee.terminatedAt && (
             <ReinstateButton employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }} />
+          )}
+          {verPapeles && unidadesPendientes > 0 && (
+            <a
+              href={`/api/epp/cargo/${employee.id}`}
+              className="inline-flex h-10 items-center gap-2 rounded-md border border-steel-300 bg-white px-4 text-sm font-semibold text-ink hover:bg-steel-50"
+              title="Todo lo que tiene a su cargo hoy, con precios, para firmar"
+            >
+              <FileDown className="h-4 w-4" /> Cargo de EPP
+            </a>
           )}
           {canManage && <EmployeeFormModal employee={employee} />}
           {can(user, "deliveries.view") && <ExportTable tabla="entregas" label="Descargar entregas" extra={{ employee: employee.id }} />}
@@ -129,31 +151,41 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           <h2 className="mb-3 font-display text-xl font-semibold">Historial de EPP entregados</h2>
           <TableShell>
             <thead>
-              <tr><Th>Fecha</Th><Th>EPP</Th><Th>Talla</Th><Th className="text-right">Cantidad</Th><Th>Motivo</Th><Th>Responsable</Th>{canVoid && <Th className="text-right"><span className="sr-only">Acciones</span></Th>}</tr>
+              <tr><Th>Fecha</Th><Th>EPP</Th><Th>Talla</Th><Th className="text-right">Cantidad</Th><Th className="text-right">P. unit.</Th><Th>Motivo</Th><Th>Responsable</Th><Th className="text-right"><span className="sr-only">Acciones</span></Th></tr>
             </thead>
             <tbody>
-              {rows.length === 0 && <EmptyRow colSpan={canVoid ? 7 : 6} title="Este trabajador aún no ha recibido EPP" />}
-              {rows.map((r) => (
+              {rows.length === 0 && <EmptyRow colSpan={8} title="Este trabajador aún no ha recibido EPP" />}
+              {rows.map((r, i) => (
                 <Tr key={r.id} className={cn(r.voidedAt && "bg-steel-50/60 [&>td]:text-steel-400")}>
                   <Td className="whitespace-nowrap tabular text-steel-600">{formatDate(r.deliveryDate)}</Td>
                   <Td className="font-medium">{r.productName}</Td>
                   <Td>{r.size ?? "—"}</Td>
                   <Td className={cn("text-right font-display text-lg font-bold tabular", r.voidedAt && "line-through")}>{r.quantity}</Td>
+                  <Td className="whitespace-nowrap text-right tabular text-steel-600">{r.unitPrice != null ? formatMoney(r.unitPrice) : "—"}</Td>
                   <Td>
                     {r.reason}{r.notes && <p className="text-xs text-steel-500">{r.notes}</p>}
                     {r.voidedAt && <VoidedNote voidedAt={r.voidedAt} voidedByName={r.voidedByName} voidReason={r.voidReason} />}
                   </Td>
                   <Td className="text-steel-600">{r.userName}</Td>
-                  {canVoid && (
-                    <Td className="text-right">
-                      {!r.voidedAt && (
+                  <Td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      {verPapeles && !r.voidedAt && cargoPrimera[i] && (
+                        <a
+                          href={`/api/epp/cargo/${employee.id}?${grupo({ batchId: r.batchId, fecha: r.deliveryDate })}`}
+                          className="inline-flex h-8 items-center gap-1 rounded-md px-2 text-sm text-steel-700 hover:bg-steel-100 hover:text-ink"
+                          title="Cargo de esta entrega, para firmar"
+                        >
+                          <FileDown className="h-4 w-4" /><span className="sr-only 2xl:not-sr-only">Cargo</span>
+                        </a>
+                      )}
+                      {canVoid && !r.voidedAt && (
                         <VoidDeliveryModal
                           delivery={{ id: r.id, deliveryDate: r.deliveryDate, employeeName: r.employeeName, productName: r.productName, size: r.size, quantity: r.quantity }}
                           dateLabel={formatDate(r.deliveryDate)}
                         />
                       )}
-                    </Td>
-                  )}
+                    </div>
+                  </Td>
                 </Tr>
               ))}
             </tbody>
@@ -321,8 +353,16 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
           {devoluciones.rows.length > 0 && (
             <Panel title="Devoluciones" action={<span className="text-sm text-steel-500">{devoluciones.total}</span>}>
               <ul className="divide-y divide-steel-100">
-                {devoluciones.rows.map((d) => (
+                {devoluciones.rows.map((d, i) => (
                   <li key={d.id} className="px-4 py-2.5 text-sm">
+                    {verPapeles && actaPrimera[i] && (
+                      <a
+                        href={`/api/epp/devolucion/${employee.id}?${grupo({ batchId: d.batchId, fecha: d.returnDate })}`}
+                        className="mb-1.5 inline-flex items-center gap-1 text-xs font-semibold text-steel-700 hover:text-ink hover:underline"
+                      >
+                        <FileDown className="h-3.5 w-3.5" /> Acta de devolución del {formatDate(d.returnDate)}
+                      </a>
+                    )}
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <p className="font-medium">{d.productName}{d.size && <span className="text-steel-500"> · {d.size}</span>}</p>

@@ -765,6 +765,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
           { key: "talla", header: "Talla", width: 8 },
           { key: "color", header: "Color", width: 12 },
           { key: "unidad", header: "Unidad", width: 11 },
+          { key: "precio", header: "Precio unitario (S/)", width: 14, align: "right" },
           { key: "ingresado", header: "Ingresado", width: 11, align: "right" },
           { key: "entregado", header: "Entregado", width: 11, align: "right" },
           { key: "otros", header: "Otros movimientos", width: 16, align: "right" },
@@ -775,6 +776,7 @@ export const TABLE_EXPORTS: Record<string, TableExport> = {
         rows: rows.map((p) => ({
           codigo: p.code, producto: p.name, categoria: p.categoryName, marca: texto(p.brand),
           talla: texto(p.size), color: texto(p.color), unidad: p.unit,
+          precio: p.unitPrice != null ? Number(p.unitPrice) : "",
           ingresado: p.ingresado, entregado: p.entregado,
           // Mermas, traslados y ajustes: lo que explica que ingresado − entregado no dé
           // exactamente el stock. En la columna, para que la resta cuadre en el Excel.

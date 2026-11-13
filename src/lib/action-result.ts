@@ -1,8 +1,11 @@
 import { ZodError } from "zod";
 import { AuthError } from "./auth-error";
 
+/** Un documento que se ofrece para descargar al terminar (el cargo, el acta). */
+export type Descarga = { href: string; label: string; detalle?: string };
+
 export type ActionResult =
-  | { ok: true; message: string }
+  | { ok: true; message: string; descargas?: Descarga[] }
   | { ok: false; message: string; fieldErrors?: Record<string, string> };
 
 export class BusinessError extends Error {}

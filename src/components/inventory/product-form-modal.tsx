@@ -77,6 +77,23 @@ export function ProductFormModal({ categories, product }: { categories: Option[]
               {UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
             </Select>
           </Field>
+          <Field
+            label="Precio unitario (S/)"
+            name="unitPrice"
+            required
+            error={errors.unitPrice}
+            hint="Va en el cargo que firma el trabajador al recibirlo."
+          >
+            <Input
+              name="unitPrice"
+              inputMode="decimal"
+              placeholder="0.00"
+              defaultValue={product?.unitPrice ?? ""}
+              invalid={!!errors.unitPrice}
+              className="tabular"
+              maxLength={14}
+            />
+          </Field>
           {!editing ? (
             <Field label="Stock inicial" name="initialStock" required error={errors.initialStock} hint="Se registra como una entrada.">
               <Input name="initialStock" type="number" min={0} step={1} inputMode="numeric" defaultValue={0} invalid={!!errors.initialStock} />

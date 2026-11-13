@@ -15,7 +15,7 @@ import { StockMeter } from "@/components/ui/stock-meter";
 import { EmptyRow, TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
-import { first, formatDateTime, formatNumber, pageParams, STOCK_STATUS_LABEL, stockStatus, type SearchParams } from "@/lib/utils";
+import { first, formatDateTime, formatMoney, formatNumber, pageParams, STOCK_STATUS_LABEL, stockStatus, type SearchParams } from "@/lib/utils";
 import { getCategoryOptions, getProductOptions, getSizeOptions, listProducts, readFilters } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Inventario de EPP" };
@@ -71,6 +71,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
             <Th className="hidden 2xl:table-cell">Marca</Th>
             <Th>Talla</Th>
             <Th className="hidden 2xl:table-cell">Unidad</Th>
+            <Th className="text-right">P. unit.</Th>
             {/* Ingresado y entregado a la vista: la resta de los dos es el stock, y así
                 se ve de dónde sale el número sin entrar al historial de cada EPP. */}
             <Th className="text-right">Ingresado</Th>
@@ -85,7 +86,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
         <tbody>
           {rows.length === 0 && (
             <EmptyRow
-              colSpan={13}
+              colSpan={14}
               title={hasFilters ? "Ningún EPP coincide con los filtros" : "Todavía no hay EPP registrados"}
               hint={hasFilters ? "Prueba con otra búsqueda o limpia los filtros." : canManage ? "Registra el primer equipo con el botón Nuevo EPP." : "Un administrador debe registrar los productos."}
               action={!hasFilters && canManage ? <ProductFormModal categories={categories} /> : undefined}
@@ -109,6 +110,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Se
                 <Td className="hidden text-steel-600 2xl:table-cell">{p.brand ?? "—"}</Td>
                 <Td>{p.size ?? "—"}</Td>
                 <Td className="hidden text-steel-600 2xl:table-cell">{p.unit}</Td>
+                <Td className="whitespace-nowrap text-right tabular">
+                  {p.unitPrice != null ? formatMoney(p.unitPrice) : (
+                    <span className="text-xs text-amber-700" title="Edita el EPP y ponle precio: va en el cargo que firma el trabajador">Sin precio</span>
+                  )}
+                </Td>
                 <Td className="text-right tabular text-steel-600">{formatNumber(p.ingresado)}</Td>
                 <Td className="text-right tabular text-steel-600">{formatNumber(p.entregado)}</Td>
                 <Td className="text-right">

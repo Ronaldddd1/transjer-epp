@@ -731,7 +731,7 @@ export async function listEmailAttachments(emailId: string) {
  * nota (que pasan a colgar de la factura al aplicarla), o los que por su nombre son una
  * nota de crédito. El PDF va primero: es lo que se quiere ver.
  */
-export async function archivosDeNotasCredito(facturas: { id: string; creditNoteNumber: string | null }[]) {
+export async function archivosDeNotasCredito(facturas: { id: string; creditNoteNumber: string | null; creditNoteRegisteredAt?: Date | null }[]) {
   const mapa = new Map<string, { id: string; filename: string }[]>();
   const conNota = facturas.filter((f) => f.creditNoteNumber);
   if (!conNota.length) return mapa;
@@ -739,6 +739,7 @@ export async function archivosDeNotasCredito(facturas: { id: string; creditNoteN
     id: invoiceAttachments.id,
     invoiceId: invoiceAttachments.invoiceId,
     filename: invoiceAttachments.filename,
+    createdAt: invoiceAttachments.createdAt,
     deNota: sql<boolean>`coalesce((select e.parsed->>'docType' = 'NOTA_CREDITO' from invoice_emails e
       where e.id = "invoice_attachments"."email_id"), false)`,
   }).from(invoiceAttachments)
@@ -747,8 +748,12 @@ export async function archivosDeNotasCredito(facturas: { id: string; creditNoteN
   for (const f of conNota) {
     const numero = (f.creditNoteNumber ?? "").toUpperCase().replace(/\s+/g, "");
     const [serie, correlativo] = numero.split("-");
+    // Los que se subieron junto con la nota (botón "Adjuntar NC"), se llamen como se llamen.
+    const juntoConLaNota = (a: { createdAt: Date }) =>
+      !!f.creditNoteRegisteredAt && Math.abs(a.createdAt.getTime() - f.creditNoteRegisteredAt.getTime()) < 120_000;
     const propios = filas.filter((a) => a.invoiceId === f.id && (
       a.deNota
+      || juntoConLaNota(a)
       || clasificarArchivo({ filename: a.filename }) === "NOTA_CREDITO"
       || (!!serie && !!correlativo && a.filename.toUpperCase().includes(serie)
         && a.filename.toUpperCase().includes(correlativo.replace(/^0+/, "")))

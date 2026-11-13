@@ -26,7 +26,7 @@ type MovementInput = {
  */
 export async function applyMovement(tx: Tx, input: MovementInput) {
   const [product] = await tx
-    .select({ id: products.id, code: products.code, name: products.name, size: products.size, stock: products.stock, active: products.active })
+    .select({ id: products.id, code: products.code, name: products.name, size: products.size, unitPrice: products.unitPrice, stock: products.stock, active: products.active })
     .from(products)
     .where(eq(products.id, input.productId))
     .for("update");

@@ -490,8 +490,31 @@ export async function voidInvoice(id: string, formData: FormData): Promise<Actio
 export async function registerCreditNote(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("invoices.manage");
-    const data = creditNoteSchema.parse(formToObject(formData));
     const before = await loadInvoice(id);
+
+    // Los archivos de la nota (PDF, XML), si se adjuntaron. Si viene el XML de la nota,
+    // de ahí salen el número, la fecha y el importe que no se hayan escrito.
+    const archivos = await readFiles(formData);
+    const leida = archivos.length ? parseFirstXml(archivos) : null;
+    const nota = leida && "parsed" in leida && leida.parsed.docType === "NOTA_CREDITO" ? leida.parsed : null;
+    if (leida && "parsed" in leida && leida.parsed.docType !== "NOTA_CREDITO") {
+      throw new BusinessError("El XML adjunto no es una nota de crédito. Revisa el archivo.");
+    }
+    if (nota?.referencedDoc) {
+      const [serieRef, numeroRef] = nota.referencedDoc.toUpperCase().split("-");
+      const mismaFactura = serieRef === before.series.toUpperCase() && Number(numeroRef) === Number(before.number);
+      if (!mismaFactura) {
+        throw new BusinessError(`Esa nota de crédito anula la factura ${nota.referencedDoc}, no la ${label(before)}.`);
+      }
+    }
+    const crudo = formToObject(formData);
+    const data = creditNoteSchema.parse({
+      ...crudo,
+      creditNoteNumber: (crudo.creditNoteNumber as string | undefined)?.trim() || (nota ? invoiceNumber(nota.series, nota.number) : ""),
+      // La fecha del formulario viene puesta con hoy: si hay XML, manda la de la nota.
+      creditNoteDate: nota?.issueDate || (crudo.creditNoteDate as string | undefined) || "",
+      creditNoteAmount: (crudo.creditNoteAmount as string | undefined) || nota?.total || "",
+    });
 
     if (before.status === "PAGADA") {
       throw new BusinessError(
@@ -530,10 +553,16 @@ export async function registerCreditNote(id: string, formData: FormData): Promis
           : { detractionStatus: "NO_APLICA" as const }),
       }).where(eq(supplierInvoices.id, id)).returning();
 
+      // Los archivos de la nota quedan en la factura que anula.
+      for (const archivo of archivos) {
+        await saveAttachment(tx, { invoiceId: id, ...archivo, uploadedBy: user.id });
+      }
+
       await logAudit({
         user, action: "ANULAR", module: "FACTURAS", recordId: id,
         description: `${user.name} anuló la factura ${label(row)} con la nota de crédito `
           + `${data.creditNoteNumber}, por ${formatMoney(monto, row.currency)}.`
+          + (archivos.length ? ` Adjuntó: ${archivos.map((a) => a.filename).join(", ")}.` : "")
           + (before.detractionStatus === "PAGADA"
             ? " La detracción ya estaba depositada y se dejó como estaba."
             : ""),

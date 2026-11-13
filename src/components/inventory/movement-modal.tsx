@@ -10,7 +10,7 @@ import { FormModal } from "@/components/ui/form-modal";
 import type { MovementType } from "@/db/schema";
 import { cn } from "@/lib/utils";
 
-export type ProductOption = { id: string; code: string; name: string; size: string | null; stock: number; unit: string };
+export type ProductOption = { id: string; code: string; name: string; size: string | null; stock: number; unit: string; unitPrice?: string | null };
 
 const REASONS: Record<MovementType, string[]> = {
   ENTRADA: ["Compra", "Devolución", "Donación", "Traslado desde otra sede", "Otro"],
