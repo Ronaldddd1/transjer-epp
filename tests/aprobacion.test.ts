@@ -232,7 +232,13 @@ async function main() {
   check("dice de qué comprobante se trata", texto.includes(`${SERIE}-${SELLO}`));
   check("dice el motivo en palabras, no en clave", texto.includes(REJECT_REASON_LABEL.IMPORTE));
   check("incluye el comentario escrito a mano", texto.includes("lo acordado fue S/ 980"));
-  check("pide que lo corrijan y lo reenvíen", texto.toLowerCase().includes("volver a enviarlo"));
+  check("si el motivo pide nota de crédito, la pide con su XML y la referencia a la factura",
+    texto.includes("nota de crédito por el importe total") && texto.includes("el XML de la nota")
+    && texto.includes(`haga referencia a ${SERIE}-${SELLO}`), texto);
+  check("y que después manden el corregido", texto.includes("comprobante corregido"));
+  const duplicado = rejectionEmailBody({ comprobante: "F001-1", proveedor: "X", motivo: "DUPLICADO", comentario: "" });
+  check("si no hace falta nota de crédito, no la pide y pide reenviarlo",
+    !duplicado.includes("nota de crédito") && duplicado.toLowerCase().includes("volver a enviarlo"), duplicado);
   check("separa los párrafos", texto.includes("\n\n"));
   check("no quedan líneas en blanco de más", !texto.includes("\n\n\n"), texto);
 

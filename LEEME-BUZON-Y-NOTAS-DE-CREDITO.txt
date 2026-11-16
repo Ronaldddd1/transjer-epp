@@ -110,3 +110,41 @@ monto, Aceptar, Registrar o Aplicar NC) · Rechazar · y en iconos chicos lo de 
 uso (corregir el monto, reintentar, descartar). Lo que falta del correo sale como
 "No se encontró:" y etiquetas cortas (XML, Factura (PDF), Guía de remisión, Guía
 transportista); la frase completa aparece al pasar el mouse.
+
+
+CAMBIOS DEL 16/11
+-----------------
+BUZÓN: VUELVE "OBSERVADAS"
+  Los correos que llegan sin XML (o con un XML que no se puede leer) van a su propia
+  pestaña, "Observadas". "Por verificar monto" y "Por aprobar" quedan para los que traen
+  XML. En Observadas se hace todo: verificar el monto mirando el PDF, registrar, rechazar
+  o descartar.
+
+FACTURAS: BUSCADOR DE PROVEEDORES
+  El filtro de proveedor se busca escribiendo el nombre o el RUC (aparecen las
+  coincidencias; Enter o clic para elegir; la X lo quita).
+
+FACTURAS: "RESUMEN POR PROVEEDOR" (EN LUGAR DE "OBSERVADAS")
+  Con "Emitida desde / hasta" se elige el rango; opcionalmente, un proveedor. Por cada
+  proveedor (y moneda):
+    Facturas         las emitidas en el rango, sin las anuladas
+    Total facturado  la suma de esas facturas
+    Pagado           el total de las ya pagadas
+    Adelantos        lo adelantado a cuenta de las que siguen por pagar
+    Saldo pendiente  lo que falta de las que siguen por pagar (total − adelantos;
+                     incluye la detracción, que va al Banco de la Nación)
+  Total facturado = pagado + adelantos + saldo pendiente. Arriba, los totales del rango.
+  "Ver facturas" abre la lista de ese proveedor con el mismo rango.
+  Las facturas "observadas" (estado de la factura) siguen viéndose en "Todas".
+
+RECHAZO QUE ESPERA NOTA DE CRÉDITO: CÓMO SE ASOCIA LA NC
+  - El correo de rechazo, cuando el motivo pide NC (datos errados, importe, falta la
+    guía), ahora le pide al proveedor la nota de crédito por el total, que haga
+    referencia a la factura, y que la envíe CON SU XML.
+  - Si la NC llega al buzón con XML: el XML dice a qué factura afecta. El correo aparece
+    con el botón "Aplicar NC" y, con un clic, la factura queda anulada con el número, la
+    fecha y el importe de la nota, y sus archivos. Solo se aplica sola si la NC es por el
+    total de la factura.
+  - Si la NC llega sin XML (solo PDF): cae en Observadas y no se puede asociar sola. Se
+    asocia a mano en Facturas > "Esperan nota de crédito" > "Adjuntar NC": se sube el PDF
+    y se escribe el número. Si después llega el XML, se adjunta ahí y completa los datos.

@@ -5,6 +5,7 @@ import { AdvanceModal, CreditNoteModal, PayInvoiceModal } from "@/components/inv
 import { ImportSheetModal } from "@/components/invoices/import-sheet-modal";
 import { ImportInvoiceModal, InvoiceFormModal } from "@/components/invoices/invoice-form-modal";
 import { VerNotaCreditoModal } from "@/components/invoices/nota-credito";
+import { ResumenProveedores } from "@/components/invoices/resumen-proveedores";
 import { Badge, DueBadge, InvoiceStatusBadge, PaymentTermBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { FilterBar } from "@/components/ui/filter-bar";
@@ -22,7 +23,7 @@ import {
 import {
   archivosDeNotasCredito,
   countAwaitingCreditNote, countEmailsToReview, getClientOptions,
-  getDestinationOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters,
+  getDestinationOptions, getSupplierOptions, invoiceTotals, listInvoices, readInvoiceFilters, resumenProveedores,
 } from "@/server/invoice-queries";
 import { maxBytesFor } from "@/server/storage";
 
@@ -48,8 +49,10 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
   const cols = 9;
   const maxMb = Math.floor(maxBytesFor() / 1024 / 1024);
 
-  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, destinos, emailsToReview] = await Promise.all([
-    listInvoices(f, pageSize, offset),
+  // "Resumen por proveedor" no es una lista de facturas: es una tabla por proveedor.
+  const vistaResumen = first(sp.estado) === "RESUMEN";
+  const [{ rows, total }, totals, totalesPorEstado, esperanNC, suppliers, clients, destinos, emailsToReview, resumenProv] = await Promise.all([
+    vistaResumen ? Promise.resolve({ rows: [] as Awaited<ReturnType<typeof listInvoices>>["rows"], total: 0 }) : listInvoices(f, pageSize, offset),
     invoiceTotals(f),
     // Los mismos filtros pero sin el estado NI la espera de nota de crédito: así cada
     // pestaña muestra cuántas hay en ella y no cero por estar mirando otra.
@@ -59,6 +62,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
     getClientOptions(),
     getDestinationOptions(),
     countEmailsToReview(),
+    vistaResumen ? resumenProveedores(f) : Promise.resolve([]),
   ]);
   // En la pestaña de notas de crédito, cada fila se pinta según si ya llegó o todavía
   // falta, y la nota se abre desde la fila.
@@ -130,16 +134,28 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
         tabs={[
           { value: "PENDIENTE", label: "Pendientes de pago", count: cuentaPorEstado("PENDIENTE") },
           { value: "PAGADA", label: "Pagadas", count: cuentaPorEstado("PAGADA") },
-          { value: "OBSERVADA", label: "Observadas", count: cuentaPorEstado("OBSERVADA") },
+          { value: "RESUMEN", label: "Resumen por proveedor" },
           { value: "SIN_NC", label: "Esperan nota de crédito", count: esperanNC },
           { value: "", label: "Todas", count: todasLasFacturas },
         ]}
       />
 
+      {vistaResumen ? (
+        <FilterBar
+          filters={[
+            { type: "search", name: "proveedor", label: "Proveedor", placeholder: "Nombre o RUC del proveedor",
+              options: suppliers.map((s) => ({ value: s.id, label: s.name, hint: `RUC ${s.ruc}` })) },
+            { type: "date", name: "from", label: "Emitida desde" },
+            { type: "date", name: "to", label: "Emitida hasta" },
+          ]}
+        />
+      ) : (
       <FilterBar
         searchPlaceholder="Buscar número, proveedor, RUC o guía"
         filters={[
-          { type: "select", name: "proveedor", label: "Proveedor", options: suppliers.map((s) => ({ value: s.id, label: s.name })) },
+          // Son muchos: se busca escribiendo el nombre o el RUC, no bajando una lista.
+          { type: "search", name: "proveedor", label: "Proveedor", placeholder: "Nombre o RUC del proveedor",
+            options: suppliers.map((s) => ({ value: s.id, label: s.name, hint: `RUC ${s.ruc}` })) },
           { type: "select", name: "tipo", label: "Tipo", allLabel: "Todos", options: Object.entries(INVOICE_DOC_TYPE_LABEL).map(([value, label]) => ({ value, label })) },
           { type: "select", name: "cliente", label: "Cliente", options: clients.map((c) => ({ value: c, label: c })) },
           /* El destino es por donde se busca un flete: "las facturas de Jaén". Los filtros
@@ -151,7 +167,12 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
           { type: "date", name: "to", label: "Emitida hasta" },
         ]}
       />
+      )}
 
+      {vistaResumen ? (
+        <ResumenProveedores filas={resumenProv} desde={f.from} hasta={f.to} />
+      ) : (
+      <>
       <TableShell>
         <thead>
           <tr>
@@ -323,6 +344,8 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
       {rows.some((r) => r.isDemo) && <p className="mt-3 text-sm text-steel-500"><Badge tone="neutral">Prueba</Badge> Las facturas de prueba se borran con <code>npm run db:clear-demo</code>.</p>}
 
       <Pagination basePath="/facturas" searchParams={sp} page={page} pageSize={pageSize} total={total} />
+      </>
+      )}
     </>
   );
 }

@@ -2,8 +2,8 @@
 Buzón: los correos sin XML pasan por el monto, los archivos que faltan se dicen, al aceptar
 se le avisa al proveedor, y las notas de crédito se ven desde la lista.
 
-  - Un correo sin XML cae en "Por verificar monto" (ya no hay pestaña "Por revisar"),
-    marcado "Sin XML" y con lo que le falta: factura, XML o guía de remisión.
+  - Un correo sin XML cae en "Observadas" (no en "Por verificar monto"), marcado
+    "Sin XML" y con lo que le falta: factura, XML o guía transportista.
   - Su importe se escribe mirando el PDF y se compara con lo pactado. Recién con el monto
     conforme se puede registrar, y al registrarlo se le avisa al proveedor.
   - Al aceptar uno con XML también se le avisa. Si el correo no sale, la aceptación igual
@@ -116,11 +116,23 @@ with sync_playwright() as p:
     page.click("button[type=submit]")
     page.wait_for_url(re.compile("/dashboard"), timeout=30000)
 
-    # --- 1. El correo sin XML está en Por verificar monto ---
+    # --- 1. El correo sin XML está en Observadas, no en Por verificar monto ---
     page.goto(f"{BASE}/facturas/correos"); page.wait_for_timeout(1500)
-    check("ya no hay pestaña Por revisar", "Por revisar" not in page.locator("main").inner_text())
+    check("vuelve la pestaña Observadas", page.get_by_role("tab", name=re.compile("^Observadas")).count() == 1)
+    check("Por verificar monto queda para los que traen XML",
+          page.locator("tbody tr").filter(has_text=SIN_XML).count() == 0)
+    check("y avisa que hay correos sin XML en Observadas", "están en Observadas" in page.locator("main").inner_text())
+    fila2 = page.locator("tbody tr").filter(has_text=PROVEEDOR).filter(has_text=f"{SERIE}-{SELLO}1")
+    check("el que trae factura, XML y las dos guías no reclama nada", fila2.count() == 1 and "No se encontró" not in fila2.inner_text(),
+          fila2.inner_text() if fila2.count() else "")
+    fila30 = page.locator("tbody tr").filter(has_text=f"E001-30{SELLO}")
+    chips30 = fila30.locator("li").all_inner_texts() if fila30.count() else []
+    check("la guía del proveedor EG03-75 se reconoce por su número, y la VT01-8407 de TransJer no se pide: no falta nada",
+          fila30.count() == 1 and chips30 == [] and "No se encontró" not in fila30.inner_text(), chips30)
+
+    page.goto(f"{BASE}/facturas/correos?estado=REVISAR"); page.wait_for_timeout(1500)
     fila = page.locator("tbody tr").filter(has_text=SIN_XML)
-    check("el correo sin XML aparece en Por verificar monto", fila.count() == 1)
+    check("el correo sin XML aparece en Observadas", fila.count() == 1)
     texto = fila.inner_text() if fila.count() else ""
     check("marcado Sin XML", "Sin XML" in texto)
     faltan = fila.locator("li").all_inner_texts() if fila.count() else []
@@ -131,22 +143,11 @@ with sync_playwright() as p:
     check("con la frase completa al pasar el mouse",
           "No se encontró la guía transportista entre los archivos." in (fila.locator("[title*='guía transportista']").first.get_attribute("title") or ""))
     check("pero no la factura, que sí vino", "Factura (PDF)" not in faltan)
-    fila2 = page.locator("tbody tr").filter(has_text=PROVEEDOR).filter(has_text=f"{SERIE}-{SELLO}1")
-    check("el que trae factura, XML y las dos guías no reclama nada", fila2.count() == 1 and "No se encontró" not in fila2.inner_text(),
-          fila2.inner_text() if fila2.count() else "")
-    fila30 = page.locator("tbody tr").filter(has_text=f"E001-30{SELLO}")
-    chips30 = fila30.locator("li").all_inner_texts() if fila30.count() else []
-    check("la guía del proveedor EG03-75 se reconoce por su número, y la VT01-8407 de TransJer no se pide: no falta nada",
-          fila30.count() == 1 and chips30 == [] and "No se encontró" not in fila30.inner_text(), chips30)
     check("sin XML todavía no se puede registrar: primero el monto",
           fila.get_by_role("button", name=re.compile("^Registrar")).count() == 0)
 
+    # --- 2. Verificar el monto escribiendo el importe del PDF (en Observadas) ---
     page.goto(f"{BASE}/facturas/correos?estado=REVISAR"); page.wait_for_timeout(1300)
-    check("un enlace viejo a Por revisar muestra Por verificar monto",
-          page.locator("tbody tr").filter(has_text=SIN_XML).count() == 1)
-
-    # --- 2. Verificar el monto escribiendo el importe del PDF ---
-    page.goto(f"{BASE}/facturas/correos"); page.wait_for_timeout(1300)
     fila = page.locator("tbody tr").filter(has_text=SIN_XML)
     fila.get_by_role("button", name=re.compile("Verificar monto|Verificar el monto")).click(); page.wait_for_timeout(500)
     d = page.locator("[role=dialog]")
@@ -161,10 +162,13 @@ with sync_playwright() as p:
     check("queda conforme, con el importe escrito",
           psql(f"select amount_status || '|' || manual_amount || '|' || manual_currency from invoice_emails where id = '{sin_xml}'") == "CONFORME|1000.00|PEN")
 
-    # --- 3. Por aprobar: se registra y se avisa ---
+    # --- 3. Sigue en Observadas, ya con su importe: se registra y se avisa ---
     page.goto(f"{BASE}/facturas/correos?estado=POR_APROBAR"); page.wait_for_timeout(1300)
+    check("no se mezcla con Por aprobar", page.locator("tbody tr").filter(has_text=SIN_XML).count() == 0)
+    page.goto(f"{BASE}/facturas/correos?estado=REVISAR"); page.wait_for_timeout(1300)
     fila = page.locator("tbody tr").filter(has_text=SIN_XML)
-    check("pasa a Por aprobar, con el importe del PDF", fila.count() == 1 and "1,000.00" in fila.inner_text())
+    check("sigue en Observadas, con el importe del PDF y listo para registrar",
+          fila.count() == 1 and "1,000.00" in fila.inner_text())
     fila.get_by_role("button", name=re.compile("^Registrar")).click(); page.wait_for_timeout(600)
     d = page.locator("[role=dialog]")
     check("el total viene propuesto con IGV", d.locator("input[name=total]").input_value() == "1180.00")

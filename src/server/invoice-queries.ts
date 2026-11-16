@@ -256,6 +256,53 @@ export async function invoiceTotals(f: InvoiceFilters) {
   return rows;
 }
 
+/**
+ * El resumen por proveedor: cuánto se le facturó en el rango y en qué quedó.
+ *
+ *   facturado = pagado + adelantos + pendiente
+ *
+ *  - Facturas: las emitidas en el rango (fecha de emisión), sin las anuladas ni las notas
+ *    de crédito: una factura anulada por una NC no se debe ni se paga.
+ *  - Pagado: el total de las facturas ya pagadas.
+ *  - Adelantos: lo que ya se le adelantó a cuenta de las que siguen por pagar.
+ *  - Pendiente: lo que falta de las que siguen por pagar (total menos adelantos). Incluye
+ *    la detracción, que se deposita aparte en el Banco de la Nación.
+ *
+ * Una fila por proveedor y moneda: soles y dólares no se suman.
+ */
+export async function resumenProveedores(f: InvoiceFilters) {
+  const porPagar = sql`${supplierInvoices.status} in ('PENDIENTE','OBSERVADA')`;
+  return db.select({
+    supplierId: suppliers.id,
+    proveedor: suppliers.businessName,
+    ruc: suppliers.ruc,
+    currency: supplierInvoices.currency,
+    facturas: sql<number>`count(*)::int`,
+    pagadas: sql<number>`count(*) filter (where ${supplierInvoices.status} = 'PAGADA')::int`,
+    facturado: sql<string>`coalesce(sum(${supplierInvoices.total}), 0)::text`,
+    pagado: sql<string>`coalesce(sum(${supplierInvoices.total}) filter (where ${supplierInvoices.status} = 'PAGADA'), 0)::text`,
+    adelantos: sql<string>`coalesce(sum(coalesce(${supplierInvoices.advances}, 0)) filter (where ${porPagar}), 0)::text`,
+    pendiente: sql<string>`coalesce(sum(${supplierInvoices.total} - coalesce(${supplierInvoices.advances}, 0)) filter (where ${porPagar}), 0)::text`,
+  }).from(supplierInvoices)
+    .innerJoin(suppliers, eq(supplierInvoices.supplierId, suppliers.id))
+    .where(and(
+      invoiceConditions({ ...f, status: undefined, notasCredito: undefined, awaitingCreditNote: undefined }),
+      ne(supplierInvoices.status, "ANULADA"),
+      ne(supplierInvoices.docType, "NOTA_CREDITO"),
+    ))
+    .groupBy(suppliers.id, suppliers.businessName, suppliers.ruc, supplierInvoices.currency)
+    // Primero a quien más se le debe.
+    // (Ordenado por el número, no por el texto: "700.00" no va antes que "6226.95".)
+    .orderBy(
+      desc(sql`coalesce(sum(${supplierInvoices.total} - coalesce(${supplierInvoices.advances}, 0)) filter (where ${porPagar}), 0)`),
+      desc(sql`sum(${supplierInvoices.total})`),
+      asc(suppliers.businessName),
+    )
+    .limit(500);
+}
+
+export type ResumenProveedor = Awaited<ReturnType<typeof resumenProveedores>>[number];
+
 export async function getInvoice(id: string) {
   const [row] = await db.select(invoiceColumns)
     .from(supplierInvoices)
@@ -518,7 +565,7 @@ export type EmailFilters = {
   status?: InvoiceEmailStatus;
   /** En qué punto del filtro del monto está: lo que separa las dos primeras pestañas. */
   amount?: "POR_VERIFICAR" | "CONFORME";
-  /** Los que esperan a una persona: por aprobar, y los que llegaron sin XML legible. */
+  /** Los que esperan a una persona y trajeron su XML (los sin XML van a "Observadas"). */
   porDecidir?: boolean;
   from?: string;
   to?: string;
@@ -542,10 +589,10 @@ export function readEmailFilters(sp: SearchParamsRecord): EmailFilters {
     from: isYmd(from) ? from : undefined,
     to: isYmd(to) ? to : undefined,
   };
-  // Los que llegan sin XML (REVISAR, ERROR) siguen el mismo camino que los demás: primero
-  // el monto, después la decisión. "Por revisar" ya no es una pestaña: un enlace viejo a
-  // ella cae en "Por verificar monto", que es donde están ahora.
-  if (pestaña === "POR_VERIFICAR" || pestaña === "REVISAR") {
+  // Los que llegan sin XML (REVISAR, ERROR) tienen su pestaña, "Observadas": ahí se
+  // verifica el monto a mano y se registran. Las dos primeras quedan para los que traen
+  // XML, que el sistema lee solo.
+  if (pestaña === "POR_VERIFICAR") {
     return { ...base, porDecidir: true, amount: "POR_VERIFICAR" };
   }
   if (pestaña === "POR_APROBAR") {
@@ -560,7 +607,7 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
   // sistema no pudo leer y alguien tiene que resolver— y separarlos haría que la pestaña
   // dijera un número y la lista mostrara otro.
   const where = and(
-    f.porDecidir ? inArray(invoiceEmails.status, ["POR_APROBAR", "REVISAR", "ERROR"])
+    f.porDecidir ? eq(invoiceEmails.status, "POR_APROBAR")
       : f.status === "REVISAR" ? inArray(invoiceEmails.status, ["REVISAR", "ERROR"])
         : f.status ? eq(invoiceEmails.status, f.status) : undefined,
     f.amount === "POR_VERIFICAR" ? inArray(invoiceEmails.amountStatus, ["PENDIENTE", "OBSERVADO"])
@@ -621,11 +668,11 @@ export async function listInvoiceEmails(f: EmailFilters, limit = 20, offset = 0)
  */
 export async function emailCounts() {
   const [row] = await db.select({
-    // Los dos pasos del camino: primero el filtro del monto, después la decisión.
-    // Con o sin XML: los que llegaron sin XML también pasan por el monto.
-    porVerificar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} in ('PENDIENTE','OBSERVADO'))::int`,
-    observados: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} = 'OBSERVADO')::int`,
-    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('POR_APROBAR','REVISAR','ERROR') and ${invoiceEmails.amountStatus} = 'CONFORME')::int`,
+    // Los dos pasos del camino de los que traen XML: primero el monto, después la decisión.
+    // Los que llegaron sin XML se cuentan aparte (sinXml): son la pestaña "Observadas".
+    porVerificar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} in ('PENDIENTE','OBSERVADO'))::int`,
+    observados: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'OBSERVADO')::int`,
+    porAprobar: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR' and ${invoiceEmails.amountStatus} = 'CONFORME')::int`,
     sinXml: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,
     esperando: sql<number>`count(*) filter (where ${invoiceEmails.status} = 'POR_APROBAR')::int`,
     revisar: sql<number>`count(*) filter (where ${invoiceEmails.status} in ('REVISAR','ERROR'))::int`,

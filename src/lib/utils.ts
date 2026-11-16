@@ -251,7 +251,14 @@ export function rejectionEmailBody(datos: {
     comentario ? "" : null,
     comentario || null,
     "",
-    "Les agradeceremos corregirlo y volver a enviarlo a este mismo correo. Mientras tanto, el comprobante no queda registrado para pago.",
+    // Si el comprobante era nuestro y está mal, ya existe ante SUNAT: lo único que lo deja
+    // sin efecto es la nota de crédito. Se pide con su XML, porque el XML dice a qué
+    // factura afecta y con eso el sistema la asocia sola cuando llega.
+    ...(PIDEN_NOTA_DE_CREDITO.has(String(datos.motivo))
+      ? [
+          `Como el comprobante ya fue emitido ante SUNAT, para dejarlo sin efecto les pedimos emitir una nota de crédito por el importe total que haga referencia a ${datos.comprobante ?? "ese comprobante"}, y enviarnos a este mismo correo el PDF junto con el XML de la nota. Luego pueden enviarnos el comprobante corregido.`,
+        ]
+      : ["Les agradeceremos corregirlo y volver a enviarlo a este mismo correo. Mientras tanto, el comprobante no queda registrado para pago."]),
     "",
     "Quedamos atentos.",
     "",

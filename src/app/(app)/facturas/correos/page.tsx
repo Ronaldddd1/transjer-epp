@@ -162,10 +162,15 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         <p className="mb-3 rounded-lg border border-brand-ink/30 bg-brand-soft px-4 py-3 text-sm text-ink-800">
           <strong>{cuentas.porVerificar} comprobante(s)</strong> esperan que se verifique el monto contra lo
           pactado por el flete. Hasta que eso no pase, no se pueden aceptar.
-          {cuentas.sinXml > 0 && <> {cuentas.sinXml} llegaron sin XML: su importe se escribe mirando el PDF.</>}
           {cuentas.observados > 0 && (
             <> <strong>{cuentas.observados}</strong> de ellos ya quedaron observados por una diferencia.</>
           )}
+        </p>
+      )}
+      {cuentas.sinXml > 0 && pestaña !== "REVISAR" && (
+        <p className="mb-3 rounded-lg border border-steel-200 bg-steel-50 px-4 py-3 text-sm text-steel-700">
+          <strong>{cuentas.sinXml} correo(s)</strong> llegaron sin XML y están en <strong>Observadas</strong>: su importe
+          se escribe mirando el PDF y después se registran a mano, o se rechazan.
         </p>
       )}
       {cuentas.porAprobar > 0 && (
@@ -177,13 +182,15 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
 
       <TabLinks
         name="estado"
-        current={pestaña === "REVISAR" ? "POR_VERIFICAR" : pestaña}
+        current={pestaña === "ERROR" ? "REVISAR" : pestaña}
         base="/facturas/correos"
         params={sp}
         className="mb-3"
         tabs={[
           { value: "POR_VERIFICAR", label: "Por verificar monto", count: cuentas.porVerificar },
           { value: "POR_APROBAR", label: "Por aprobar", count: cuentas.porAprobar },
+          // Los que llegaron sin XML: el sistema no los puede leer, así que van aparte.
+          { value: "REVISAR", label: "Observadas", count: cuentas.sinXml },
           { value: "PROCESADO", label: "Aceptados", count: cuentas.aceptados },
           { value: "RECHAZADO", label: "Rechazados", count: cuentas.rechazados },
           { value: "", label: "Todos", count: cuentas.total },
@@ -217,6 +224,7 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
               colSpan={6}
               title={pestaña === "POR_VERIFICAR" ? "No hay montos por verificar"
                 : pestaña === "POR_APROBAR" ? "No hay nada esperando decisión"
+                : pestaña === "REVISAR" ? "No hay correos sin XML"
                 : "No hay correos para mostrar"}
               hint={!status.configured
                 ? "Esta bandeja se llena cuando se conecta el buzón de correo."
@@ -409,8 +417,8 @@ export default async function MailboxPage({ searchParams }: { searchParams: Sear
         El camino es: se verifica el monto contra lo pactado, después se acepta o se rechaza, y lo
         aceptado pasa a facturas por pagar ·{" "}
         {EMAIL_STATUS_LABEL.POR_APROBAR}: el comprobante se leyó y espera decisión ·{" "}
-        {EMAIL_STATUS_LABEL.REVISAR}: llegó sin XML legible; el importe se escribe mirando el PDF y después se
-        registra a mano o se rechaza ·{" "}
+        Observadas ({EMAIL_STATUS_LABEL.REVISAR}): llegó sin XML legible; el importe se escribe mirando el PDF y
+        después se registra a mano o se rechaza ·{" "}
         {EMAIL_STATUS_LABEL.DESCARTADO}: no era una factura por pagar, o ya estaba registrada (sin avisar al proveedor).
       </p>
 

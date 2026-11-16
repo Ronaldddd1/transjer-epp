@@ -10,7 +10,94 @@ import { controlClass } from "./field";
 
 export type FilterDef =
   | { type: "select"; name: string; label: string; options: { value: string; label: string }[]; allLabel?: string }
+  /**
+   * Una lista larga (los proveedores) que se busca escribiendo: por nombre o por lo que
+   * diga `hint` (el RUC). Elegir una opción filtra igual que el select.
+   */
+  | { type: "search"; name: string; label: string; options: { value: string; label: string; hint?: string }[]; placeholder?: string }
   | { type: "date"; name: string; label: string };
+
+const sinTildes = (v: string) => v.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+
+/** El buscador de una opción: escribe, aparecen las que coinciden, elige una. */
+function ComboFiltro({ def, value, onChange }: {
+  def: Extract<FilterDef, { type: "search" }>;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const elegida = def.options.find((o) => o.value === value);
+  const [texto, setTexto] = useState("");
+  const [abierto, setAbierto] = useState(false);
+  const [activo, setActivo] = useState(0);
+  const listaId = `combo-${def.name}`;
+  const buscado = sinTildes(texto.trim());
+  const coinciden = buscado
+    ? def.options.filter((o) => sinTildes(`${o.label} ${o.hint ?? ""}`).includes(buscado)).slice(0, 12)
+    : def.options.slice(0, 12);
+
+  const elegir = (v: string) => {
+    onChange(v);
+    setTexto("");
+    setAbierto(false);
+  };
+
+  return (
+    <div className="relative min-w-[16rem]">
+      <input
+        type="text"
+        role="combobox"
+        aria-expanded={abierto}
+        aria-controls={listaId}
+        aria-autocomplete="list"
+        aria-label={def.label}
+        value={abierto ? texto : elegida?.label ?? ""}
+        placeholder={def.placeholder ?? "Escribe para buscar"}
+        onFocus={() => { setAbierto(true); setTexto(""); setActivo(0); }}
+        onBlur={() => setTimeout(() => setAbierto(false), 150)}
+        onChange={(e) => { setTexto(e.target.value); setAbierto(true); setActivo(0); }}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") { e.preventDefault(); setActivo((i) => Math.min(i + 1, coinciden.length - 1)); }
+          else if (e.key === "ArrowUp") { e.preventDefault(); setActivo((i) => Math.max(i - 1, 0)); }
+          else if (e.key === "Enter" && coinciden[activo]) { e.preventDefault(); elegir(coinciden[activo].value); (e.target as HTMLInputElement).blur(); }
+          else if (e.key === "Escape") { setAbierto(false); (e.target as HTMLInputElement).blur(); }
+        }}
+        className={cn(controlClass, "h-10 pr-8 text-sm", elegida && !abierto && "font-medium text-ink")}
+      />
+      {elegida && !abierto && (
+        <button
+          type="button"
+          onClick={() => onChange("")}
+          aria-label={`Quitar ${def.label.toLowerCase()}`}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-steel-400 hover:text-ink"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
+      {abierto && (
+        <ul
+          id={listaId}
+          role="listbox"
+          className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-auto rounded-md border border-steel-200 bg-white py-1 text-sm shadow-lg"
+        >
+          {coinciden.length === 0 && <li className="px-3 py-2 text-steel-500">Ninguno coincide con «{texto}»</li>}
+          {coinciden.map((o, i) => (
+            <li
+              key={o.value}
+              role="option"
+              aria-selected={i === activo}
+              onMouseDown={(e) => { e.preventDefault(); elegir(o.value); }}
+              onMouseEnter={() => setActivo(i)}
+              className={cn("cursor-pointer px-3 py-1.5", i === activo && "bg-steel-100")}
+            >
+              <span className="block font-medium text-ink">{o.label}</span>
+              {o.hint && <span className="block text-xs text-steel-500">{o.hint}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 /**
  * Estado de navegación de la barra. Vive fuera del componente para que sobreviva si Next
@@ -132,7 +219,9 @@ export function FilterBar({ searchPlaceholder, filters = [], className }: { sear
         {filters.map((f) => (
           <label key={f.name} className="flex flex-col gap-1 text-xs font-medium text-steel-500">
             {f.label}
-            {f.type === "select" ? (
+            {f.type === "search" ? (
+              <ComboFiltro def={f} value={values.get(f.name) ?? ""} onChange={(v) => update({ [f.name]: v })} />
+            ) : f.type === "select" ? (
               <select
                 value={values.get(f.name) ?? ""}
                 onChange={(e) => update({ [f.name]: e.target.value })}

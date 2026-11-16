@@ -351,7 +351,11 @@ with sync_playwright() as p:
     page.fill("input[name=emergencyContactPhone]", "987654321")
     page.fill("input[name=emergencyContactRelation]", "Esposa")
     page.get_by_role("button", name="Guardar cambios").click()
-    page.wait_for_timeout(2600)
+    try:
+        page.wait_for_selector("div.fixed.inset-0.z-50", state="detached", timeout=15000)
+    except Exception:
+        print("     (el formulario no se cerró:", page.locator("[role=dialog]").inner_text()[-300:], ")")
+    page.wait_for_timeout(500)
     guardado = psql(f"select coalesce(address,'-') || '|' || coalesce(emergency_contact_name,'-') || '|' || "
                     f"coalesce(emergency_contact_relation,'-') from employees where id='{ana_id}'")
     check("la dirección y el contacto de emergencia se guardan",
