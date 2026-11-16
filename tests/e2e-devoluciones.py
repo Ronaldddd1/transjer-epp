@@ -279,15 +279,84 @@ def main():
         check("y esa hoja nombra el EPP del trabajador de prueba",
               any(nombres[0] == t for t in textos), nombres[0])
 
-        # --- Anular el cese ---
+        # --- Anular el cese: REINGRESO (se fue, devolvió, y vuelve) ---
+        # El cese y las devoluciones pasan a unos días atrás, como en la vida real.
+        ejecutar(f"update employees set terminated_at = current_date - 5 where id = '{emp}'")
+        ejecutar(f"update epp_returns set return_date = current_date - 4 where employee_id = '{emp}'")
+        cese_viejo = psql("select to_char(current_date - 5, 'DD/MM/YYYY')")
+        lote_viejo = psql(f"select batch_id from epp_returns where employee_id = '{emp}' order by created_at limit 1")
         page.goto(f"{BASE}/trabajadores/{emp}"); page.wait_for_timeout(900)
         page.click("button:has-text('Anular cese')"); page.wait_for_timeout(500)
-        boton_modal(page, "Anular el cese").click()
-        page.wait_for_timeout(2000)
-        check("el cese se puede anular", psql(f"select terminated_at is null from employees where id = '{emp}'") == "t")
-        check("y el trabajador vuelve a estar activo", psql(f"select active from employees where id = '{emp}'") == "t")
-        check("las devoluciones registradas se conservan",
+        boton_modal(page, "Anular el cese").click(); page.wait_for_timeout(1200)
+        check("pregunta qué pasó antes de anular", "Elige qué pasó" in page.content())
+        page.locator("div.fixed.inset-0.z-50 label", has_text="Regresa a trabajar").click()
+        page.locator("#rehiredAt").fill(cese_viejo)
+        boton_modal(page, "Reincorporar").click(); page.wait_for_timeout(1500)
+        check("el reingreso no puede ser el mismo día del cese", "después del cese" in page.content())
+        reingreso = psql("select to_char(current_date - 2, 'DD/MM/YYYY')")
+        page.locator("#rehiredAt").fill(reingreso)
+        enviar(page, "Reincorporar")
+        fila = psql(f"select active, terminated_at is null, hire_date = current_date - 2 from employees where id = '{emp}'")
+        check("reincorporado: activo, sin cese y con la nueva fecha de ingreso", fila == "t|t|t", fila)
+        periodo = psql(f"select hire_date || '|' || terminated_at || '|' || (rehired_at = current_date - 2) "
+                       f"from employment_periods where employee_id = '{emp}'")
+        check("el periodo anterior queda guardado", periodo.startswith("2026-01-02|") and periodo.endswith("|true"), periodo)
+        check("lo que devolvió sigue devuelto", int(psql(f"select count(*) from epp_returns where employee_id = '{emp}'")) == 2)
+        page.goto(f"{BASE}/trabajadores/{emp}"); page.wait_for_timeout(900)
+        check("la ficha muestra los periodos anteriores", "Periodos anteriores" in page.content() and "Reingresó el" in page.content())
+        check("y no le reclama nada", page.locator("button:has-text('Anular cese')").count() == 0)
+        r = page.evaluate("async (u) => { const r = await fetch(u); return new Uint8Array(await r.arrayBuffer()); }",
+                          f"/api/epp/devolucion/{emp}?lote={lote_viejo}")
+        acta_vieja = bytes(r.values()) if isinstance(r, dict) else bytes(r)
+        check("el acta del cese anterior sigue diciendo su fecha de cese", cese_viejo.encode() in acta_vieja)
+
+        # --- Una devolución completa dice COMPLETA ---
+        admin = psql("select id from users order by created_at limit 1")
+        pid = productos[0]
+        ejecutar(
+            "insert into inventory_movements (product_id, type, quantity, stock_before, stock_after, reason, user_id, employee_id) "
+            f"select '{pid}', 'SALIDA', 1, stock, stock - 1, 'PRUEBA E2E entrega 2', '{admin}', '{emp}' from products where id = '{pid}'")
+        ejecutar(f"update products set stock = stock - 1 where id = '{pid}'")
+        ejecutar(
+            "insert into epp_deliveries (employee_id, product_id, movement_id, quantity, size, unit_price, delivery_date, reason, user_id) "
+            f"select '{emp}', '{pid}', m.id, 1, p.size, 25, current_date - 1, 'PRUEBA E2E entrega 2', '{admin}' "
+            f"from inventory_movements m join products p on p.id = m.product_id "
+            f"where m.reason = 'PRUEBA E2E entrega 2' and m.employee_id = '{emp}' limit 1")
+        page.goto(f"{BASE}/trabajadores/{emp}"); page.wait_for_timeout(900)
+        page.click("button:has-text('Registrar cese')"); page.wait_for_timeout(600)
+        enviar(page, "Registrar cese")
+        page.click("button:has-text('Registrar devolución')"); page.wait_for_timeout(600)
+        check("el modal dice devolución completa", "Devolución completa" in page.locator("[data-testid=tipo-devolucion]").inner_text())
+        boton_modal(page, "Registrar devolución").click()
+        page.wait_for_selector("[data-testid=form-listo]", timeout=15000)
+        with page.expect_download() as bajada:
+            page.click("a:has-text('Descargar acta de devolución')")
+        pdf = open(bajada.value.path(), "rb").read()
+        check("y el acta también dice COMPLETA", b"N COMPLETA" in pdf and b"N PARCIAL" not in pdf)
+        check("con el archivo llamado completa", "completa" in bajada.value.suggested_filename, bajada.value.suggested_filename)
+        boton_modal(page, "Cerrar").click(); page.wait_for_timeout(600)
+
+        # --- Anular el cese: ERROR (nunca se fue) y deshacer la devolución ---
+        stock_antes = int(psql(f"select stock from products where id = '{pid}'"))
+        page.goto(f"{BASE}/trabajadores/{emp}"); page.wait_for_timeout(900)
+        page.click("button:has-text('Anular cese')"); page.wait_for_timeout(500)
+        page.locator("div.fixed.inset-0.z-50 label", has_text="El cese fue un error").click()
+        casilla = page.locator("input[name=deshacerDevoluciones]")
+        check("ofrece deshacer la devolución hecha por el cese, marcada", casilla.count() == 1 and casilla.is_checked())
+        check("y dice cuántas unidades", "(1 unidad(es))" in page.content())
+        enviar(page, "Anular el cese")
+        fila = psql(f"select active, terminated_at is null, hire_date = current_date - 2 from employees where id = '{emp}'")
+        check("cese anulado sin tocar la fecha de ingreso", fila == "t|t|t", fila)
+        check("la devolución del cese se deshizo (las del periodo anterior no)",
               int(psql(f"select count(*) from epp_returns where employee_id = '{emp}'")) == 2)
+        pendiente = psql(f"select (select coalesce(sum(quantity),0) from epp_deliveries where employee_id = '{emp}' and voided_at is null)"
+                         f" - (select coalesce(sum(quantity),0) from epp_returns where employee_id = '{emp}')")
+        check("el EPP volvió a su cargo", pendiente == "1", pendiente)
+        stock_despues = int(psql(f"select stock from products where id = '{pid}'"))
+        check("y lo que había vuelto al stock salió otra vez", stock_despues == stock_antes - 1, f"{stock_antes} → {stock_despues}")
+        check("queda el movimiento en el kárdex",
+              psql(f"select count(*) from inventory_movements where employee_id = '{emp}' and reason like 'Anulación de devolución%'") == "1")
+        ejecutar(f"delete from employment_periods where employee_id = '{emp}'")
 
         check("ninguna pantalla lanzó errores de JavaScript", not errores, errores[:3])
         ctx.close(); nav.close()

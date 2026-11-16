@@ -140,7 +140,7 @@ export default async function AsistenciaPage({ searchParams }: { searchParams: S
             </p>
           ) : (
             // Una lista nueva por día y por filtro: reutilizar la anterior arrastraba sus marcas.
-            <AttendanceSheet key={`${dia}|${f.q ?? ""}|${f.area ?? ""}`} dia={dia} filas={filas} puedeMarcar={puedeMarcar} />
+            <AttendanceSheet key={`${dia}|${f.q ?? ""}|${f.area ?? ""}`} dia={dia} filas={filas} puedeMarcar={puedeMarcar} puedeReabrir={can(user, "attendance.reopen")} />
           )}
         </div>
       </section>

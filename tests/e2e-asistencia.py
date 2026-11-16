@@ -187,6 +187,42 @@ with sync_playwright() as p:
     check("y dice por qué", "ya está cerrada" in page.locator("body").inner_text())
     page.reload(); page.wait_for_timeout(1500)
 
+    # --- Un error en un día cerrado: el administrador reabre el día con un motivo ---
+    hoy_sql = "((now() at time zone 'America/Lima')::date)"
+    reabrir = page.get_by_role("button", name="Reabrir para corregir")
+    check("con marcas cerradas, el administrador ve «Reabrir para corregir»", reabrir.count() == 1)
+    reabrir.click(); page.wait_for_timeout(500)
+    modal = page.get_by_role("dialog")
+    modal.get_by_role("button", name="Reabrir para corregir").click(); page.wait_for_timeout(1200)
+    check("sin motivo no se reabre", "Escribe qué hay que corregir" in modal.inner_text())
+    modal.locator("textarea[name=motivo]").fill("Beto faltó y se le marcó que vino (prueba)")
+    modal.get_by_role("button", name="Reabrir para corregir").click()
+    page.wait_for_selector("div.fixed.inset-0.z-50", state="detached", timeout=15000)
+    page.wait_for_timeout(1500)
+    check("queda guardado quién lo reabrió y por qué",
+          psql("select count(*) from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and a.day={hoy_sql} and a.reopened_at is not null "
+               "and a.reopened_by is not null and a.reopen_reason like 'Beto faltó%'") == "2")
+    check("y en la auditoría", psql("select count(*) from audit_logs where action = 'REABRIR' "
+                                    "and description like '%Beto faltó y se le marcó que vino (prueba)%'") != "0")
+    check("la pantalla dice que el día está reabierto, por quién y hasta cuándo",
+          page.locator("[data-testid=dia-reabierto]").count() == 1
+          and "Se puede corregir hasta" in page.locator("[data-testid=dia-reabierto]").inner_text())
+    fila_beto = page.get_by_role("row").filter(has_text="Beto").filter(has=page.get_by_role("button", name="Vino"))
+    fila_beto.get_by_role("button", name="Faltó").click()
+    page.wait_for_timeout(300)
+    page.get_by_role("button", name=re.compile("Guardar la lista")).first.click()
+    page.wait_for_timeout(2400)
+    check("ahora sí se corrige la marca",
+          psql("select a.status from attendance a join employees e on e.id=a.employee_id "
+               f"where e.area='{AREA}' and e.first_name='Beto' and a.day={hoy_sql}") == "FALTA")
+    # Pasadas 24 horas desde la reapertura, se vuelve a cerrar.
+    ejecutar("update attendance a set reopened_at = now() - interval '25 hours' from employees e "
+             f"where e.id = a.employee_id and e.area = '{AREA}' and a.day = {hoy_sql}")
+    page.reload(); page.wait_for_timeout(1500)
+    fila_beto = page.get_by_role("row").filter(has_text="Beto").filter(has=page.get_by_role("button", name="Vino"))
+    check("y a las 24 horas de reabierto se vuelve a cerrar", fila_beto.get_by_role("button", name="Vino").is_disabled())
+
     # --- Un día anterior ---
     page.goto(f"{BASE}/asistencia?dia={ayer}&area={AREA.replace(' ', '+')}")
     page.wait_for_timeout(1700)

@@ -1,7 +1,7 @@
 import "server-only";
-import { and, asc, eq, isNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
-import { employees, eppDeliveries, eppReturns, products, users } from "@/db/schema";
+import { employees, employmentPeriods, eppDeliveries, eppReturns, products, users } from "@/db/schema";
 import type { DatosCargo, DatosDevolucion, Empresa, LineaEpp, Trabajador } from "./actas-epp-pdf";
 import { employeeHoldings } from "./queries";
 
@@ -32,14 +32,21 @@ export function empresa(): Empresa {
   };
 }
 
-async function trabajador(id: string): Promise<Trabajador | null> {
+async function trabajador(id: string, fecha?: string): Promise<Trabajador | null> {
   if (!esUuid(id)) return null;
   const [e] = await db.select().from(employees).where(eq(employees.id, id));
   if (!e) return null;
-  return {
+  const t = {
     nombre: `${e.firstName} ${e.lastName}`.toUpperCase(),
     dni: e.dni, cargo: e.position, area: e.area, ingreso: e.hireDate, cese: e.terminatedAt,
   };
+  if (!fecha) return t;
+  // Un papel de un periodo anterior (se fue y volvió) lleva el ingreso y el cese de ese
+  // periodo, no los de ahora: es el primer periodo que terminó en un reingreso posterior.
+  const [periodo] = await db.select().from(employmentPeriods)
+    .where(and(eq(employmentPeriods.employeeId, id), sql`${employmentPeriods.rehiredAt} > ${fecha}`))
+    .orderBy(asc(employmentPeriods.rehiredAt)).limit(1);
+  return periodo ? { ...t, ingreso: periodo.hireDate, cese: periodo.terminatedAt } : t;
 }
 
 const numero = (prefijo: string, id: string | null, ymd: string) =>
@@ -96,7 +103,7 @@ export async function datosCargo(employeeId: string, sel: Seleccion, hoy: string
 
   const primera = filas[0];
   return {
-    empresa: empresa(), trabajador: t,
+    empresa: empresa(), trabajador: (await trabajador(employeeId, primera.fecha)) ?? t,
     numero: numero("CE", sel.lote ?? primera.id, primera.fecha),
     fecha: primera.fecha,
     motivo: unicos(filas.map((f) => f.motivo)),
@@ -132,7 +139,6 @@ export async function datosDevolucion(employeeId: string, sel: Seleccion): Promi
     codigo: products.code,
     descripcion: products.name,
     responsable: users.name,
-    creado: eppReturns.createdAt,
   }).from(eppReturns)
     .innerJoin(products, eq(products.id, eppReturns.productId))
     .innerJoin(users, eq(users.id, eppReturns.userId))
@@ -146,7 +152,11 @@ export async function datosDevolucion(employeeId: string, sel: Seleccion): Promi
   // Lo que quedaba a su cargo al terminar esta devolución: lo entregado hasta ese momento
   // menos lo devuelto hasta ese momento. Así el acta vieja sigue diciendo lo mismo aunque
   // después haya devuelto el resto.
-  const corte = filas.reduce((m, f) => (f.creado > m ? f.creado : m), filas[0].creado);
+  // El corte se calcula en la base: la hora guardada tiene microsegundos y un Date de
+  // JavaScript solo milisegundos. Compararla aquí dejaba afuera la propia devolución, y
+  // toda acta salía parcial.
+  const ids = filas.map((f) => f.id);
+  const corte = sql`(select max(r.created_at) from epp_returns r where r.id in (${sql.join(ids.map((i) => sql`${i}::uuid`), sql`, `)}))`;
   const [entregado, devuelto] = await Promise.all([
     db.select({
       productId: products.id, codigo: products.code, descripcion: products.name, talla: products.size,
@@ -154,11 +164,11 @@ export async function datosDevolucion(employeeId: string, sel: Seleccion): Promi
       precio: sql<string | null>`coalesce(max(${eppDeliveries.unitPrice}), ${products.unitPrice})::text`,
     }).from(eppDeliveries)
       .innerJoin(products, eq(products.id, eppDeliveries.productId))
-      .where(and(eq(eppDeliveries.employeeId, employeeId), isNull(eppDeliveries.voidedAt), lte(eppDeliveries.createdAt, corte)))
+      .where(and(eq(eppDeliveries.employeeId, employeeId), isNull(eppDeliveries.voidedAt), sql`${eppDeliveries.createdAt} <= ${corte}`))
       .groupBy(products.id, products.code, products.name, products.size, products.unitPrice),
     db.select({ productId: eppReturns.productId, cantidad: sql<number>`sum(${eppReturns.quantity})::int` })
       .from(eppReturns)
-      .where(and(eq(eppReturns.employeeId, employeeId), lte(eppReturns.createdAt, corte)))
+      .where(and(eq(eppReturns.employeeId, employeeId), sql`${eppReturns.createdAt} <= ${corte}`))
       .groupBy(eppReturns.productId),
   ]);
   const yaDevuelto = new Map(devuelto.map((d) => [d.productId, d.cantidad]));
@@ -173,7 +183,7 @@ export async function datosDevolucion(employeeId: string, sel: Seleccion): Promi
 
   const primera = filas[0];
   return {
-    empresa: empresa(), trabajador: t,
+    empresa: empresa(), trabajador: (await trabajador(employeeId, primera.fecha)) ?? t,
     numero: numero("DV", sel.lote ?? primera.id, primera.fecha),
     fecha: primera.fecha,
     motivo: unicos(filas.map((f) => f.motivo)),

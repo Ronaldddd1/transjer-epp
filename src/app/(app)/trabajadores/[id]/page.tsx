@@ -19,7 +19,8 @@ import { cn, documentStatus, formatDate, formatMoney, todayLima } from "@/lib/ut
 import { listDocumentsFor } from "@/server/document-queries";
 import { attendanceFor } from "@/server/attendance-queries";
 import {
-  employeeHoldings, getEmployee, getEmployeeOptions, getProductOptions, listDeliveries, listReturns,
+  devueltoDesde, employeeHoldings, getEmployee, getEmployeeOptions, getProductOptions, listDeliveries, listReturns,
+  periodosLaborales,
 } from "@/server/queries";
 
 export const metadata: Metadata = { title: "Historial del trabajador" };
@@ -34,7 +35,7 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
   // Quien no tiene acceso a documentos no ve la sección, igual que no ve el menú.
   const verDocumentos = can(user, "documents.view");
   const verAsistencia = can(user, "attendance.view");
-  const [{ rows }, holdings, devoluciones, products, employees, documentos, asistencia] = await Promise.all([
+  const [{ rows }, holdings, devoluciones, products, employees, documentos, asistencia, periodos, devueltoCese] = await Promise.all([
     listDeliveries({ employeeId: id }),
     employeeHoldings(id),
     listReturns({ employeeId: id }),
@@ -42,6 +43,8 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
     canDeliver ? getEmployeeOptions() : Promise.resolve([]),
     verDocumentos ? listDocumentsFor({ employeeId: id }) : Promise.resolve([]),
     verAsistencia ? attendanceFor(id, 60) : Promise.resolve([]),
+    periodosLaborales(id),
+    employee.terminatedAt ? devueltoDesde(id, employee.terminatedAt) : Promise.resolve(0),
   ]);
   const docsVencidos = documentos.filter((d) => documentStatus(d.expiresAt) === "VENCIDO");
   const canVoid = can(user, "deliveries.void");
@@ -117,7 +120,10 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
             />
           )}
           {canManage && employee.terminatedAt && (
-            <ReinstateButton employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }} />
+            <ReinstateButton
+              employee={{ id: employee.id, name: `${employee.firstName} ${employee.lastName}`, terminatedAt: employee.terminatedAt }}
+              devueltoDesdeCese={devueltoCese}
+            />
           )}
           {verPapeles && unidadesPendientes > 0 && (
             <a
@@ -290,6 +296,22 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
               <p className="border-t border-steel-100 px-4 py-2 text-xs text-steel-500">
                 Lo registrado en los últimos días. Los días sin registrar no cuentan.
               </p>
+            </Panel>
+          )}
+
+          {periodos.length > 0 && (
+            <Panel title="Periodos anteriores">
+              <ul className="divide-y divide-steel-100">
+                {periodos.map((p) => (
+                  <li key={p.id} className="px-4 py-2.5 text-sm">
+                    <p>
+                      Ingresó el {p.hireDate ? formatDate(p.hireDate) : "—"} · cesó el {formatDate(p.terminatedAt)}
+                      {p.terminationReason && <span className="text-steel-500"> ({p.terminationReason})</span>}
+                    </p>
+                    <p className="text-xs text-steel-500">Reingresó el {formatDate(p.rehiredAt)}</p>
+                  </li>
+                ))}
+              </ul>
             </Panel>
           )}
 

@@ -1,12 +1,13 @@
 "use client";
 
-import { Check, CircleSlash, FileText, Loader2, Lock, X } from "lucide-react";
+import { Check, CircleSlash, FileText, Loader2, Lock, LockOpen, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { saveAttendance } from "@/actions/attendance";
 import { Button } from "@/components/ui/button";
 import { TableShell, Td, Th, Tr } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { ReabrirDia } from "./reabrir-dia";
 import { cn, formatDate } from "@/lib/utils";
 
 export type FilaAsistencia = {
@@ -23,6 +24,9 @@ export type FilaAsistencia = {
   bloqueado: boolean;
   /** Hasta cuándo se puede corregir, "DD/MM HH:MI" en hora de Lima; null si no hay marca. */
   editableHasta: string | null;
+  /** Si el día se reabrió para corregir: quién y por qué. */
+  reabiertoPor?: string | null;
+  motivoReapertura?: string | null;
 };
 
 type Estado = "PRESENTE" | "FALTA" | "JUSTIFICADO";
@@ -49,10 +53,12 @@ const BOTONES: { valor: Estado; etiqueta: string; icono: typeof Check; activo: s
  * La pantalla monta una lista nueva por cada día (key={dia}): si se reutilizara, al pasar
  * a un día sin registrar seguiría mostrando lo marcado en el anterior.
  */
-export function AttendanceSheet({ dia, filas, puedeMarcar }: {
+export function AttendanceSheet({ dia, filas, puedeMarcar, puedeReabrir = false }: {
   dia: string;
   filas: FilaAsistencia[];
   puedeMarcar: boolean;
+  /** Puede reabrir un día cerrado para corregir un error (permiso attendance.reopen). */
+  puedeReabrir?: boolean;
 }) {
   const [marcas, setMarcas] = useState<Record<string, Estado | null>>(
     () => Object.fromEntries(filas.map((f) => [f.employeeId, f.status])),
@@ -130,6 +136,8 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
     });
   const hayParaMarcar = filas.some((f) => !f.bloqueado && !marcas[f.employeeId]);
   const cerradas = filas.filter((f) => f.bloqueado).length;
+  // La reapertura vigente (si hay): la de alguna marca que todavía se puede corregir.
+  const reabierta = filas.find((f) => f.motivoReapertura && !f.bloqueado);
 
   const guardar = () => {
     const fd = new FormData();
@@ -196,12 +204,26 @@ export function AttendanceSheet({ dia, filas, puedeMarcar }: {
       </div>
 
       {cerradas > 0 && (
-        <p className="mb-3 flex items-start gap-2 rounded-lg border border-steel-200 bg-steel-50 px-4 py-2.5 text-sm text-steel-600">
-          <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-steel-200 bg-steel-50 px-4 py-2.5 text-sm text-steel-600">
+          <p className="flex items-start gap-2">
+            <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+            <span>
+              {cerradas === filas.length
+                ? "La asistencia de este día está cerrada: se guardó hace más de un día y ya no se puede cambiar."
+                : `${cerradas} marca(s) de este día están cerradas porque se guardaron hace más de un día. A los que siguen sin marcar sí se los puede registrar.`}
+              {!puedeReabrir && " Si hay un error, pide a un administrador que reabra el día."}
+            </span>
+          </p>
+          {puedeReabrir && <ReabrirDia dia={dia} cerradas={cerradas} />}
+        </div>
+      )}
+
+      {reabierta && (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border border-brand/60 bg-brand-soft px-4 py-2.5 text-sm text-[#7A5A00]" data-testid="dia-reabierto">
+          <LockOpen className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
           <span>
-            {cerradas === filas.length
-              ? "La asistencia de este día está cerrada: se guardó hace más de un día y ya no se puede cambiar."
-              : `${cerradas} marca(s) de este día están cerradas porque se guardaron hace más de un día. A los que siguen sin marcar sí se los puede registrar.`}
+            Día reabierto por {reabierta.reabiertoPor ?? "un administrador"} para corregir: «{reabierta.motivoReapertura}».
+            Se puede corregir hasta el {reabierta.editableHasta}.
           </span>
         </p>
       )}

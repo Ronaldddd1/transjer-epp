@@ -179,6 +179,13 @@ export const attendance = pgTable("attendance", {
   /** En qué se ocupó el día que vino. Obligatoria en los presentes, vacía en el resto. */
   activity: varchar("activity", { length: 250 }),
   recordedBy: uuid("recorded_by").references(() => users.id),
+  /**
+   * Si el día se reabrió para corregir un error: desde aquí corren otra vez las 24 horas
+   * para cambiarla (en vez de desde que se guardó). Quién, cuándo y por qué.
+   */
+  reopenedAt: timestamp("reopened_at", { withTimezone: true }),
+  reopenedBy: uuid("reopened_by").references(() => users.id, { onDelete: "set null" }),
+  reopenReason: varchar("reopen_reason", { length: 200 }),
   ...timestamps,
 }, (t) => [
   // Un trabajador tiene una sola asistencia por día: volver a marcarlo corrige la que hay.
@@ -205,6 +212,23 @@ export const inventoryMovements = pgTable("inventory_movements", {
   index("movements_type_date_idx").on(t.type, t.createdAt),
   index("movements_user_idx").on(t.userId),
   index("movements_date_idx").on(t.createdAt),
+]);
+
+/**
+ * Los periodos anteriores de quien cesó y volvió a trabajar: al reincorporarlo, el
+ * periodo que terminó con el cese se guarda aquí y la ficha toma la nueva fecha de ingreso.
+ */
+export const employmentPeriods = pgTable("employment_periods", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  employeeId: uuid("employee_id").notNull().references(() => employees.id, { onDelete: "cascade" }),
+  hireDate: date("hire_date"),
+  terminatedAt: date("terminated_at").notNull(),
+  terminationReason: varchar("termination_reason", { length: 160 }),
+  rehiredAt: date("rehired_at").notNull(),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("employment_periods_employee_idx").on(t.employeeId, t.terminatedAt),
 ]);
 
 export const eppDeliveries = pgTable("epp_deliveries", {

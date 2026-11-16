@@ -202,8 +202,8 @@ with sync_playwright() as p:
     dialogo.locator("input[name=email]").fill(f"{NUEVO_USUARIO}@transjer.test")
     dialogo.locator("input[name=password]").fill("Flota12345")
     check("el formulario muestra la grilla de módulos", "Módulos a los que entra" in dialogo.inner_text())
-    dialogo.get_by_role("radiogroup", name="Salidas y liquidación").get_by_text("Ver y editar").click()
-    dialogo.get_by_role("radiogroup", name="Asistencia").get_by_text("Solo ver").click()
+    dialogo.get_by_role("radiogroup", name="Salidas y liquidación", exact=True).get_by_text("Ver y editar").click()
+    dialogo.get_by_role("radiogroup", name="Asistencia", exact=True).get_by_text("Solo ver").click()
     dialogo.get_by_role("button", name="Crear usuario").click()
     page.wait_for_timeout(2500)
     accesos = psql(f"select role || '|' || coalesce(module_access::text, '') from users where username = '{NUEVO_USUARIO}'")
@@ -233,10 +233,10 @@ with sync_playwright() as p:
     page.get_by_role("row").filter(has_text=f"finanzas_e2e{SELLO}").get_by_role("button", name="Editar").click()
     page.wait_for_timeout(700)
     dialogo = page.locator("[role=dialog]")
-    facturas = dialogo.get_by_role("radiogroup", name="Facturas y calendario de pagos")
+    facturas = dialogo.get_by_role("radiogroup", name="Facturas y calendario de pagos", exact=True)
     check("al editar a alguien con rol, la grilla trae lo que el rol le daba",
           facturas.locator("input[value=edit]").is_checked()
-          and dialogo.get_by_role("radiogroup", name="Asistencia").locator("input[value=none]").is_checked())
+          and dialogo.get_by_role("radiogroup", name="Asistencia", exact=True).locator("input[value=none]").is_checked())
     dialogo.get_by_role("button", name="Guardar cambios").click(); page.wait_for_timeout(2200)
     check("al guardar pasa a accesos por módulo sin perder lo que tenía",
           psql(f"select role || '|' || (module_access->>'facturas') || '|' || (module_access->>'obligaciones') "

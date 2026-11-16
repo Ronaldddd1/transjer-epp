@@ -27,6 +27,10 @@ export const PERMISSIONS = [
   // La asistencia diaria. Va aparte de employees.manage porque marcar quién vino es una
   // tarea de todos los días, y editar la ficha de un trabajador no lo es.
   "attendance.view", "attendance.manage",
+  // Reabrir un día de asistencia ya cerrado para corregir un error. Va aparte: cerrar las
+  // marcas a las 24 horas es justamente para que no se cambien después, así que la
+  // excepción la decide quien supervisa (por defecto, el administrador).
+  "attendance.reopen",
   // El directorio de clientes de provincia. Lo consulta y lo mantiene todo el mundo: es
   // una agenda de trabajo, no un dato reservado, y el que coordina un viaje puede ser
   // cualquiera de los que están ese día.
@@ -159,6 +163,10 @@ export const MODULOS: readonly ModuloSistema[] = [
     ver: ["deliveries.view"], editar: ["deliveries.create", "deliveries.void"] },
   { key: "asistencia", label: "Asistencia", seccion: "Recursos Humanos",
     ver: ["attendance.view"], editar: ["attendance.manage"] },
+  // Reabrir un día ya cerrado no tiene vista propia: o se puede o no. Por defecto, solo
+  // el administrador; se le puede dar a quien supervise la asistencia.
+  { key: "asistenciaReabrir", label: "Reabrir asistencia cerrada", seccion: "Recursos Humanos",
+    ver: [], editar: ["attendance.reopen"] },
   { key: "trabajadores", label: "Trabajadores", seccion: "Recursos Humanos",
     ver: ["employees.view"], editar: ["employees.manage"] },
   { key: "salidas", label: "Salidas y liquidación", seccion: "Flota",

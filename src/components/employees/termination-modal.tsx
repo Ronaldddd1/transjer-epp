@@ -1,14 +1,14 @@
 "use client";
 
 import { UserMinus, UserPlus } from "lucide-react";
+import { useState } from "react";
 import { reinstateEmployee, terminateEmployee } from "@/actions/returns";
 import { Button } from "@/components/ui/button";
-import { ConfirmButton } from "@/components/ui/confirm-button";
 import { DateInput } from "@/components/ui/date-field";
 import { Field, Input } from "@/components/ui/field";
 import { FormModal } from "@/components/ui/form-modal";
 import type { PendingItem } from "@/components/deliveries/return-modal";
-import { formatDate, formatMoney, todayLima } from "@/lib/utils";
+import { cn, formatDate, formatMoney, todayLima } from "@/lib/utils";
 
 type Props = {
   employee: { id: string; name: string; hireDate: string | null };
@@ -114,19 +114,81 @@ export function TerminationModal({ employee, pendiente, tipos, items = [] }: Pro
   );
 }
 
-/** Deshace un cese puesto por error. */
-export function ReinstateButton({ employee }: { employee: { id: string; name: string; terminatedAt: string } }) {
+/**
+ * Anula un cese, preguntando qué pasó: si vuelve a trabajar (reingreso, con su nueva
+ * fecha de ingreso) o si el cese fue un error (y entonces se pueden deshacer las
+ * devoluciones que se registraron por él).
+ */
+export function ReinstateButton({ employee, devueltoDesdeCese = 0 }: {
+  employee: { id: string; name: string; terminatedAt: string };
+  /** Unidades devueltas desde la fecha del cese: lo que se puede deshacer si fue un error. */
+  devueltoDesdeCese?: number;
+}) {
+  const [modo, setModo] = useState<"REINGRESO" | "ERROR" | "">("");
+  const opcion = (valor: "REINGRESO" | "ERROR", titulo: string, detalle: string) => (
+    <label
+      className={cn(
+        "flex cursor-pointer gap-3 rounded-lg border px-3 py-2.5",
+        modo === valor ? "border-ink bg-steel-50" : "border-steel-200 hover:border-steel-400",
+      )}
+    >
+      <input type="radio" name="modo" value={valor} checked={modo === valor} onChange={() => setModo(valor)} className="mt-1" />
+      <span>
+        <span className="block font-semibold">{titulo}</span>
+        <span className="block text-sm text-steel-500">{detalle}</span>
+      </span>
+    </label>
+  );
+
   return (
-    <ConfirmButton
-      action={() => reinstateEmployee(employee.id)}
-      title="Anular el cese"
-      message={`${employee.name} figura cesado desde el ${formatDate(employee.terminatedAt)}. Al anularlo vuelve a estar activo y deja de aparecer en las devoluciones pendientes. Las devoluciones ya registradas se mantienen.`}
-      confirmLabel="Anular el cese"
-      confirmVariant="primary"
-      triggerVariant="outline"
+    <FormModal
+      title={`Anular el cese de ${employee.name}`}
+      description={`Figura cesado desde el ${formatDate(employee.terminatedAt)}. ¿Qué pasó?`}
+      submitLabel={modo === "REINGRESO" ? "Reincorporar" : "Anular el cese"}
       size="md"
-      triggerLabel={<><UserPlus className="h-4 w-4" /> Anular cese</>}
-      triggerTitle="Anular el cese y reincorporar"
-    />
+      action={(fd) => reinstateEmployee(employee.id, fd)}
+      onClosed={() => setModo("")}
+      trigger={(open) => (
+        <Button variant="outline" onClick={open} title="Anular el cese o reincorporar">
+          <UserPlus className="h-4 w-4" /> Anular cese
+        </Button>
+      )}
+    >
+      {({ errors }) => (
+        <>
+          <fieldset className="grid gap-2">
+            <legend className="sr-only">Qué pasó</legend>
+            {opcion(
+              "REINGRESO",
+              "Regresa a trabajar (reingreso)",
+              "Se fue y vuelve. Lo que devolvió sigue devuelto, su periodo anterior queda en el historial y su ficha toma la nueva fecha de ingreso.",
+            )}
+            {opcion(
+              "ERROR",
+              "El cese fue un error",
+              "Nunca se fue. Vuelve a estar activo con su fecha de ingreso de siempre.",
+            )}
+            {errors.modo && <p className="text-sm text-red-700">{errors.modo}</p>}
+          </fieldset>
+
+          {modo === "REINGRESO" && (
+            <Field label="Fecha de reingreso" name="rehiredAt" required error={errors.rehiredAt}
+              hint={`Tiene que ser después del cese (${formatDate(employee.terminatedAt)}). Para entregarle EPP otra vez, usa "Registrar entrega".`}>
+              <DateInput name="rehiredAt" defaultValue={todayLima()} required invalid={!!errors.rehiredAt} />
+            </Field>
+          )}
+
+          {modo === "ERROR" && devueltoDesdeCese > 0 && (
+            <label className="flex gap-3 rounded-md border border-brand/60 bg-brand-soft px-3 py-2.5 text-sm text-[#7A5A00]">
+              <input type="checkbox" name="deshacerDevoluciones" defaultChecked className="mt-0.5" />
+              <span>
+                <strong>Deshacer las devoluciones registradas desde el cese</strong> ({devueltoDesdeCese} unidad(es)):
+                el EPP vuelve a su cargo y lo que había vuelto al stock sale otra vez. Desmárcalo si de verdad devolvió el EPP.
+              </span>
+            </label>
+          )}
+        </>
+      )}
+    </FormModal>
   );
 }

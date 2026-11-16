@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { db, type Tx } from "@/db";
-import { employees, eppDeliveries, eppReturns, products } from "@/db/schema";
+import { employees, employmentPeriods, eppDeliveries, eppReturns, products } from "@/db/schema";
 import { BusinessError, formToObject, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser, type CurrentUser } from "@/lib/auth";
@@ -64,28 +64,117 @@ export async function terminateEmployee(id: string, formData: FormData): Promise
   }
 }
 
-/** Deshace un cese registrado por error: el trabajador vuelve a estar activo. */
-export async function reinstateEmployee(id: string): Promise<ActionResult> {
+/**
+ * Anula un cese. Hay dos casos, y no se tratan igual:
+ *
+ *  - REINGRESO: se fue de verdad (y devolvió lo que devolvió) y ahora vuelve a trabajar.
+ *    Lo devuelto sigue devuelto; el periodo anterior (ingreso, cese y motivo) se guarda
+ *    en employment_periods y la ficha toma la nueva fecha de ingreso.
+ *  - ERROR: el cese nunca debió registrarse. Además de quitarlo, se pueden deshacer las
+ *    devoluciones registradas desde la fecha del cese: el EPP vuelve a su cargo y lo que
+ *    había vuelto al stock sale otra vez (con su movimiento, para que cuadre el kárdex).
+ */
+export async function reinstateEmployee(id: string, formData: FormData): Promise<ActionResult> {
   try {
     const user = await requireActionUser("employees.manage");
-    const [before] = await db.select().from(employees).where(eq(employees.id, id));
-    if (!before) throw new BusinessError("El trabajador no existe.");
-    if (!before.terminatedAt) throw new BusinessError("Este trabajador no tiene un cese registrado.");
+    const modo = String(formData.get("modo") ?? "");
+    if (modo !== "REINGRESO" && modo !== "ERROR") {
+      return { ok: false, message: "Revisa los campos marcados.", fieldErrors: { modo: "Elige qué pasó" } };
+    }
+    const fecha = String(formData.get("rehiredAt") ?? "").trim();
+    const deshacer = formData.get("deshacerDevoluciones") === "on";
 
-    await db.update(employees)
-      .set({ terminatedAt: null, terminationReason: null, active: true })
-      .where(eq(employees.id, id));
+    const resultado = await db.transaction(async (tx) => {
+      const [before] = await tx.select().from(employees).where(eq(employees.id, id)).for("update");
+      if (!before) throw new BusinessError("El trabajador no existe.");
+      if (!before.terminatedAt) throw new BusinessError("Este trabajador no tiene un cese registrado.");
+      const fullName = `${before.firstName} ${before.lastName}`;
 
-    await logAudit({
-      user, action: "ACTIVAR", module: "TRABAJADORES", recordId: id,
-      description: `${user.name} anuló el cese de ${before.firstName} ${before.lastName} del ${formatDate(before.terminatedAt)} y lo reincorporó.`,
-      oldData: { active: before.active, terminatedAt: before.terminatedAt, terminationReason: before.terminationReason },
-      newData: { active: true, terminatedAt: null },
+      if (modo === "REINGRESO") {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+          throw Object.assign(new BusinessError("Revisa los campos marcados."), { fieldErrors: { rehiredAt: "La fecha de reingreso es obligatoria" } });
+        }
+        if (fecha <= before.terminatedAt) {
+          throw Object.assign(new BusinessError("Revisa los campos marcados."), {
+            fieldErrors: { rehiredAt: `El reingreso tiene que ser después del cese (${formatDate(before.terminatedAt)})` },
+          });
+        }
+        await tx.insert(employmentPeriods).values({
+          employeeId: id,
+          hireDate: before.hireDate,
+          terminatedAt: before.terminatedAt,
+          terminationReason: before.terminationReason,
+          rehiredAt: fecha,
+          createdBy: user.id,
+        });
+        await tx.update(employees)
+          .set({ terminatedAt: null, terminationReason: null, active: true, hireDate: fecha })
+          .where(eq(employees.id, id));
+        await logAudit({
+          user, action: "ACTIVAR", module: "TRABAJADORES", recordId: id,
+          description: `${user.name} reincorporó a ${fullName} el ${formatDate(fecha)} (había cesado el ${formatDate(before.terminatedAt)}).`,
+          oldData: { hireDate: before.hireDate, terminatedAt: before.terminatedAt, terminationReason: before.terminationReason },
+          newData: { hireDate: fecha, terminatedAt: null, active: true },
+        }, tx);
+        return { modo, deshechas: 0, fullName };
+      }
+
+      // ERROR: el cese no debió existir.
+      let deshechas = 0;
+      if (deshacer) {
+        const devueltas = await tx.select({
+          id: eppReturns.id, productId: eppReturns.productId, quantity: eppReturns.quantity,
+          condition: eppReturns.condition, movementId: eppReturns.movementId, returnDate: eppReturns.returnDate,
+          productName: products.name, productCode: products.code,
+        }).from(eppReturns)
+          .innerJoin(products, eq(products.id, eppReturns.productId))
+          .where(and(eq(eppReturns.employeeId, id), sql`${eppReturns.returnDate} >= ${before.terminatedAt}`));
+        for (const d of devueltas) {
+          // Lo que había vuelto al stock sale otra vez: vuelve a estar en manos del trabajador.
+          if (d.movementId) {
+            await applyMovement(tx, {
+              productId: d.productId, type: "SALIDA", quantity: d.quantity,
+              reason: "Anulación de devolución (cese registrado por error)",
+              employeeId: id, user, allowInactive: true,
+              auditDescription: `${user.name} sacó ${d.quantity} ${d.productName} del stock: la devolución de ${fullName} se anuló junto con su cese.`,
+            });
+          }
+          await tx.delete(eppReturns).where(eq(eppReturns.id, d.id));
+          await logAudit({
+            user, action: "ANULAR", module: "ENTREGAS", recordId: d.id,
+            description: `${user.name} anuló la devolución de ${d.quantity} ${d.productName} (${d.productCode}) de ${fullName}`
+              + ` del ${formatDate(d.returnDate)}: el cese era un error y el EPP vuelve a su cargo.`,
+            oldData: d,
+          }, tx);
+          deshechas += d.quantity;
+        }
+      }
+
+      await tx.update(employees)
+        .set({ terminatedAt: null, terminationReason: null, active: true })
+        .where(eq(employees.id, id));
+      await logAudit({
+        user, action: "ACTIVAR", module: "TRABAJADORES", recordId: id,
+        description: `${user.name} anuló el cese de ${fullName} del ${formatDate(before.terminatedAt)} por ser un error`
+          + (deshechas ? ` y deshizo ${deshechas} unidad(es) devuelta(s).` : "."),
+        oldData: { active: before.active, terminatedAt: before.terminatedAt, terminationReason: before.terminationReason },
+        newData: { active: true, terminatedAt: null },
+      }, tx);
+      return { modo, deshechas, fullName };
     });
 
     revalidatePath("/", "layout");
-    return { ok: true, message: "Cese anulado. El trabajador está activo otra vez." };
+    return {
+      ok: true,
+      message: resultado.modo === "REINGRESO"
+        ? `${resultado.fullName} reincorporado. Su periodo anterior queda en el historial; lo que devolvió sigue devuelto.`
+        : resultado.deshechas
+          ? `Cese anulado. ${resultado.deshechas} unidad(es) vuelven a estar a su cargo.`
+          : "Cese anulado. El trabajador está activo otra vez.",
+    };
   } catch (e) {
+    const campos = (e as { fieldErrors?: Record<string, string> }).fieldErrors;
+    if (campos) return { ok: false, message: "Revisa los campos marcados.", fieldErrors: campos };
     return toActionError(e);
   }
 }

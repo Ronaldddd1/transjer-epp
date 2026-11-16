@@ -3,7 +3,7 @@ import { and, asc, count, desc, eq, gte, ilike, isNotNull, isNull, lte, or, sql,
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import {
-  auditLogs, categories, employees, eppDeliveries, eppReturns, inventoryMovements, products, users,
+  auditLogs, categories, employees, employmentPeriods, eppDeliveries, eppReturns, inventoryMovements, products, users,
   type MovementType, type ReturnCondition,
 } from "@/db/schema";
 import { first, isYmd, limaDayEnd, limaDayStart, limaMonthStartYmd, type SearchParamsRecord, type StockStatus, todayLima } from "@/lib/utils";
@@ -726,4 +726,25 @@ export async function cuadroEpp(f: CuadroEppFiltros = {}) {
   const totales = Object.fromEntries(productos.map((p) => [p.id, filas.reduce((a, r) => a + r.cantidades[p.id], 0)]));
 
   return { productos, filas, totales, total: Object.values(totales).reduce((a, b) => a + b, 0) };
+}
+
+/** Los periodos anteriores de quien cesó y volvió (el más reciente primero). */
+export async function periodosLaborales(employeeId: string) {
+  return db.select({
+    id: employmentPeriods.id,
+    hireDate: employmentPeriods.hireDate,
+    terminatedAt: employmentPeriods.terminatedAt,
+    terminationReason: employmentPeriods.terminationReason,
+    rehiredAt: employmentPeriods.rehiredAt,
+  }).from(employmentPeriods)
+    .where(eq(employmentPeriods.employeeId, employeeId))
+    .orderBy(desc(employmentPeriods.terminatedAt));
+}
+
+/** Unidades devueltas desde una fecha (lo que se deshace si el cese fue un error). */
+export async function devueltoDesde(employeeId: string, fecha: string) {
+  const [row] = await db.select({ n: sql<number>`coalesce(sum(${eppReturns.quantity}), 0)::int` })
+    .from(eppReturns)
+    .where(and(eq(eppReturns.employeeId, employeeId), gte(eppReturns.returnDate, fecha)));
+  return row?.n ?? 0;
 }

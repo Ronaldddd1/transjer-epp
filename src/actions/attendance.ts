@@ -18,7 +18,8 @@ import { formatDate, HORAS_PARA_CORREGIR_ASISTENCIA, todayLima } from "@/lib/uti
  *
  * Volver a marcar un día ya marcado lo corrige: la fila es una por trabajador y día. Pero
  * solo durante un día desde que se guardó (HORAS_PARA_CORREGIR_ASISTENCIA); después la
- * marca queda cerrada. Lo que nunca se registró se puede registrar siempre, sea del día
+ * marca queda cerrada (salvo que alguien con permiso reabra el día para corregir un
+ * error: ver reabrirAsistencia). Lo que nunca se registró se puede registrar siempre, sea del día
  * que sea: cerrar los huecos impediría completar una lista que se olvidó pasar.
  */
 
@@ -186,6 +187,48 @@ async function marcasCerradas(employeeIds: string[], day: string) {
     .where(and(
       eq(attendance.day, day),
       inArray(attendance.employeeId, employeeIds),
-      sql`${attendance.createdAt} < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)`,
+      sql`coalesce(${attendance.reopenedAt}, ${attendance.createdAt}) < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)`,
     ));
+}
+
+/**
+ * Reabre un día de asistencia ya cerrado para corregir un error.
+ *
+ * Las marcas se cierran a las 24 horas para que nadie las cambie después; esta es la
+ * excepción, y por eso pide su propio permiso y un motivo. Desde que se reabre hay otras
+ * 24 horas para corregir. Solo se reabren las marcas de ese día que estaban cerradas.
+ */
+export async function reabrirAsistencia(formData: FormData): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("attendance.reopen");
+    const day = String(formData.get("day") ?? "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) throw new BusinessError("Día inválido.");
+    const motivo = String(formData.get("motivo") ?? "").trim();
+    if (motivo.length < 5) {
+      return { ok: false, message: "Revisa los campos marcados.", fieldErrors: { motivo: "Escribe qué hay que corregir" } };
+    }
+
+    const reabiertas = await db.update(attendance)
+      .set({ reopenedAt: new Date(), reopenedBy: user.id, reopenReason: motivo.slice(0, 200) })
+      .where(and(
+        eq(attendance.day, day),
+        sql`coalesce(${attendance.reopenedAt}, ${attendance.createdAt}) < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)`,
+      ))
+      .returning({ id: attendance.id });
+    if (reabiertas.length === 0) throw new BusinessError(`La asistencia del ${formatDate(day)} no tiene marcas cerradas.`);
+
+    await logAudit({
+      user, action: "REABRIR", module: "ASISTENCIA", recordId: day,
+      description: `${user.name} reabrió la asistencia del ${formatDate(day)} (${reabiertas.length} marca(s)) para corregirla: ${motivo}`,
+      newData: { dia: day, marcas: reabiertas.length, motivo },
+    });
+
+    revalidatePath("/", "layout");
+    return {
+      ok: true,
+      message: `Asistencia del ${formatDate(day)} reabierta: se puede corregir durante las próximas ${HORAS_PARA_CORREGIR_ASISTENCIA} horas.`,
+    };
+  } catch (e) {
+    return toActionError(e);
+  }
 }

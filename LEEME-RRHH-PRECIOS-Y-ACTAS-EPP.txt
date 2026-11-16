@@ -3,13 +3,15 @@ RECURSOS HUMANOS PRIMERO, PRECIO DE LOS EPP, CARGO Y ACTA PARA FIRMAR, FICHA COM
 
 ANTES DE SUBIR
 --------------
-Lleva una migración nueva (0030). Si todavía no corriste la 0026 a la 0029, van todas
-juntas. En tu PC, contra producción, y ANTES del git push:
+Lleva tres migraciones nuevas (0030, 0031 y 0032). Si todavía no corriste la 0026 a la
+0029, van todas juntas. En tu PC, contra producción, y ANTES del git push:
 
     npm run db:migrate
 
     0030_precios_y_actas_epp   el precio unitario de cada EPP, y el precio y el lote de
                                cada entrega y devolución (para armar el cargo y el acta)
+    0031_periodos_laborales    los periodos anteriores de quien cesó y volvió a trabajar
+    0032_reabrir_asistencia    quién reabrió un día de asistencia cerrado, cuándo y por qué
 
 Solo agrega: no borra datos.
 
@@ -61,6 +63,28 @@ CESE Y DEVOLUCIÓN: LA TABLA Y EL ACTA
     lo devolvió", el acta sale parcial).
   - En la ficha, cada devolución tiene su "Acta de devolución del dd/mm/aaaa".
   - Las devoluciones de antes de este cambio también sacan su acta (agrupadas por día).
+  - Corregido: el acta salía siempre "parcial" aunque devolviera todo (la hora de la
+    devolución se comparaba sin los microsegundos y la propia devolución no se contaba).
+
+
+ANULAR UN CESE: REINGRESO O ERROR
+---------------------------------
+"Anular cese" pregunta qué pasó:
+
+  Regresa a trabajar (reingreso)
+    Se fue, devolvió lo que devolvió, y vuelve. Se pide la fecha de reingreso (después
+    del cese). La ficha toma esa fecha como ingreso; lo devuelto sigue devuelto (no
+    vuelve a figurar a su cargo); el periodo anterior (ingreso, cese y motivo) queda en
+    "Periodos anteriores" de la ficha. Para darle EPP otra vez: "Registrar entrega".
+    Las actas y cargos de ese periodo siguen saliendo con sus fechas de entonces.
+
+  El cese fue un error
+    Nunca se fue: vuelve activo con su fecha de ingreso de siempre. Si se registraron
+    devoluciones desde la fecha del cese, aparece la casilla (marcada) "Deshacer las
+    devoluciones": el EPP vuelve a su cargo y lo que había vuelto al stock sale otra vez,
+    con su movimiento en el kárdex. Desmárcala si de verdad devolvió el EPP.
+
+Todo queda en auditoría.
 
 
 NUEVO TRABAJADOR: TODOS LOS DATOS OBLIGATORIOS
@@ -76,3 +100,16 @@ A TENER EN CUENTA
 El cargo dice que los precios son el valor de cada equipo, pero NO incluye una
 autorización de descuento por planilla si no lo devuelve. Si la quieren, conviene que
 la redacte o revise su asesor laboral; se agrega en una línea.
+
+
+ASISTENCIA: REABRIR UN DÍA CERRADO PARA CORREGIR
+------------------------------------------------
+Las marcas se siguen cerrando 24 horas después de guardadas. Si hubo un error en un día
+ya cerrado (por ejemplo, el sábado), en ese día aparece "Reabrir para corregir":
+  - Pide escribir qué hay que corregir. Queda guardado quién lo reabrió, cuándo y por
+    qué, en la auditoría y en la misma pantalla ("Día reabierto por …").
+  - Desde que se reabre hay otras 24 horas para corregir; después se vuelve a cerrar.
+  - Por defecto solo lo puede hacer el administrador. Se le puede dar a otro usuario en
+    Usuarios > accesos > "Reabrir asistencia cerrada" (Recursos Humanos).
+  - Quien no tiene el permiso ve: "Si hay un error, pide a un administrador que reabra
+    el día."

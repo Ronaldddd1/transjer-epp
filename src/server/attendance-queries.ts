@@ -51,8 +51,11 @@ export async function listAttendanceDay(f: AttendanceFilters) {
     // Una marca se puede corregir durante un día desde que se guardó por primera vez;
     // después queda cerrada. Se calcula aquí, con el reloj del servidor, y no en el
     // navegador, cuyo reloj puede estar mal puesto.
-    bloqueado: sql<boolean>`coalesce(${attendance.createdAt} < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int), false)`,
-    editableHasta: sql<string | null>`to_char((${attendance.createdAt} + make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)) at time zone 'America/Lima', 'DD/MM HH24:MI')`,
+    // Si el día se reabrió, las 24 horas corren desde que se reabrió.
+    bloqueado: sql<boolean>`coalesce(coalesce(${attendance.reopenedAt}, ${attendance.createdAt}) < now() - make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int), false)`,
+    editableHasta: sql<string | null>`to_char((coalesce(${attendance.reopenedAt}, ${attendance.createdAt}) + make_interval(hours => ${HORAS_PARA_CORREGIR_ASISTENCIA}::int)) at time zone 'America/Lima', 'DD/MM HH24:MI')`,
+    reabiertoPor: sql<string | null>`(select u.name from users u where u.id = ${attendance.reopenedBy})`,
+    motivoReapertura: attendance.reopenReason,
   })
     .from(employees)
     .leftJoin(attendance, and(eq(attendance.employeeId, employees.id), eq(attendance.day, day)))
