@@ -60,27 +60,48 @@ async function conectado<T>(config: ImapConfig, trabajo: (cliente: ImapFlow) => 
 
   try {
     return await trabajo(cliente);
+  } catch (error) {
+    // Un NO del servidor a mitad del trabajo también llega como "Command failed".
+    if (error instanceof ImapError || !(error as { responseText?: string })?.responseText) throw error;
+    throw new ImapError(explicar(error, config));
   } finally {
     // logout() cierra la sesión con educación; si ya se cayó, no hay nada que cerrar.
     await cliente.logout().catch(() => cliente.close());
   }
 }
 
-/** Traduce los fallos típicos a algo que se pueda leer sin saber de IMAP. */
+/**
+ * Traduce los fallos típicos a algo que se pueda leer sin saber de IMAP.
+ *
+ * Cuando el servidor contesta NO o BAD a una orden, la librería lanza un error que solo
+ * dice "Command failed": el motivo real viene aparte, en responseText (y si fue el inicio
+ * de sesión, con authenticationFailed). Sin mirarlos, la pantalla decía "Command failed"
+ * y no había forma de saber si era la contraseña, un bloqueo o el buzón lleno.
+ */
 export function explicar(error: unknown, config: ImapConfig): string {
+  const e = (error ?? {}) as { message?: string; code?: string; responseText?: string; authenticationFailed?: boolean; serverResponseCode?: string };
   const mensaje = error instanceof Error ? error.message : String(error);
-  const codigo = (error as { code?: string })?.code ?? "";
+  const codigo = e.code ?? "";
+  const servidor = (e.responseText ?? "").trim();
+  const todo = `${mensaje} ${servidor} ${e.serverResponseCode ?? ""}`;
+  const dijo = servidor ? ` El servidor respondió: «${servidor}».` : "";
 
   if (codigo === "ENOTFOUND") return `No se encontró el servidor ${config.host}. Revisa IMAP_HOST.`;
   if (codigo === "ECONNREFUSED") return `El servidor ${config.host} rechazó la conexión en el puerto ${config.port}. Revisa IMAP_PORT.`;
   if (codigo === "ETIMEDOUT" || /timeout/i.test(mensaje)) {
     return `El servidor ${config.host} no respondió. Puede estar bloqueando conexiones desde fuera de su red.`;
   }
-  if (/auth/i.test(mensaje) || /credential/i.test(mensaje) || /login/i.test(mensaje)) {
-    return "El servidor rechazó el usuario o la contraseña. Revisa IMAP_USER e IMAP_PASSWORD.";
+  if (/certificate/i.test(todo)) return `Problema con el certificado de ${config.host}: ${mensaje}`;
+  if (/quota/i.test(todo)) return `El buzón ${config.user} está lleno.${dijo} Libera espacio en el correo.`;
+  if (/too many|unavailable|try again|temporar|limit|blocked|bloque/i.test(todo)) {
+    return `El servidor ${config.host} no está aceptando la conexión por ahora (demasiados intentos o un bloqueo temporal).${dijo}`
+      + " Espera unos minutos; si sigue, pide al proveedor del hosting que revise si bloqueó la conexión.";
   }
-  if (/certificate/i.test(mensaje)) return `Problema con el certificado de ${config.host}: ${mensaje}`;
-  return `No se pudo conectar con ${config.host}: ${mensaje}`;
+  if (e.authenticationFailed || /auth|credential|login|password|contrase/i.test(todo)) {
+    return `El servidor rechazó el usuario o la contraseña de ${config.user}.${dijo}`
+      + " Si la contraseña del correo cambió, actualiza IMAP_PASSWORD en Vercel y vuelve a desplegar.";
+  }
+  return `No se pudo conectar con ${config.host}: ${servidor || mensaje}`;
 }
 
 /** Abre la carpeta configurada y avisa claro si no existe. */

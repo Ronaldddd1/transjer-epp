@@ -135,6 +135,19 @@ async function main() {
   check("usuario o clave mal",
     explicar(new Error("Authentication failed"), CONFIG).includes("IMAP_PASSWORD"),
     explicar(new Error("Authentication failed"), CONFIG));
+  // "Command failed" es lo único que dice la librería: el motivo está en responseText.
+  const no = (texto: string, extra: object = {}) =>
+    explicar(Object.assign(new Error("Command failed"), { responseStatus: "NO", responseText: texto }, extra), CONFIG);
+  const auth = no("[AUTHENTICATIONFAILED] Authentication failed.", { authenticationFailed: true });
+  check("un login rechazado se reconoce aunque el mensaje diga solo Command failed",
+    auth.includes("usuario o la contraseña") && auth.includes("IMAP_PASSWORD") && !auth.includes("Command failed"), auth);
+  check("y muestra lo que respondió el servidor", auth.includes("[AUTHENTICATIONFAILED] Authentication failed."), auth);
+  const bloqueo = no("[UNAVAILABLE] Too many connections, try again later");
+  check("un bloqueo temporal se dice como tal", bloqueo.includes("bloqueo temporal") && bloqueo.includes("Too many"), bloqueo);
+  check("el buzón lleno", no("[OVERQUOTA] Quota exceeded").includes("lleno"));
+  const otro = no("[SERVERBUG] Internal error");
+  check("cualquier otro NO muestra el texto del servidor, no «Command failed»",
+    otro.includes("[SERVERBUG] Internal error") && !otro.includes("Command failed"), otro);
   check("todos los mensajes nombran el servidor o la variable a revisar",
     [fallo("ENOTFOUND"), fallo("ECONNREFUSED"), fallo("ETIMEDOUT"), explicar(new Error("raro"), CONFIG)]
       .every((m) => m.includes(CONFIG.host) || m.includes("IMAP_")));
