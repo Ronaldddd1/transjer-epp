@@ -1,18 +1,26 @@
 /**
  * El reparto de las paradas entre las móviles y el orden de cada ruta.
  *
- * Es el problema de ruteo de vehículos con capacidad: cada móvil sale del centro de
- * recojo (Lurín), hace sus entregas y termina en la cochera; no puede llevar más peso ni
- * más volumen de lo que admite, ni (si se pidió) más paradas que el máximo acordado. Se
- * busca que la suma de kilómetros de todas las móviles sea la menor.
+ * Es el problema de ruteo de vehículos con capacidad. Cada móvil que sale hace
+ * cochera → centro de recojo (Lurín, a cargar) → sus entregas → cochera. No puede llevar
+ * más peso ni más volumen de lo que admite, ni pasar de la jornada, ni (si se acordó) de
+ * un máximo de entregas. Se busca que la suma de kilómetros de todas sea la menor.
+ *
+ * El tramo cochera → centro de recojo es igual para todas, pero solo lo hace la móvil que
+ * sale: por eso sacar una móvil más "cuesta" ese tramo, y el sistema solo la usa si
+ * acorta el total o si hace falta (por carga o por jornada). No se reparte parejo: cada
+ * móvil lleva lo que le toca por su zona.
  *
  * No hay una fórmula que dé la mejor ruta exacta en un tiempo razonable, así que se hace
  * como lo hacen los programas de ruteo:
  *
  *  1. Construcción por "arrepentimiento" (regret): en cada paso se ubica primero la parada
  *     que más se perdería si no se la pone ya en su mejor sitio.
- *  2. Mejora local: mover una parada a otro lugar u otra móvil, intercambiar dos paradas
- *     entre móviles e invertir tramos de una ruta (2-opt), mientras se gane distancia.
+ *  2. Mejora local, mientras se gane distancia: invertir tramos de una ruta (2-opt),
+ *     mover tramos cortos (or-opt), mover una parada a otro lugar u otra móvil,
+ *     intercambiar dos paradas entre móviles e intercambiar los finales de dos rutas
+ *     (2-opt*). Este último desenreda rutas que se cruzan o se meten en la zona de otra:
+ *     con él, cada móvil queda con una zona coherente.
  *  3. Destruir y reconstruir: se sacan unas cuantas paradas al azar (o las más cercanas
  *     entre sí) y se vuelven a meter; si el resultado es mejor, se queda. Se repite
  *     hasta agotar el tiempo.
@@ -20,7 +28,8 @@
  * Todo trabaja sobre la matriz de distancias por las calles, así que respeta los
  * sentidos de las vías (ir de A a B no cuesta lo mismo que de B a A).
  *
- * Índices: 0 es el centro de recojo, 1..n las paradas y n+1 la cochera.
+ * Índices: 0 es el centro de recojo, 1..n las paradas y n+1 la cochera. El tramo de
+ * salida (cochera → centro) llega aparte, en salidaMetros y salidaSegundos.
  */
 
 export type Movil = {
@@ -42,11 +51,10 @@ export type Entrada = {
   duraciones?: number[][];
   /** Segundos que se queda la móvil en cada entrega. */
   servicioSeg?: number;
-  /**
-   * Repartir las paradas parejo entre todas las móviles: si se marcaron tres, salen las
-   * tres. Sin esto, se usan las que hagan menos kilómetros (a veces una sola).
-   */
-  repartir?: boolean;
+  /** El tramo de salida, cochera → centro de recojo: lo hace cada móvil que sale. */
+  salidaMetros?: number;
+  /** El tiempo de ese tramo más el de carga en el centro. */
+  salidaSegundos?: number;
   /** Milisegundos como máximo para buscar mejoras (un tope de seguridad). */
   tiempoMs?: number;
   /**
@@ -71,46 +79,26 @@ const EPS = 1e-6;
 
 export function optimizar(e: Entrada): Salida {
   const n = e.distancias.length - 2;
-  const V = e.moviles.length;
-  if (!e.repartir || V < 2 || n < 2) return resolver(e);
-  // Parejo: cada móvil lleva como mucho su parte (n / V, redondeado arriba). Si por la
-  // capacidad o la jornada alguna no puede con su parte, se da un poco de holgura.
-  let ultimo: Salida | null = null;
-  for (let holgura = 0; holgura <= n; holgura++) {
-    const parte = Math.ceil(n / V) + holgura;
-    const r = resolver({
-      ...e,
-      moviles: e.moviles.map((m) => ({ ...m, maxParadas: m.maxParadas == null ? parte : Math.min(m.maxParadas, parte) })),
-    });
-    if (!r.sinAsignar.length) return r;
-    ultimo = r;
-    if (parte >= n) break;
-  }
-  const libre = resolver(e);
-  return libre.sinAsignar.length <= (ultimo?.sinAsignar.length ?? Infinity) ? libre : ultimo!;
-}
-
-function resolver(e: Entrada): Salida {
-  const n = e.distancias.length - 2;
   const fin = n + 1;
   const d = e.distancias;
   const V = e.moviles.length;
   const azar = generador(e.semilla ?? 7);
   const tope = Date.now() + (e.tiempoMs ?? 8000);
 
+  const salida = e.salidaMetros ?? 0;
   const costo = (r: number[]) => {
     if (!r.length) return 0;
-    let c = d[0][r[0]];
+    let c = salida + d[0][r[0]];
     for (let i = 1; i < r.length; i++) c += d[r[i - 1]][r[i]];
     return c + d[r[r.length - 1]][fin];
   };
   const carga = (r: number[]) => r.reduce((s, x) => [s[0] + (e.kg[x] ?? 0), s[1] + (e.m3[x] ?? 0)], [0, 0]);
   const t = e.duraciones;
   const servicio = e.servicioSeg ?? 0;
-  /** La jornada de una ruta: manejo de Lurín a la cochera más el tiempo en cada entrega. */
+  /** La jornada de una ruta: cochera → centro → entregas → cochera, más cada entrega. */
   const jornada = (r: number[]) => {
     if (!r.length || !t) return 0;
-    let s = t[0][r[0]];
+    let s = (e.salidaSegundos ?? 0) + t[0][r[0]];
     for (let i = 1; i < r.length; i++) s += t[r[i - 1]][r[i]];
     return s + t[r[r.length - 1]][fin] + servicio * r.length;
   };
@@ -131,7 +119,7 @@ function resolver(e: Entrada): Salida {
   const costoInsertar = (r: number[], x: number, p: number) => {
     const antes = p === 0 ? 0 : r[p - 1];
     const despues = p === r.length ? fin : r[p];
-    if (!r.length) return d[0][x] + d[x][fin];
+    if (!r.length) return salida + d[0][x] + d[x][fin];
     return d[antes][x] + d[x][despues] - d[antes][despues];
   };
   const puedeAgregar = (v: number, r: number[], x: number) => {
@@ -234,6 +222,23 @@ function resolver(e: Entrada): Salida {
             hubo = true;
             i = -1; // la ruta a cambió: se vuelve a recorrer
             if (rutas[a].length === 0) break;
+          }
+        }
+      }
+      // 2-opt*: intercambiar los finales de dos rutas. Si dos móviles se cruzan o una se
+      // mete en la zona de la otra, esto lo desenreda.
+      for (let a = 0; a < V; a++) {
+        for (let b = a + 1; b < V; b++) {
+          let base = costo(rutas[a]) + costo(rutas[b]);
+          for (let i = -1; i < rutas[a].length; i++) {
+            for (let k = -1; k < rutas[b].length; k++) {
+              const ra = [...rutas[a].slice(0, i + 1), ...rutas[b].slice(k + 1)];
+              const rb = [...rutas[b].slice(0, k + 1), ...rutas[a].slice(i + 1)];
+              const c = costo(ra) + costo(rb);
+              if (c < base - EPS && cabe(a, ra) && cabe(b, rb)) {
+                rutas[a] = ra; rutas[b] = rb; base = c; hubo = true;
+              }
+            }
           }
         }
       }

@@ -118,15 +118,33 @@ const check = (n: string, c: boolean, x?: unknown) => {
     moviles: [0, 1].map(() => ({ capacidadKg: null, capacidadM3: null, maxParadas: null, maxSegundos: tLibre * 0.7 })), intentos: 100 });
   check("con dos móviles y esa jornada, se reparte y entra todo", dosJ.sinAsignar.length === 0 && dosJ.rutas.every((r) => r.length > 0 && tiempoDe(r) <= tLibre * 0.7 + 1), dosJ.rutas);
 
-  // Repartir parejo: con dos móviles grandes, sin repartir sale una sola; repartiendo, las dos.
-  const grandes = [0, 1].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null }));
-  const sinRepartir = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), moviles: grandes, intentos: 150 });
-  const parejo = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), moviles: grandes, intentos: 150, repartir: true });
-  check("sin repartir, minimiza km aunque salga una sola móvil", sinRepartir.rutas.filter((r) => r.length).length === 1, sinRepartir.rutas.map((r) => r.length));
-  check("repartiendo, salen las dos con 5 paradas cada una", parejo.rutas.map((r) => r.length).join(",") === "5,5" && parejo.sinAsignar.length === 0, parejo.rutas.map((r) => r.length));
-  const desigual = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), intentos: 150, repartir: true,
-    moviles: [{ capacidadKg: 100, capacidadM3: null, maxParadas: null }, { capacidadKg: 5000, capacidadM3: null, maxParadas: null }] });
-  check("si una móvil chica no puede con su parte, la grande lleva más (y entra todo)", desigual.sinAsignar.length === 0 && desigual.rutas[0].reduce((s, x) => s + kgs[x], 0) <= 100, desigual.rutas);
+  // El tramo cochera → centro: lo hace cada móvil que sale.
+  const unaSola = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 150,
+    moviles: [0, 1].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null })) });
+  check("si una móvil puede con todo, sale una sola (otra sumaría su tramo cochera → centro)",
+    unaSola.rutas.filter((r) => r.length).length === 1, unaSola.rutas.map((r) => r.length));
+  const conTramo = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 50,
+    moviles: [{ capacidadKg: null, capacidadM3: null, maxParadas: null }] });
+  const sinTramo = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), intentos: 50,
+    moviles: [{ capacidadKg: null, capacidadM3: null, maxParadas: null }] });
+  check("los km incluyen el tramo cochera → centro", Math.abs(conTramo.total - sinTramo.total - 20000) < 1e-6, [conTramo.total, sinTramo.total]);
+  const cortaJ = optimizar({ distancias: dist, duraciones: seg, servicioSeg: 900, salidaSegundos: 3600, kg: kgs, m3: Array(11).fill(0), intentos: 50,
+    moviles: [{ capacidadKg: null, capacidadM3: null, maxParadas: null, maxSegundos: tiempoDe(libre.rutas[0]) + 1800 }] });
+  check("y la jornada cuenta el tramo de salida (con una hora más de salida, ya no entra todo)", cortaJ.sinAsignar.length > 0, cortaJ.sinAsignar);
+
+  // Rutas coherentes: dos zonas separadas, dos móviles que no pueden con todo: cada una
+  // se queda con su zona, sin mezclar.
+  const zonaA = Array.from({ length: 6 }, (_, i) => ({ x: -20 + (i % 3) * 1.5, y: 10 + Math.floor(i / 3) * 1.5 }));
+  const zonaB = Array.from({ length: 6 }, (_, i) => ({ x: 20 + (i % 3) * 1.5, y: 10 + Math.floor(i / 3) * 1.5 }));
+  const mezcla = [zonaA[0], zonaB[0], zonaA[1], zonaB[1], zonaA[2], zonaB[2], zonaA[3], zonaB[3], zonaA[4], zonaB[4], zonaA[5], zonaB[5]];
+  const ptsZ = [{ x: 0, y: 0 }, ...mezcla, { x: 0, y: -2 }];
+  const dZ = ptsZ.map((a) => ptsZ.map((b) => Math.hypot(a.x - b.x, a.y - b.y) * 1000));
+  const zonas = optimizar({ distancias: dZ, kg: [0, ...Array(12).fill(10)], m3: Array(13).fill(0), salidaMetros: 5000, intentos: 200,
+    moviles: [0, 1].map(() => ({ capacidadKg: 60, capacidadM3: null, maxParadas: null })) });
+  const lado = (i: number) => (ptsZ[i].x < 0 ? "A" : "B");
+  check("cada móvil se queda con una zona (no hay rutas que se metan en la zona de la otra)",
+    zonas.sinAsignar.length === 0 && zonas.rutas.every((r) => r.length === 6 && new Set(r.map(lado)).size === 1),
+    zonas.rutas.map((r) => r.map(lado).join("")));
 
   console.log(fails ? `\n${fails} comprobación(es) fallaron.` : "\nTodo en orden.");
   process.exit(fails ? 1 : 0);

@@ -71,7 +71,7 @@ export function MapaRutas({ paradas, rutas, lugares, editable, onMoverParada, on
   const mapa = useRef<Leaflet.Map | null>(null);
   const L = useRef<typeof Leaflet | null>(null);
   const capa = useRef<Leaflet.LayerGroup | null>(null);
-  const encuadrado = useRef(false);
+  const encuadrado = useRef("");
   const elegir = useRef(onElegirPunto);
   elegir.current = onElegirPunto;
 
@@ -108,20 +108,24 @@ export function MapaRutas({ paradas, rutas, lugares, editable, onMoverParada, on
     const g = capa.current;
     if (!lib || !m || !g) return;
     g.clearLayers();
+    // Mientras se elige un punto, nada en el mapa se queda con el clic: si se hace clic
+    // encima de un pin (por ejemplo, para mover el centro un poco), igual vale.
+    const eligiendo = !!elegir.current;
     for (const r of rutas) {
       if (r.puntos.length < 2) continue;
-      lib.polyline(r.puntos, { color: "#fff", weight: 8, opacity: 0.9 }).addTo(g);
-      lib.polyline(r.puntos, { color: r.color, weight: 5, opacity: 0.9 }).addTo(g);
+      lib.polyline(r.puntos, { color: "#fff", weight: 8, opacity: 0.9, interactive: false }).addTo(g);
+      lib.polyline(r.puntos, { color: r.color, weight: 5, opacity: 0.9, interactive: false }).addTo(g);
     }
     for (const l of lugares) {
-      lib.marker([l.lat, l.lng], { icon: iconoLugar(lib, l), zIndexOffset: 1000, keyboard: false })
+      lib.marker([l.lat, l.lng], { icon: iconoLugar(lib, l), zIndexOffset: 1000, keyboard: false, interactive: !eligiendo })
         .bindTooltip(`${l.nombre}${l.porDefecto ? " (aproximado: ubícalo en el mapa)" : ""}`)
         .addTo(g);
     }
     for (const p of paradas) {
       const mk = lib.marker([p.lat, p.lng], {
         icon: icono(lib, p, foco === p.id),
-        draggable: !!editable,
+        draggable: !!editable && !eligiendo,
+        interactive: !eligiendo,
         title: p.titulo,
         zIndexOffset: foco === p.id ? 900 : 0,
       }).bindTooltip(p.titulo).addTo(g);
@@ -133,12 +137,19 @@ export function MapaRutas({ paradas, rutas, lugares, editable, onMoverParada, on
         });
       }
     }
-    // Encuadrar todo la primera vez que hay algo que mostrar.
-    if (!encuadrado.current) {
-      const todos: [number, number][] = [...paradas.map((p) => [p.lat, p.lng] as [number, number]), ...lugares.map((l) => [l.lat, l.lng] as [number, number])];
+    // Encuadrar todo cada vez que aparecen puntos o rutas nuevas (mientras se ubican las
+    // direcciones van llegando de a una; al calcular aparecen las rutas). Mover un pin o
+    // un lugar no cambia la cuenta: el mapa no salta mientras se corrige.
+    const clave = `${paradas.length}|${rutas.length}|${lugares.length}`;
+    if (encuadrado.current !== clave) {
+      const todos: [number, number][] = [
+        ...paradas.map((p) => [p.lat, p.lng] as [number, number]),
+        ...lugares.map((l) => [l.lat, l.lng] as [number, number]),
+        ...rutas.flatMap((r) => r.puntos),
+      ];
       if (todos.length > 1) {
-        m.fitBounds(lib.latLngBounds(todos), { padding: [30, 30] });
-        encuadrado.current = paradas.length > 0;
+        m.fitBounds(lib.latLngBounds(todos), { padding: [40, 40] });
+        encuadrado.current = clave;
       }
     }
   }

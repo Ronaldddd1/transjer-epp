@@ -128,10 +128,22 @@ with sync_playwright() as p:
     form = page.locator("[data-testid=form-moviles]")
     check("sin cochera, avisa y no deja calcular",
           "ubica la cochera" in form.inner_text() and form.get_by_role("button", name=re.compile("Calcular rutas")).is_disabled())
-    page.get_by_role("button", name="Ubicar cochera").click()
+    page.get_by_role("button", name="Ubicar cochera").click(); page.wait_for_timeout(300)
+    despues = page.locator("[data-testid=mapa-rutas]").bounding_box()
+    check("al pulsar «Ubicar cochera» la página no salta: el mapa sigue en su lugar", abs(despues["y"] - caja["y"]) < 2, (caja["y"], despues["y"]))
+    check("y el aviso sale encima del mapa", page.locator("[data-testid=eligiendo]").count() == 1)
     page.mouse.click(caja["x"] + caja["width"] * 0.3, caja["y"] + caja["height"] * 0.3)
     page.wait_for_timeout(1800)
     check("la cochera queda guardada", psql("select count(*) from route_places where key = 'COCHERA'") == "1")
+    # Reubicar el centro y la cochera varias veces seguidas: cada clic se guarda.
+    for i, (boton, clave, fx) in enumerate((("Ubicar centro", "CD", 0.62), ("Ubicar cochera", "COCHERA", 0.35), ("Ubicar centro", "CD", 0.6))):
+        antes = psql(f"select coalesce(max(updated_at)::text, '') from route_places where key = '{clave}'")
+        page.get_by_role("button", name=boton).click(); page.wait_for_timeout(300)
+        page.mouse.click(caja["x"] + caja["width"] * fx, caja["y"] + caja["height"] * 0.5)
+        page.wait_for_timeout(1500)
+        luego = psql(f"select coalesce(max(updated_at)::text, '') from route_places where key = '{clave}'")
+        check(f"reubicar {boton.split()[-1]} ({i + 1}) se guarda y el mapa sigue a la vista",
+              luego != antes and page.locator("[data-testid=mapa-rutas] .leaflet-marker-icon").count() >= 17, (antes, luego))
 
     # --- Calcular con dos móviles ---
     page.get_by_role("tab", name=re.compile("Móviles")).click(); page.wait_for_timeout(300)
@@ -157,16 +169,18 @@ with sync_playwright() as p:
     check("cada ruta tiene sus paradas numeradas 1, 2, 3… sin saltos",
           all(o.split(",") == [str(i) for i in range(1, len(o.split(",")) + 1)] for o in orden.splitlines()), orden)
     tarjetas = page.locator("[data-testid=movil-ruta]")
-    check("repartiendo (por defecto), salen las dos: una tarjeta por móvil con sus km y tiempo",
-          tarjetas.count() == 2 and " km" in tarjetas.first.inner_text(), tarjetas.count())
-    paradas_por = psql(f"select string_agg(n::text, ',' order by n) from (select count(*) n from route_plan_stops where plan_id = '{plan_id}' group by plan_vehicle_id) x")
-    nums = [int(x) for x in paradas_por.split(",")]
-    check("y con entregas parejas (8 y 8, o casi si la chica no puede con su parte)", len(nums) == 2 and sum(nums) == 16 and abs(nums[0] - nums[1]) <= 2, paradas_por)
+    minutos = psql(f"select string_agg(minutes::text, ',') from route_plan_vehicles where plan_id = '{plan_id}' and km is not null")
+    check("ninguna móvil pasa la jornada de 9 h", all(int(x) <= 540 for x in minutos.split(",")), minutos)
+    check("una tarjeta por móvil que sale, con sus km y tiempo", tarjetas.count() >= 1 and " km" in tarjetas.first.inner_text(), tarjetas.count())
+    check("la ruta empieza en la cochera y carga en el centro", "Sale de la cochera → carga en" in tarjetas.first.inner_text())
     check("con enlace a Google Maps para el conductor", tarjetas.first.locator("a[href^='https://www.google.com/maps/dir/']").count() >= 1)
-    check("las rutas se dibujan en el mapa", page.locator("[data-testid=mapa-rutas] path.leaflet-interactive").count() >= 2)
+    check("las rutas se dibujan en el mapa", page.locator("[data-testid=mapa-rutas] .leaflet-overlay-pane path").count() >= 2)
     km_total = float(psql(f"select total_km from route_plans where id = '{plan_id}'"))
     km_moviles = float(psql(f"select sum(km) from route_plan_vehicles where plan_id = '{plan_id}'"))
     check("los km totales son la suma de los de cada móvil", abs(km_total - km_moviles) < 0.05, (km_total, km_moviles))
+    enlace = tarjetas.first.locator("a[href^='https://www.google.com/maps/dir/']").first.get_attribute("href")
+    coch = psql("select round(lat::numeric, 6) || ',' || round(lng::numeric, 6) from route_places where key = 'COCHERA'")
+    check("el enlace de Google Maps sale de la cochera", f"origin={coch.replace(',', '%2C')}" in enlace, (coch, enlace[:120]))
     check("en Lima, el reparto suma una cantidad razonable de km (50–400)", 50 < km_total < 400, km_total)
 
     # --- Hojas de ruta en Excel ---
@@ -176,7 +190,8 @@ with sync_playwright() as p:
     os.makedirs(os.path.dirname(destino), exist_ok=True)
     bajada.value.save_as(destino)
     wb = openpyxl.load_workbook(destino)
-    check("el Excel trae el resumen y una hoja por móvil", wb.sheetnames == ["Resumen", "RTA-901", "RTA-902"] or wb.sheetnames == ["Resumen", "RTA-902", "RTA-901"], wb.sheetnames)
+    usadas = int(psql(f"select count(*) from route_plan_vehicles where plan_id = '{plan_id}' and km is not null"))
+    check("el Excel trae el resumen y una hoja por móvil que sale", wb.sheetnames[0] == "Resumen" and len(wb.sheetnames) == 1 + usadas, wb.sheetnames)
     filas = sum(max(0, ws.max_row - 4) for ws in wb.worksheets[1:])
     check("con las 16 entregas en orden", filas == 16, filas)
 

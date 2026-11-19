@@ -1,6 +1,13 @@
 RUTAS DE REPARTO (Flota > Rutas de reparto)
 ==========================================
 
+Cambios del 19/11 (tarde):
+  - La ruta es cochera → centro de recojo → entregas → cochera (antes salía del centro).
+  - Menor recorrido total, sin repartir parejo; rutas por zona, sin cruces.
+  - Al reubicar el centro o la cochera la página ya no salta (antes el mapa se iba de la
+    pantalla y quedaba en blanco); los botones están sobre el mapa y el mapa se queda a
+    la vista al bajar por la lista.
+
 ANTES DE SUBIR
 --------------
 Lleva una migración nueva (0033). Si todavía no corriste las anteriores (0026 a 0032), van
@@ -19,9 +26,9 @@ No necesita claves ni cuentas: usa OpenStreetMap (gratis). Ver "Variables" abajo
 
 PRIMERA VEZ: UBICAR EL CENTRO DE RECOJO Y LA COCHERA
 -----------------------------------------------------
-Abre cualquier programación y, debajo del mapa:
+Abre cualquier programación y, con los botones de la esquina del mapa:
   - "Ubicar cochera" y clic en el mapa donde está la cochera. Es obligatorio: cada ruta
-    termina ahí.
+    empieza y termina ahí.
   - "Ubicar centro" y clic en el punto exacto del centro de recojo en Lurín. Mientras no
     se ubique, se usa el centro del distrito (dice "aproximado").
 Se guardan una sola vez y valen para todas las programaciones.
@@ -54,21 +61,23 @@ CADA DÍA
    - La capacidad (kg y m³) viene de la ficha de la unidad; se puede cambiar para ese día.
    - "Máx." es el tope de entregas acordado para esa móvil (vacío = sin tope).
    - "Móvil de tercero": para una unidad alquilada, escribiendo su placa y capacidad.
-   - "Repartir entre todas las marcadas" (marcado): salen todas, con una cantidad pareja
-     de entregas. Desmarcado: el sistema usa solo las que hagan menos km en total (a
-     veces una sola).
-   - "Minutos por entrega" (15) y "Jornada máx." (9 h): ninguna ruta pasa de esa jornada,
-     contando el manejo y el tiempo en cada entrega.
+   - "Carga en el centro" (30 min), "Minutos por entrega" (15) y "Jornada máx." (9 h):
+     ninguna ruta pasa de esa jornada, contando el manejo, la carga y cada entrega.
 
-5. "Calcular rutas". Cada móvil sale del centro de recojo (Lurín), hace sus entregas y
-   termina en la cochera. El sistema busca el reparto y el orden que dan menos km en
-   total, respetando la capacidad, el tope de entregas y la jornada.
+5. "Calcular rutas". Cada móvil que sale hace: COCHERA → CENTRO DE RECOJO (Lurín, a
+   cargar) → sus entregas → COCHERA. El sistema busca el reparto y el orden que dan el
+   MENOR RECORRIDO TOTAL, respetando la capacidad, el tope de entregas y la jornada.
+   - No se reparte parejo: cada móvil lleva las entregas de su zona, y las rutas no se
+     cruzan ni se meten en la zona de otra.
+   - Si una sola móvil puede con todo dentro de la jornada, sale una sola: otra sumaría
+     su viaje cochera → centro. Sale una segunda solo si hace falta (por carga o jornada)
+     o si acorta el total.
    - En el mapa, cada móvil con su color y sus paradas numeradas en orden; la ruta va
      dibujada por las calles.
    - Por móvil: km, tiempo estimado, carga (kg y m³ con % de su capacidad) y el orden
      de las entregas.
-   - "Google Maps": abre la ruta en el celular del conductor, con las paradas en orden
-     (si son más de 9, en tramos).
+   - "Google Maps": abre la ruta en el celular del conductor, desde la cochera, pasando
+     por el centro y las paradas en orden (si son más de 9, en tramos).
    - Si algo no entra (capacidad o jornada), lo dice en rojo: agrega otra móvil o amplía.
    - "Descargar hojas de ruta (Excel)": un resumen y una pestaña por móvil con el orden,
      pedidos, cliente, teléfono, dirección, referencia, kg, m³, fecha máxima y
@@ -84,8 +93,9 @@ CÓMO CALCULA (PARA QUIEN PREGUNTE)
   sentido de las vías. Si ese servicio no responde, se estima en línea recta ×1.35 y la
   pantalla dice "aproximado".
 - El reparto y el orden se buscan con el método que usan los programas de ruteo
-  (inserción por "arrepentimiento", mejoras 2-opt / or-opt / mover / intercambiar, y
-  destruir y reconstruir). En pruebas con casos chicos llega siempre a la ruta más corta
+  (inserción por "arrepentimiento", mejoras 2-opt / or-opt / mover / intercambiar /
+  2-opt* entre rutas, y destruir y reconstruir). El 2-opt* intercambia los finales de dos
+  rutas: es lo que desenreda rutas que se cruzan. En pruebas con casos chicos llega siempre a la ruta más corta
   posible; con 16 paradas tarda menos de un segundo. El mismo archivo da siempre la misma
   ruta.
 - El tiempo es estimado (sin tráfico): sirve para comparar y para la jornada, no como

@@ -84,24 +84,27 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
 
   // Ubicar en el mapa las paradas que todavía no tienen punto, una por una (el buscador
   // de OpenStreetMap admite una consulta por segundo).
+  // Se lanza una sola vez al abrir el plan. No depende de los datos que llegan del
+  // servidor: si mientras tanto se ubica la cochera (y la página se refresca), sigue
+  // con las que faltan en vez de cortarse a la mitad.
+  const montado = useRef(true);
+  useEffect(() => () => { montado.current = false; }, []);
   useEffect(() => {
     if (!canManage || yaUbico.current) return;
     const faltan = inicial.filter((p) => p.lat == null && p.geoQuality !== "SIN_UBICAR");
     if (!faltan.length) return;
     yaUbico.current = true;
-    let vivo = true;
     (async () => {
-      for (let i = 0; i < faltan.length && vivo; i++) {
+      for (let i = 0; i < faltan.length && montado.current; i++) {
         setUbicando(faltan.length - i);
         const r = await ubicarParada(faltan[i].id);
-        if (!vivo) return;
+        if (!montado.current) return;
         setParadas((ps) => ps.map((p) => p.id === faltan[i].id
           ? { ...p, lat: r.lat ?? p.lat, lng: r.lng ?? p.lng, geoQuality: r.calidad ?? (r.ok ? p.geoQuality : "SIN_UBICAR") }
           : p));
       }
-      if (vivo) { setUbicando(0); router.refresh(); }
+      if (montado.current) { setUbicando(0); router.refresh(); }
     })();
-    return () => { vivo = false; };
   }, [inicial, canManage, router]);
 
   const moviPorId = useMemo(() => new Map(moviles.map((m) => [m.id, m])), [moviles]);
@@ -164,24 +167,32 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
   const sinMovil = calculada ? paradas.filter((p) => !p.planVehicleId) : [];
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
-      <div className="grid gap-3">
-        {/* Avisos sobre el mapa */}
-        {eligiendo && (
-          <p className="flex items-center justify-between gap-3 rounded-lg border border-ink bg-ink px-4 py-2.5 text-sm text-white">
-            <span className="flex items-center gap-2">
-              <Crosshair className="h-4 w-4" />
-              Haz clic en el mapa donde está {eligiendo.tipo === "CD" ? "el centro de recojo" : eligiendo.tipo === "COCHERA" ? "la cochera" : "esta entrega"}.
-            </span>
-            <button type="button" className="font-semibold underline" onClick={() => setEligiendo(null)}>Cancelar</button>
-          </p>
-        )}
-        {ubicando > 0 && (
-          <p className="rounded-lg border border-steel-200 bg-white px-4 py-2.5 text-sm text-steel-700" data-testid="ubicando">
-            Ubicando las direcciones en el mapa… faltan {ubicando}. (OpenStreetMap atiende una por segundo.)
-          </p>
-        )}
-        <div className="h-[62vh] min-h-[440px]">
+    <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
+      {/* El mapa se queda a la vista mientras se recorre la lista de la derecha. Los avisos
+          y los botones van ENCIMA del mapa: si se insertaran arriba, la página saltaría y
+          el mapa se iría de la pantalla justo cuando hay que hacer clic en él. */}
+      <div className="grid content-start gap-3 xl:sticky xl:top-4">
+        <div className="relative h-[68vh] min-h-[440px]">
+          <div className="pointer-events-none absolute inset-x-3 top-3 z-[1000] grid justify-items-center gap-2">
+            {eligiendo && (
+              <p className="pointer-events-auto flex items-center gap-3 rounded-lg bg-ink px-4 py-2.5 text-sm text-white shadow-lg" data-testid="eligiendo">
+                <Crosshair className="h-4 w-4 shrink-0" />
+                Haz clic en el mapa donde está {eligiendo.tipo === "CD" ? "el centro de recojo" : eligiendo.tipo === "COCHERA" ? "la cochera" : "esta entrega"}.
+                <button type="button" className="font-semibold text-brand underline" onClick={() => setEligiendo(null)}>Cancelar</button>
+              </p>
+            )}
+            {ubicando > 0 && !eligiendo && (
+              <p className="rounded-lg border border-steel-200 bg-white/95 px-4 py-2 text-sm text-steel-700 shadow" data-testid="ubicando">
+                Ubicando las direcciones… faltan {ubicando} (una por segundo).
+              </p>
+            )}
+          </div>
+          {canManage && (
+            <div className="absolute bottom-8 right-3 z-[1000] grid gap-1.5">
+              <Button size="sm" variant="outline" className="shadow" onClick={() => setEligiendo({ tipo: "CD" })}><Warehouse className="h-4 w-4" /> Ubicar centro</Button>
+              <Button size="sm" variant={cochera ? "outline" : "primary"} className="shadow" onClick={() => setEligiendo({ tipo: "COCHERA" })}><MapPin className="h-4 w-4" /> Ubicar cochera</Button>
+            </div>
+          )}
           <MapaRutas
             paradas={pins}
             rutas={lineas}
@@ -197,12 +208,6 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
           <span className="flex items-center gap-1.5"><span className="inline-block h-4 w-6 rounded bg-brand text-center text-[10px] font-bold leading-4 text-ink">CD</span> {centro.name}{centro.porDefecto && <em className="text-amber-700"> (aproximado)</em>}</span>
           <span className="flex items-center gap-1.5"><span className="inline-block h-4 w-6 rounded bg-ink text-center text-[10px] font-bold leading-4 text-brand">P</span> {cochera ? "Cochera" : <em className="text-red-700">Cochera sin ubicar</em>}</span>
           <span>Arrastra un punto para corregir su ubicación; se recordará para la próxima vez.</span>
-          {canManage && (
-            <span className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => setEligiendo({ tipo: "CD" })}><Warehouse className="h-4 w-4" /> Ubicar centro</Button>
-              <Button size="sm" variant={cochera ? "outline" : "primary"} onClick={() => setEligiendo({ tipo: "COCHERA" })}><MapPin className="h-4 w-4" /> Ubicar cochera</Button>
-            </span>
-          )}
         </div>
       </div>
 
@@ -283,7 +288,7 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                   const ps = paradasDe(m);
                   const color = COLORES[m.position % COLORES.length];
                   const pct = (carga: string | null, cap: string | null) => (cap ? Math.round((Number(carga ?? 0) / Number(cap)) * 100) : null);
-                  const enlaces = enlacesGoogle([centro, ...ps.map((p) => ({ lat: p.lat!, lng: p.lng! })), ...(cochera ? [cochera] : [])]);
+                  const enlaces = enlacesGoogle([...(cochera ? [cochera] : []), centro, ...ps.map((p) => ({ lat: p.lat!, lng: p.lng! })), ...(cochera ? [cochera] : [])]);
                   return (
                     <section key={m.id} className="rounded-lg border border-steel-200 bg-white" data-testid="movil-ruta">
                       <header className="flex items-center justify-between gap-2 border-b border-steel-100 px-3 py-2" style={{ borderLeft: `6px solid ${color}` }}>
@@ -295,14 +300,14 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                         {" · "}{Number(m.loadM3 ?? 0).toFixed(2)} m³{pct(m.loadM3, m.capacityM3) != null && ` (${pct(m.loadM3, m.capacityM3)} %)`}
                       </div>
                       <ol className="grid gap-0.5 px-3 pb-2 text-sm">
-                        <li className="text-xs text-steel-500">Sale: {centro.name}</li>
+                        <li className="text-xs text-steel-500">Sale de la cochera → carga en {centro.name}</li>
                         {ps.map((p) => (
                           <li key={p.id} className="flex gap-2">
                             <span className="mt-0.5 inline-grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: color }}>{p.sequence}</span>
                             <span><span className="font-medium">{p.customer}</span> <span className="text-steel-500">· {p.district}</span></span>
                           </li>
                         ))}
-                        <li className="text-xs text-steel-500">Termina: cochera</li>
+                        <li className="text-xs text-steel-500">Vuelve a la cochera</li>
                       </ol>
                       <div className="flex flex-wrap gap-2 border-t border-steel-100 px-3 py-2">
                         {enlaces.map((u, i) => (
@@ -369,11 +374,15 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                   <p className="text-sm text-red-700">{Object.values(errores).filter((_, i) => Object.keys(errores)[i] !== "moviles").join(" · ")}</p>
                 )}
                 <Button size="sm" variant="ghost" className="justify-self-start" onClick={() => setTerceros((t) => [...t, (t.at(-1) ?? 0) + 1])}><Plus className="h-4 w-4" /> Móvil de tercero</Button>
-                <label className="flex items-start gap-2 text-sm">
-                  <input type="checkbox" name="repartir" defaultChecked className="mt-0.5" />
-                  <span><strong>Repartir entre todas las marcadas</strong><span className="block text-xs text-steel-500">Salen todas, con una cantidad pareja de entregas. Desmárcalo para usar solo las que hagan menos km.</span></span>
-                </label>
+                <p className="text-xs text-steel-500">
+                  Se busca el menor recorrido total. Cada móvil lleva las entregas de su zona; no se reparte parejo. Si una
+                  sola puede con todo dentro de la jornada, sale una sola: otra móvil sumaría su viaje cochera → centro.
+                </p>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+                  <label className="flex items-center gap-2">
+                    Carga en el centro (min)
+                    <input name="loadMinutes" inputMode="numeric" defaultValue="30" aria-label="Minutos de carga en el centro" className={cn("h-8 w-14 rounded border px-1.5 text-right", errores.loadMinutes ? "border-red-500" : "border-steel-300")} />
+                  </label>
                   <label className="flex items-center gap-2">
                     Minutos por entrega
                     <input name="serviceMinutes" inputMode="numeric" defaultValue={plan.serviceMinutes} aria-label="Minutos por entrega" className="h-8 w-14 rounded border border-steel-300 px-1.5 text-right" />

@@ -26,7 +26,7 @@ export default async function RutasPage() {
     <>
       <PageHeader
         title="Rutas de reparto"
-        description="Sube la programación del cliente y el sistema arma la ruta más corta para cada móvil: sale del centro de recojo en Lurín, hace las entregas y termina en la cochera."
+        description="Sube la programación del cliente y el sistema arma la ruta más corta para cada móvil: sale de la cochera, carga en el centro de Lurín, hace sus entregas y vuelve a la cochera."
         actions={canManage ? <NuevaProgramacion /> : undefined}
       />
       <TableShell>
