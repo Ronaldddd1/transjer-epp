@@ -8,8 +8,9 @@
  *
  * El tramo cochera → centro de recojo es igual para todas, pero solo lo hace la móvil que
  * sale: por eso sacar una móvil más "cuesta" ese tramo, y el sistema solo la usa si
- * acorta el total o si hace falta (por carga o por jornada). No se reparte parejo: cada
- * móvil lleva lo que le toca por su zona.
+ * acorta el total o si hace falta (por carga o por jornada). No se reparte parejo ni se
+ * divide el mapa en zonas: se busca el menor recorrido, y eso ya da rutas en un orden
+ * lógico, sin idas y vueltas ni cruces.
  *
  * No hay una fórmula que dé la mejor ruta exacta en un tiempo razonable, así que se hace
  * como lo hacen los programas de ruteo:
@@ -19,8 +20,7 @@
  *  2. Mejora local, mientras se gane distancia: invertir tramos de una ruta (2-opt),
  *     mover tramos cortos (or-opt), mover una parada a otro lugar u otra móvil,
  *     intercambiar dos paradas entre móviles e intercambiar los finales de dos rutas
- *     (2-opt*). Este último desenreda rutas que se cruzan o se meten en la zona de otra:
- *     con él, cada móvil queda con una zona coherente.
+ *     (2-opt*). Este último desenreda dos rutas que se cruzan entre sí.
  *  3. Destruir y reconstruir: se sacan unas cuantas paradas al azar (o las más cercanas
  *     entre sí) y se vuelven a meter; si el resultado es mejor, se queda. Se repite
  *     hasta agotar el tiempo.
@@ -226,7 +226,7 @@ export function optimizar(e: Entrada): Salida {
         }
       }
       // 2-opt*: intercambiar los finales de dos rutas. Si dos móviles se cruzan o una se
-      // mete en la zona de la otra, esto lo desenreda.
+      // mete en el camino de la otra, esto lo desenreda.
       for (let a = 0; a < V; a++) {
         for (let b = a + 1; b < V; b++) {
           let base = costo(rutas[a]) + costo(rutas[b]);

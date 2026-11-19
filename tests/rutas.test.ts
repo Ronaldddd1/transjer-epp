@@ -142,9 +142,36 @@ const check = (n: string, c: boolean, x?: unknown) => {
   const zonas = optimizar({ distancias: dZ, kg: [0, ...Array(12).fill(10)], m3: Array(13).fill(0), salidaMetros: 5000, intentos: 200,
     moviles: [0, 1].map(() => ({ capacidadKg: 60, capacidadM3: null, maxParadas: null })) });
   const lado = (i: number) => (ptsZ[i].x < 0 ? "A" : "B");
-  check("cada móvil se queda con una zona (no hay rutas que se metan en la zona de la otra)",
+  check("dos grupos de entregas separados: cada móvil hace uno entero, sin cruzar al otro lado y volver",
     zonas.sinAsignar.length === 0 && zonas.rutas.every((r) => r.length === 6 && new Set(r.map(lado)).size === 1),
     zonas.rutas.map((r) => r.map(lado).join("")));
+
+  // Rutas coherentes: ninguna ruta se cruza consigo misma (sin idas y vueltas).
+  const cruzan = (p: { x: number; y: number }, q: { x: number; y: number }, r: { x: number; y: number }, t: { x: number; y: number }) => {
+    const o = (a: typeof p, b: typeof p, c: typeof p) => Math.sign((b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x));
+    return o(p, q, r) * o(p, q, t) < 0 && o(r, t, p) * o(r, t, q) < 0;
+  };
+  let sinCruces = 0;
+  for (let caso = 0; caso < 30; caso++) {
+    let sem = 100 + caso;
+    const rnd = () => ((sem = (sem * 16807) % 2147483647) / 2147483647);
+    const n = 14;
+    const pts = Array.from({ length: n + 2 }, () => ({ x: rnd() * 40, y: rnd() * 40 }));
+    const dd = pts.map((a) => pts.map((b) => Math.hypot(a.x - b.x, a.y - b.y) * 1000));
+    const res = optimizar({ distancias: dd, kg: [0, ...Array(n).fill(10)], m3: Array(n + 1).fill(0), salidaMetros: 8000,
+      moviles: [0, 1].map(() => ({ capacidadKg: 80, capacidadM3: null, maxParadas: null })), semilla: caso + 1 });
+    const ok = res.rutas.every((r) => {
+      const camino = [pts[0], ...r.map((i) => pts[i]), pts[n + 1]];
+      for (let i = 0; i < camino.length - 1; i++) {
+        for (let k = i + 2; k < camino.length - 1; k++) {
+          if (cruzan(camino[i], camino[i + 1], camino[k], camino[k + 1])) return false;
+        }
+      }
+      return true;
+    });
+    if (ok) sinCruces++;
+  }
+  check("ninguna ruta se cruza consigo misma (30 casos al azar, 14 entregas y 2 móviles)", sinCruces === 30, sinCruces);
 
   console.log(fails ? `\n${fails} comprobación(es) fallaron.` : "\nTodo en orden.");
   process.exit(fails ? 1 : 0);

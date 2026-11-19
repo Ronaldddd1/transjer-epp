@@ -3,7 +3,8 @@ RUTAS DE REPARTO (Flota > Rutas de reparto)
 
 Cambios del 19/11 (tarde):
   - La ruta es cochera → centro de recojo → entregas → cochera (antes salía del centro).
-  - Menor recorrido total, sin repartir parejo; rutas por zona, sin cruces.
+  - Menor recorrido total, sin repartir parejo: rutas en orden lógico, sin idas y
+    vueltas ni cruces.
   - Al reubicar el centro o la cochera la página ya no salta (antes el mapa se iba de la
     pantalla y quedaba en blanco); los botones están sobre el mapa y el mapa se queda a
     la vista al bajar por la lista.
@@ -67,8 +68,9 @@ CADA DÍA
 5. "Calcular rutas". Cada móvil que sale hace: COCHERA → CENTRO DE RECOJO (Lurín, a
    cargar) → sus entregas → COCHERA. El sistema busca el reparto y el orden que dan el
    MENOR RECORRIDO TOTAL, respetando la capacidad, el tope de entregas y la jornada.
-   - No se reparte parejo: cada móvil lleva las entregas de su zona, y las rutas no se
-     cruzan ni se meten en la zona de otra.
+   - No se reparte parejo ni se divide el mapa en zonas: cada ruta sale en un orden
+     lógico (sin idas y vueltas ni cruces) y cada entrega va en la móvil que pasa más
+     cerca de ella.
    - Si una sola móvil puede con todo dentro de la jornada, sale una sola: otra sumaría
      su viaje cochera → centro. Sale una segunda solo si hace falta (por carga o jornada)
      o si acorta el total.
