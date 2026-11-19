@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { candidatos, enDistrito, haversine, titulo } from "../src/lib/rutas/geo";
 import { optimizar } from "../src/lib/rutas/optimizar";
 import { claveDireccion, limpiarDireccion } from "../src/lib/rutas/programacion";
+import { caminoPorCalles, esTrazoRecto, servidoresOsrm } from "../src/lib/rutas/trazado";
 import { leerExcelProgramacion } from "../src/server/rutas-excel";
 
 let fails = 0;
@@ -187,6 +188,27 @@ const check = (n: string, c: boolean, x?: unknown) => {
     if (ok) sinCruces++;
   }
   check("ninguna ruta se cruza consigo misma (30 casos al azar, 14 entregas y 2 móviles)", sinCruces === 30, sinCruces);
+
+  // --- Trazo por las calles ---
+  const recta: [number, number][] = [[-12.0, -77.0], [-12.27, -76.87], [-12.1, -77.02], [-12.12, -77.0], [-12.0, -77.0]];
+  check("un trazo que solo une las paradas es «recto»", esTrazoRecto(recta, 2));
+  check("uno por las calles (muchos puntos) no", !esTrazoRecto(Array.from({ length: 200 }, (_, i) => [-12 - i / 1000, -77] as [number, number]), 2));
+  check("sin servidor propio usa los públicos (dos, de respaldo)", servidoresOsrm(null).length === 2 && servidoresOsrm(" http://x/ ")[0] === "http://x");
+  {
+    const real = globalThis.fetch;
+    const pedidos: string[] = [];
+    globalThis.fetch = (async (url: string) => {
+      pedidos.push(url);
+      if (url.startsWith("http://uno")) return new Response("", { status: 429 });
+      return new Response(JSON.stringify({ code: "Ok", routes: [{ distance: 1000, duration: 100, geometry: { coordinates: [[-77, -12], [-77.01, -12.01]] } }] }));
+    }) as typeof fetch;
+    try {
+      const c = await caminoPorCalles(["http://uno", "http://dos"], recta, { pausaMs: 1 });
+      check("si un servidor rechaza, reintenta y pasa al siguiente", pedidos.filter((u) => u.startsWith("http://uno")).length === 2 && c.metros === 1000 && c.linea[0][0] === -12, pedidos);
+    } finally {
+      globalThis.fetch = real;
+    }
+  }
 
   console.log(fails ? `\n${fails} comprobación(es) fallaron.` : "\nTodo en orden.");
   process.exit(fails ? 1 : 0);

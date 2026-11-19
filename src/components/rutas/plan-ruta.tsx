@@ -4,11 +4,12 @@ import { AlertTriangle, Crosshair, ExternalLink, FileDown, MapPin, Plus, Route, 
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { calcularRutas, guardarLugar, moverParada, ubicarParada } from "@/actions/rutas";
+import { calcularRutas, guardarLugar, guardarTrazo, moverParada, ubicarParada } from "@/actions/rutas";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { CALIDAD_LABEL, esAproximada, type Calidad } from "@/lib/rutas/geo";
+import { caminoPorCalles, esTrazoRecto } from "@/lib/rutas/trazado";
 import { cn, formatDate, formatNumber } from "@/lib/utils";
 import type { LineaRuta, PinLugar, PinParada } from "./mapa";
 
@@ -59,7 +60,7 @@ export function enlacesGoogle(puntos: { lat: number; lng: number }[]) {
   return tramos;
 }
 
-export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flota, canManage }: {
+export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flota, canManage, servidoresOsrm }: {
   plan: { id: string; serviceDate: string; status: string; totalKm: string | null; approximate: boolean; serviceMinutes: number };
   paradas: ParadaUI[];
   moviles: MovilUI[];
@@ -67,6 +68,8 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
   cochera: LugarUI | null;
   flota: FlotaUI[];
   canManage: boolean;
+  /** Dónde pedir el camino por las calles desde el navegador. */
+  servidoresOsrm: string[];
 }) {
   const router = useRouter();
   const { notify } = useToast();
@@ -110,6 +113,36 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
   const moviPorId = useMemo(() => new Map(moviles.map((m) => [m.id, m])), [moviles]);
   const calculada = plan.status === "CALCULADA" && moviles.some((m) => m.km != null);
 
+  // Una ruta que quedó en línea recta (el servidor no obtuvo las calles al calcular) se
+  // pide de nuevo desde aquí, se dibuja por las calles y se guarda con sus km reales.
+  const [trazos, setTrazos] = useState<Record<string, [number, number][]>>({});
+  const [trazando, setTrazando] = useState(false);
+  const pedidos = useRef(new Set<string>());
+  useEffect(() => {
+    if (!calculada) return;
+    const rectas = moviles.filter((m) => !pedidos.current.has(m.id)
+      && esTrazoRecto(m.geometry, inicial.filter((p) => p.planVehicleId === m.id).length));
+    if (!rectas.length) return;
+    rectas.forEach((m) => pedidos.current.add(m.id));
+    (async () => {
+      setTrazando(true);
+      let guardados = 0;
+      for (const m of rectas) {
+        try {
+          const c = await caminoPorCalles(servidoresOsrm, m.geometry!);
+          if (!montado.current) return;
+          setTrazos((t) => ({ ...t, [m.id]: c.linea }));
+          if (canManage && (await guardarTrazo(m.id, c)).ok) guardados++;
+        } catch {
+          // Sin respuesta tampoco desde aquí: queda en línea recta (y dice «aproximado»).
+        }
+      }
+      if (!montado.current) return;
+      setTrazando(false);
+      if (guardados) router.refresh();
+    })();
+  }, [calculada, moviles, inicial, servidoresOsrm, canManage, router]);
+
   const pins: PinParada[] = paradas.filter((p) => p.lat != null && p.lng != null).map((p) => {
     const m = p.planVehicleId ? moviPorId.get(p.planVehicleId) : null;
     return {
@@ -121,7 +154,7 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
     };
   });
   const lineas: LineaRuta[] = calculada
-    ? moviles.filter((m) => m.geometry?.length).map((m) => ({ color: COLORES[m.position % COLORES.length], puntos: m.geometry! }))
+    ? moviles.filter((m) => m.geometry?.length).map((m) => ({ color: COLORES[m.position % COLORES.length], puntos: trazos[m.id] ?? m.geometry! }))
     : [];
   const lugares: PinLugar[] = [
     { ...centro, nombre: centro.name, tipo: "CD", porDefecto: centro.porDefecto },
@@ -184,6 +217,11 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
             {ubicando > 0 && !eligiendo && (
               <p className="rounded-lg border border-steel-200 bg-white/95 px-4 py-2 text-sm text-steel-700 shadow" data-testid="ubicando">
                 Ubicando las direcciones… faltan {ubicando} (una por segundo).
+              </p>
+            )}
+            {trazando && !eligiendo && (
+              <p className="rounded-lg border border-steel-200 bg-white/95 px-4 py-2 text-sm text-steel-700 shadow" data-testid="trazando">
+                Trazando las rutas por las calles…
               </p>
             )}
           </div>

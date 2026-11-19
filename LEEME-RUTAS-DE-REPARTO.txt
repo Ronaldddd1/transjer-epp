@@ -1,6 +1,17 @@
 RUTAS DE REPARTO (Flota > Rutas de reparto)
 ==========================================
 
+Cambios del 19/11 (noche):
+  - Las rutas salían en línea recta entre las paradas: el servidor público de OSRM no
+    respondía a Vercel (rechaza pedidos seguidos o desde la nube) y el sistema caía al
+    trazo recto. Ahora:
+      · pide las rutas una por una, reintenta y, si el servidor de OSRM falla, usa un
+        segundo servidor público (routing.openstreetmap.de);
+      · si aun así una ruta queda recta, al abrir el plan EL NAVEGADOR la pide por las
+        calles, la dibuja y la guarda con sus km reales (dice "Trazando las rutas por las
+        calles…" sobre el mapa). Queda en la auditoría.
+  - Las programaciones ya calculadas con líneas rectas se corrigen solas al abrirlas.
+
 Cambios del 19/11 (tarde):
   - La ruta es cochera → centro de recojo → entregas → cochera (antes salía del centro).
   - Salen todas las móviles marcadas; el reparto entre ellas es por el menor recorrido
@@ -90,8 +101,9 @@ CADA DÍA
 CÓMO CALCULA (PARA QUIEN PREGUNTE)
 ----------------------------------
 - Las distancias son por las calles (OSRM, el motor de rutas de OpenStreetMap), en el
-  sentido de las vías. Si ese servicio no responde, se estima en línea recta ×1.35 y la
-  pantalla dice "aproximado".
+  sentido de las vías: primero router.project-osrm.org y, si falla, routing.openstreetmap.de.
+  Si ninguno responde, se estima en línea recta ×1.35 y la pantalla dice "aproximado";
+  el trazo lo vuelve a pedir el navegador al abrir el plan.
 - El reparto y el orden se buscan con el método que usan los programas de ruteo
   (inserción por "arrepentimiento", mejoras 2-opt / or-opt / mover / intercambiar /
   2-opt* entre rutas, y destruir y reconstruir). El 2-opt* intercambia los finales de dos

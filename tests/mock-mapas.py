@@ -7,7 +7,11 @@ Un Nominatim y un OSRM de mentira, para probar las rutas sin salir a internet.
                            la consulta (con un corrimiento según el texto, para que dos
                            direcciones no caigan en el mismo sitio).
   /table/v1/driving/...    como OSRM: distancias en línea recta ×1.3 y 25 km/h.
-  /route/v1/driving/...    como OSRM: el trazo en línea recta entre los puntos.
+  /route/v1/driving/...    como OSRM: un trazo "por las calles" (cada tramo en escuadra, con
+                           puntos intermedios, como un camino real).
+  /__fallar-servidor?on=1  desde ahí, los pedidos a OSRM del SERVIDOR (User-Agent
+                           TransjerGestion) fallan con 503; los del navegador, no. Sirve
+                           para probar que el navegador redibuja la ruta. on=0 lo apaga.
 
 Trampas a propósito:
   - "Tomas Marsano" devuelve primero una calle en San Isidro (otro distrito): el sistema
@@ -72,6 +76,21 @@ def hav(a, b):
     return 2 * R * math.asin(math.sqrt(h))
 
 
+FALLAR = {"servidor": False}
+
+
+def escuadra(pts):
+    """Cada tramo va primero en una dirección y luego en la otra, con puntos intermedios."""
+    out = [list(pts[0])]
+    for a, b in zip(pts, pts[1:]):
+        esquina = (b[0], a[1])
+        for t in (0.5, 1):
+            out.append([a[0] + (esquina[0] - a[0]) * t, a[1]])
+        for t in (0.5, 1):
+            out.append([b[0], esquina[1] + (b[1] - esquina[1]) * t])
+    return out
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -80,6 +99,7 @@ class H(BaseHTTPRequestHandler):
         b = json.dumps(obj).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
         self.wfile.write(b)
@@ -88,14 +108,21 @@ class H(BaseHTTPRequestHandler):
         u = urlsplit(self.path)
         if u.path == "/search":
             return self.responder(buscar(parse_qs(u.query).get("q", [""])[0]))
+        if u.path == "/__fallar-servidor":
+            FALLAR["servidor"] = parse_qs(u.query).get("on", ["1"])[0] == "1"
+            return self.responder({"code": "Ok", "fallar": FALLAR["servidor"]})
         if u.path.startswith("/table/v1/driving/") or u.path.startswith("/route/v1/driving/"):
+            if FALLAR["servidor"] and "TransjerGestion" in (self.headers.get("User-Agent") or ""):
+                self.send_response(503)
+                self.end_headers()
+                return
             pts = [tuple(map(float, p.split(","))) for p in unquote(u.path.split("/")[-1]).split(";")]
             if u.path.startswith("/table"):
                 d = [[hav(a, b) * 1.3 for b in pts] for a in pts]
                 return self.responder({"code": "Ok", "distances": d, "durations": [[x / (25000 / 3600) for x in f] for f in d]})
             dist = sum(hav(pts[i - 1], pts[i]) * 1.3 for i in range(1, len(pts)))
             return self.responder({"code": "Ok", "routes": [{"distance": dist, "duration": dist / (25000 / 3600),
-                                                             "geometry": {"coordinates": [list(p) for p in pts]}}]})
+                                                             "geometry": {"coordinates": escuadra(pts)}}]})
         self.send_response(404)
         self.end_headers()
 

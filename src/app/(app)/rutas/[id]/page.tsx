@@ -8,6 +8,7 @@ import { ConfirmButton } from "@/components/ui/confirm-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
+import { servidoresOsrm } from "@/lib/rutas/trazado";
 import { formatDate } from "@/lib/utils";
 import { lugares, obtenerPlan, vehiculosParaRutas } from "@/server/rutas";
 
@@ -62,6 +63,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
         cochera={cochera ? { lat: cochera.lat, lng: cochera.lng, name: cochera.name, address: cochera.address } : null}
         flota={flota}
         canManage={canManage}
+        servidoresOsrm={servidoresOsrm(process.env.OSRM_URL)}
       />
     </>
   );

@@ -183,6 +183,28 @@ with sync_playwright() as p:
     check("el enlace de Google Maps sale de la cochera", f"origin={coch.replace(',', '%2C')}" in enlace, (coch, enlace[:120]))
     check("en Lima, el reparto suma una cantidad razonable de km (50–400)", 50 < km_total < 400, km_total)
 
+    rectas_q = (f"select count(*) from route_plan_vehicles v where v.plan_id = '{plan_id}' and v.km is not null and "
+                f"jsonb_array_length(v.geometry) <= 3 + (select count(*) from route_plan_stops s where s.plan_vehicle_id = v.id)")
+    check("cada ruta va dibujada por las calles, no en línea recta", psql(rectas_q) == "0", psql(rectas_q))
+
+    # --- Si el servidor no obtiene las calles, el navegador redibuja la ruta ---
+    urllib.request.urlopen("http://127.0.0.1:3999/__fallar-servidor?on=1").read()
+    try:
+        form.get_by_role("button", name=re.compile("Recalcular rutas")).click()
+        page.wait_for_timeout(1500)
+        for _ in range(20):
+            if psql(rectas_q) == "0" and psql(f"select approximate from route_plans where id = '{plan_id}'") in ("f", "false"):
+                break
+            page.wait_for_timeout(500)
+        check("sin respuesta en el servidor, el navegador traza las rutas por las calles y las guarda", psql(rectas_q) == "0", psql(rectas_q))
+        check("y el plan deja de decir «aproximado»", psql(f"select approximate from route_plans where id = '{plan_id}'") in ("f", "false"))
+        km_total = float(psql(f"select total_km from route_plans where id = '{plan_id}'"))
+        km_moviles = float(psql(f"select sum(km) from route_plan_vehicles where plan_id = '{plan_id}'"))
+        check("con los km corregidos (total = suma de móviles)", abs(km_total - km_moviles) < 0.05, (km_total, km_moviles))
+        check("queda en la auditoría", int(psql(f"select count(*) from audit_logs where record_id = '{plan_id}' and description like '%trazada por las calles%'")) >= 1)
+    finally:
+        urllib.request.urlopen("http://127.0.0.1:3999/__fallar-servidor?on=0").read()
+
     # --- Hojas de ruta en Excel ---
     with page.expect_download() as bajada:
         page.get_by_role("link", name=re.compile("Descargar hojas de ruta")).click()

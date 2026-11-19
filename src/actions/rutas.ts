@@ -8,12 +8,13 @@ import { geoCache, routePlaces, routePlans, routePlanStops, routePlanVehicles } 
 import { BusinessError, toActionError, type ActionResult } from "@/lib/action-result";
 import { logAudit } from "@/lib/audit";
 import { requireActionUser } from "@/lib/auth";
-import { dentroDeLima, type Calidad } from "@/lib/rutas/geo";
+import { dentroDeLima, haversine, type Calidad } from "@/lib/rutas/geo";
+import { esTrazoRecto, type Camino } from "@/lib/rutas/trazado";
 import { leerMoviles } from "@/lib/rutas/moviles";
 import { optimizar } from "@/lib/rutas/optimizar";
 import { formatDate } from "@/lib/utils";
 import { geocodificar } from "@/server/geocoder";
-import { matriz, trazo } from "@/server/osrm";
+import { matriz, trazo, VELOCIDAD_MS } from "@/server/osrm";
 import { lugares } from "@/server/rutas";
 import { leerExcelProgramacion } from "@/server/rutas-excel";
 
@@ -142,6 +143,61 @@ export async function moverParada(stopId: string, lat: number, lng: number): Pro
   }
 }
 
+/**
+ * Guarda el trazo por las calles que obtuvo el navegador para una ruta que había quedado
+ * en línea recta (el servidor no consiguió respuesta de OSRM al calcular). Corrige sus km
+ * y su tiempo. Solo reemplaza un trazo recto, y solo por uno que empieza y termina donde
+ * él (la cochera).
+ */
+export async function guardarTrazo(movilId: string, camino: Camino): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("trips.manage");
+    const { linea, metros, segundos } = camino ?? ({} as Camino);
+    const valido = Array.isArray(linea) && linea.length >= 2 && linea.length <= 100_000
+      && linea.every((p) => Array.isArray(p) && p.length === 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]) && Math.abs(p[0]) <= 90 && Math.abs(p[1]) <= 180)
+      && Number.isFinite(metros) && metros > 0 && metros < 2_000_000 && Number.isFinite(segundos) && segundos > 0 && segundos < 7 * 86400;
+    if (!valido) throw new BusinessError("El trazo recibido no es válido.");
+
+    const [mv] = await db.select().from(routePlanVehicles).where(eq(routePlanVehicles.id, movilId));
+    if (!mv) throw new BusinessError("La ruta ya no existe (¿se volvió a calcular?).");
+    const todas = await db.select({ id: routePlanVehicles.id, km: routePlanVehicles.km, geometry: routePlanVehicles.geometry })
+      .from(routePlanVehicles).where(eq(routePlanVehicles.planId, mv.planId));
+    const paradas = await db.select({ v: routePlanStops.planVehicleId }).from(routePlanStops).where(eq(routePlanStops.planId, mv.planId));
+    const entregas = (id: string) => paradas.filter((p) => p.v === id).length;
+    if (!esTrazoRecto(mv.geometry, entregas(mv.id))) return { ok: true, message: "La ruta ya estaba trazada por las calles." };
+
+    const g = mv.geometry!;
+    const cerca = (a: [number, number], b: [number, number]) => haversine({ lat: a[0], lng: a[1] }, { lat: b[0], lng: b[1] }) < 1500;
+    if (!cerca(linea[0], g[0]) || !cerca(linea[linea.length - 1], g[g.length - 1])) {
+      throw new BusinessError("El trazo no corresponde a esta ruta.");
+    }
+
+    const kmAntes = Number(mv.km ?? 0);
+    const km = metros / 1000;
+    // Los minutos guardados = manejo estimado + carga + entregas: se cambia solo el manejo.
+    const manejoAntes = Math.round((kmAntes * 1000) / VELOCIDAD_MS / 60);
+    const minutos = mv.minutes != null ? Math.max(0, mv.minutes - manejoAntes) + Math.round(segundos / 60) : null;
+    const quedanRectas = todas.some((t) => t.id !== mv.id && esTrazoRecto(t.geometry, entregas(t.id)));
+    const total = todas.reduce((s, t) => s + (t.id === mv.id ? km : Number(t.km ?? 0)), 0);
+
+    await db.transaction(async (tx) => {
+      await tx.update(routePlanVehicles).set({ geometry: linea, km: km.toFixed(2), minutes: minutos }).where(eq(routePlanVehicles.id, mv.id));
+      await tx.update(routePlans).set({ totalKm: total.toFixed(2), ...(quedanRectas ? {} : { approximate: false }) })
+        .where(eq(routePlans.id, mv.planId));
+      await logAudit({
+        user, action: "EDITAR", module: "RUTAS", recordId: mv.planId,
+        description: `Ruta de ${mv.plate} trazada por las calles: ${kmAntes.toFixed(1)} km estimados → ${km.toFixed(1)} km.`,
+        oldData: { km: kmAntes }, newData: { km },
+      }, tx);
+    });
+    revalidatePath(`/rutas/${mv.planId}`);
+    revalidatePath("/rutas");
+    return { ok: true, message: `Ruta de ${mv.plate} trazada por las calles.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
 /** Fija el centro de recojo o la cochera en el mapa. */
 export async function guardarLugar(key: "CD" | "COCHERA", lat: number, lng: number, address: string): Promise<ActionResult> {
   try {
@@ -214,9 +270,15 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
     });
 
     // El trazo por las calles de cada móvil con paradas.
-    const trazos = await Promise.all(r.rutas.map((ruta) => ruta.length
-      ? trazo([cochera, centro, ...ruta.map((i) => puntos[i]), cochera])
-      : Promise.resolve(null)));
+    // Uno tras otro: los servidores públicos rechazan varios pedidos a la vez.
+    // Si las calles no respondieron para la matriz, o se acaba el tiempo, se guarda la línea
+    // recta y el navegador la redibuja por las calles al abrir el plan.
+    const inicio = Date.now();
+    const trazos: (Awaited<ReturnType<typeof trazo>> | null)[] = [];
+    for (const ruta of r.rutas) {
+      const sinTiempo = m.aproximada || Date.now() - inicio > 25_000;
+      trazos.push(ruta.length ? await trazo([cochera, centro, ...ruta.map((i) => puntos[i]), cochera], sinTiempo) : null);
+    }
     const aproximado = m.aproximada || trazos.some((t) => t?.aproximado);
 
     let totalKm = 0;
