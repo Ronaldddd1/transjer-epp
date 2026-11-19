@@ -6,11 +6,11 @@
  * más peso ni más volumen de lo que admite, ni pasar de la jornada, ni (si se acordó) de
  * un máximo de entregas. Se busca que la suma de kilómetros de todas sea la menor.
  *
- * El tramo cochera → centro de recojo es igual para todas, pero solo lo hace la móvil que
- * sale: por eso sacar una móvil más "cuesta" ese tramo, y el sistema solo la usa si
- * acorta el total o si hace falta (por carga o por jornada). No se reparte parejo ni se
- * divide el mapa en zonas: se busca el menor recorrido, y eso ya da rutas en un orden
- * lógico, sin idas y vueltas ni cruces.
+ * Con usarTodas (lo que hace la pantalla), salen todas las móviles elegidas y ninguna
+ * se queda sin entregas; sin eso, una móvil más "cuesta" su tramo cochera → centro y
+ * solo se usa si acorta el total o hace falta. En los dos casos no se reparte parejo ni
+ * se divide el mapa en zonas: se busca el menor recorrido total, y eso ya da rutas en
+ * un orden lógico, sin idas y vueltas ni cruces.
  *
  * No hay una fórmula que dé la mejor ruta exacta en un tiempo razonable, así que se hace
  * como lo hacen los programas de ruteo:
@@ -55,6 +55,11 @@ export type Entrada = {
   salidaMetros?: number;
   /** El tiempo de ese tramo más el de carga en el centro. */
   salidaSegundos?: number;
+  /**
+   * Salen todas las móviles: ninguna se queda sin entregas. Entre ellas se reparte para el
+   * menor recorrido total (no parejo: cada una lleva lo que le queda más a mano).
+   */
+  usarTodas?: boolean;
   /** Milisegundos como máximo para buscar mejoras (un tope de seguridad). */
   tiempoMs?: number;
   /**
@@ -86,6 +91,8 @@ export function optimizar(e: Entrada): Salida {
   const tope = Date.now() + (e.tiempoMs ?? 8000);
 
   const salida = e.salidaMetros ?? 0;
+  // Salir con todas solo tiene sentido si hay al menos una entrega para cada una.
+  const todas = !!e.usarTodas && n >= V;
   const costo = (r: number[]) => {
     if (!r.length) return 0;
     let c = salida + d[0][r[0]];
@@ -216,6 +223,8 @@ export function optimizar(e: Entrada): Salida {
               if (gana > mejor + EPS && enJornada(b, [...destino.slice(0, p), x, ...destino.slice(p)])) { mejor = gana; bV = b; bP = p; }
             }
           }
+          // Si salen todas, la última entrega de una móvil no se le quita.
+          if (bV >= 0 && todas && bV !== a && sinX.length === 0) continue;
           if (bV >= 0) {
             rutas[a] = sinX;
             rutas[bV].splice(bP, 0, x);
@@ -235,6 +244,7 @@ export function optimizar(e: Entrada): Salida {
               const ra = [...rutas[a].slice(0, i + 1), ...rutas[b].slice(k + 1)];
               const rb = [...rutas[b].slice(0, k + 1), ...rutas[a].slice(i + 1)];
               const c = costo(ra) + costo(rb);
+              if (todas && (!ra.length || !rb.length)) continue;
               if (c < base - EPS && cabe(a, ra) && cabe(b, rb)) {
                 rutas[a] = ra; rutas[b] = rb; base = c; hubo = true;
               }
@@ -262,9 +272,23 @@ export function optimizar(e: Entrada): Salida {
 
   const total = (rutas: number[][]) => rutas.reduce((s, r) => s + costo(r), 0);
 
-  // 1 y 2: la primera solución.
+  // 1 y 2: la primera solución. Si salen todas, cada móvil empieza con una entrega
+  // "semilla": la más alejada del centro y, para las siguientes, la más alejada de las ya
+  // elegidas. Así cada una arranca en un extremo distinto y el resto se acomoda alrededor.
   let mejores: number[][] = Array.from({ length: V }, () => []);
-  let sinAsignar = reconstruir(mejores, Array.from({ length: n }, (_, i) => i + 1));
+  if (todas) {
+    const semillas: number[] = [];
+    for (let v = 0; v < V; v++) {
+      let mejorX = -1, mejorD = -1;
+      for (let x = 1; x <= n; x++) {
+        if (semillas.includes(x) || !puedeAgregar(v, [], x)) continue;
+        const lejos = semillas.length ? Math.min(...semillas.map((s2) => Math.min(d[s2][x], d[x][s2]))) : d[0][x];
+        if (lejos > mejorD) { mejorD = lejos; mejorX = x; }
+      }
+      if (mejorX > 0) { semillas.push(mejorX); mejores[v].push(mejorX); }
+    }
+  }
+  let sinAsignar = reconstruir(mejores, Array.from({ length: n }, (_, i) => i + 1).filter((x) => !mejores.flat().includes(x)));
   mejorar(mejores);
   sinAsignar = reconstruir(mejores, sinAsignar);
   let mejorTotal = total(mejores);
@@ -279,15 +303,21 @@ export function optimizar(e: Entrada): Salida {
       const fuera: number[] = [];
       if (azar() < 0.5) {
         // Al azar.
-        const todas = rutas.flat();
-        while (fuera.length < cuantas && todas.length) fuera.push(todas.splice(Math.floor(azar() * todas.length), 1)[0]);
+        const lista = rutas.flat();
+        while (fuera.length < cuantas && lista.length) fuera.push(lista.splice(Math.floor(azar() * lista.length), 1)[0]);
       } else {
         // Las más cercanas a una parada elegida al azar: rehace un barrio entero.
-        const todas = rutas.flat();
-        if (!todas.length) break;
-        const semilla = todas[Math.floor(azar() * todas.length)];
-        todas.sort((x, y) => d[semilla][x] - d[semilla][y]);
-        fuera.push(...todas.slice(0, cuantas));
+        const lista = rutas.flat();
+        if (!lista.length) break;
+        const semilla = lista[Math.floor(azar() * lista.length)];
+        lista.sort((x, y) => d[semilla][x] - d[semilla][y]);
+        fuera.push(...lista.slice(0, cuantas));
+      }
+      if (todas) {
+        // Ninguna móvil se queda vacía: si se iban a sacar todas sus entregas, una se queda.
+        for (const r of rutas) {
+          if (r.length && r.every((x) => fuera.includes(x))) fuera.splice(fuera.indexOf(r[0]), 1);
+        }
       }
       for (let v = 0; v < V; v++) rutas[v] = rutas[v].filter((x) => !fuera.includes(x));
       const quedan = reconstruir(rutas, [...fuera, ...sinAsignar]);

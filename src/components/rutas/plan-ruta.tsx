@@ -375,9 +375,9 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                 )}
                 <Button size="sm" variant="ghost" className="justify-self-start" onClick={() => setTerceros((t) => [...t, (t.at(-1) ?? 0) + 1])}><Plus className="h-4 w-4" /> Móvil de tercero</Button>
                 <p className="text-xs text-steel-500">
-                  Se busca el menor recorrido total: cada ruta en un orden lógico, sin idas y vueltas ni cruces, y cada
-                  entrega en la móvil que pasa más cerca. Si una sola puede con todo dentro de la jornada, sale una sola:
-                  otra móvil sumaría su viaje cochera → centro.
+                  Salen todas las móviles que marques. Entre ellas se reparten las entregas para el menor recorrido
+                  total: cada ruta en un orden lógico, sin idas y vueltas ni cruces, y cada entrega en la móvil que pasa
+                  más cerca (no necesariamente la misma cantidad para cada una).
                 </p>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
                   <label className="flex items-center gap-2">

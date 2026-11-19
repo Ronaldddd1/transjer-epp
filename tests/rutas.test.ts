@@ -121,8 +121,23 @@ const check = (n: string, c: boolean, x?: unknown) => {
   // El tramo cochera → centro: lo hace cada móvil que sale.
   const unaSola = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 150,
     moviles: [0, 1].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null })) });
-  check("si una móvil puede con todo, sale una sola (otra sumaría su tramo cochera → centro)",
+  check("sin «usar todas», si una móvil puede con todo, sale una sola (otra sumaría su tramo cochera → centro)",
     unaSola.rutas.filter((r) => r.length).length === 1, unaSola.rutas.map((r) => r.length));
+  const ambas = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 150, usarTodas: true,
+    moviles: [0, 1].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null })) });
+  check("con «usar todas», salen las dos aunque una pudiera con todo, y entra todo",
+    ambas.rutas.every((r) => r.length > 0) && ambas.sinAsignar.length === 0, ambas.rutas.map((r) => r.length));
+  const tres = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 150, usarTodas: true,
+    moviles: [0, 1, 2].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null })) });
+  check("con tres, salen las tres", tres.rutas.every((r) => r.length > 0) && tres.rutas.flat().length === 10, tres.rutas.map((r) => r.length));
+  // No parejo: un grupo grande lejos y una entrega suelta; con dos móviles, una lleva el grupo.
+  const grupo = [...Array.from({ length: 7 }, (_, i) => ({ x: 30 + (i % 3), y: 30 + Math.floor(i / 3) })), { x: -12, y: 2 }];
+  const pg = [{ x: 0, y: 0 }, ...grupo, { x: 0, y: -1 }];
+  const dg = pg.map((a) => pg.map((b2) => Math.hypot(a.x - b2.x, a.y - b2.y) * 1000));
+  const desparejo = optimizar({ distancias: dg, kg: [0, ...Array(8).fill(10)], m3: Array(9).fill(0), salidaMetros: 3000, usarTodas: true, intentos: 150,
+    moviles: [0, 1].map(() => ({ capacidadKg: 5000, capacidadM3: null, maxParadas: null })) });
+  check("no se reparte parejo: una móvil lleva el grupo de 7 y la otra la entrega suelta",
+    desparejo.rutas.map((r) => r.length).sort().join(",") === "1,7", desparejo.rutas.map((r) => r.length));
   const conTramo = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), salidaMetros: 20000, intentos: 50,
     moviles: [{ capacidadKg: null, capacidadM3: null, maxParadas: null }] });
   const sinTramo = optimizar({ distancias: dist, kg: kgs, m3: Array(11).fill(0), intentos: 50,
@@ -158,7 +173,7 @@ const check = (n: string, c: boolean, x?: unknown) => {
     const n = 14;
     const pts = Array.from({ length: n + 2 }, () => ({ x: rnd() * 40, y: rnd() * 40 }));
     const dd = pts.map((a) => pts.map((b) => Math.hypot(a.x - b.x, a.y - b.y) * 1000));
-    const res = optimizar({ distancias: dd, kg: [0, ...Array(n).fill(10)], m3: Array(n + 1).fill(0), salidaMetros: 8000,
+    const res = optimizar({ distancias: dd, kg: [0, ...Array(n).fill(10)], m3: Array(n + 1).fill(0), salidaMetros: 8000, usarTodas: caso % 2 === 0,
       moviles: [0, 1].map(() => ({ capacidadKg: 80, capacidadM3: null, maxParadas: null })), semilla: caso + 1 });
     const ok = res.rutas.every((r) => {
       const camino = [pts[0], ...r.map((i) => pts[i]), pts[n + 1]];

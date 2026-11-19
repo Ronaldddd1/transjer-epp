@@ -203,6 +203,8 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
       // El tramo cochera → centro (índices: la cochera es la última fila de la matriz).
       salidaMetros: m.distancias[puntos.length - 1][0],
       salidaSegundos: m.duraciones[puntos.length - 1][0] + cargaMin * 60,
+      // Salen todas las móviles marcadas: si no hace falta alguna, se desmarca.
+      usarTodas: true,
       kg: [0, ...paradas.map((p) => Number(p.kg))],
       m3: [0, ...paradas.map((p) => Number(p.m3))],
       moviles: moviles.map((v) => ({
