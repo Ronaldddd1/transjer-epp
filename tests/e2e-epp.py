@@ -215,7 +215,7 @@ with sync_playwright() as p:
 
     # 10. Usuario de almacén, creado marcando sus módulos: sin facturas
     def marcar(modulo, nivel):
-        m.get_by_role("radiogroup", name=modulo).get_by_text(nivel, exact=True).click()
+        m.get_by_role("radiogroup", name=modulo, exact=True).get_by_text(nivel, exact=True).click()
 
     page.goto(BASE + "/usuarios")
     page.get_by_role("button", name="Nuevo usuario").click()

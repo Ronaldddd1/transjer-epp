@@ -232,6 +232,13 @@
       "when": 1795100000000,
       "tag": "0032_reabrir_asistencia",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1795600000000,
+      "tag": "0033_rutas_reparto",
+      "breakpoints": true
     }
   ]
 }

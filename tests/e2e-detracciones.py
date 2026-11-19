@@ -215,8 +215,8 @@ def main():
         page.fill("input[name=email]", f"detra{SELLO}@transjer.pe")
         # Lo que antes daba el rol de detracciones, marcado módulo por módulo.
         dialogo = page.locator("[role=dialog]")
-        dialogo.get_by_role("radiogroup", name="Detracciones").get_by_text("Ver y editar", exact=True).click()
-        dialogo.get_by_role("radiogroup", name="Facturas y calendario de pagos").get_by_text("Solo ver", exact=True).click()
+        dialogo.get_by_role("radiogroup", name="Detracciones", exact=True).get_by_text("Ver y editar", exact=True).click()
+        dialogo.get_by_role("radiogroup", name="Facturas y calendario de pagos", exact=True).get_by_text("Solo ver", exact=True).click()
         page.wait_for_timeout(300)
         check("el formulario ofrece marcar los módulos", "Módulos a los que entra" in dialogo.inner_text())
         page.fill("input[name=password]", "Detrac123!")

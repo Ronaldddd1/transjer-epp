@@ -10,7 +10,7 @@ import {
 } from "@/lib/utils";
 import {
   type AnyPgColumn,
-  boolean, check, customType, date, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
+  boolean, check, customType, date, doublePrecision, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp,
   uniqueIndex, uuid, varchar,
 } from "drizzle-orm/pg-core";
 
@@ -1093,3 +1093,97 @@ export type Vehicle = typeof vehicles.$inferSelect;
 export type DocumentRow = typeof documents.$inferSelect;
 export type EppReturn = typeof eppReturns.$inferSelect;
 export type ReturnCondition = (typeof returnConditionEnum.enumValues)[number];
+
+// --- Rutas de reparto ---
+
+/** Los lugares fijos de las rutas: el centro de recojo del cliente (CD) y la cochera. */
+export const routePlaces = pgTable("route_places", {
+  key: varchar("key", { length: 20 }).primaryKey(),
+  name: varchar("name", { length: 120 }).notNull(),
+  address: varchar("address", { length: 240 }),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/**
+ * Dónde quedó cada dirección. La clave es la dirección ordenada y su distrito; si alguien
+ * corrige el pin a mano, queda MANUAL y la próxima programación con la misma dirección ya
+ * sale en su sitio.
+ */
+export const geoCache = pgTable("geo_cache", {
+  key: varchar("key", { length: 400 }).primaryKey(),
+  query: varchar("query", { length: 400 }),
+  lat: doublePrecision("lat").notNull(),
+  lng: doublePrecision("lng").notNull(),
+  quality: varchar("quality", { length: 12 }).notNull(),
+  label: varchar("label", { length: 400 }),
+  updatedBy: uuid("updated_by").references(() => users.id, { onDelete: "set null" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Una programación del cliente (un Excel) para un día de servicio. */
+export const routePlans = pgTable("route_plans", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  serviceDate: date("service_date").notNull(),
+  name: varchar("name", { length: 160 }).notNull(),
+  fileName: varchar("file_name", { length: 240 }),
+  /** Minutos que se queda la móvil en cada parada (descargar, firmar). */
+  serviceMinutes: integer("service_minutes").notNull().default(15),
+  /** BORRADOR: falta calcular. CALCULADA: ya tiene rutas. */
+  status: varchar("status", { length: 12 }).notNull().default("BORRADOR"),
+  totalKm: numeric("total_km", { precision: 10, scale: 2 }),
+  /** Si las distancias salieron en línea recta (no se pudo consultar las calles). */
+  approximate: boolean("approximate").notNull().default(false),
+  calculatedAt: timestamp("calculated_at", { withTimezone: true }),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("route_plans_date_idx").on(t.serviceDate)]);
+
+/** Las móviles de una programación: su capacidad y lo que les tocó. */
+export const routePlanVehicles = pgTable("route_plan_vehicles", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  planId: uuid("plan_id").notNull().references(() => routePlans.id, { onDelete: "cascade" }),
+  vehicleId: uuid("vehicle_id").references(() => vehicles.id, { onDelete: "set null" }),
+  plate: varchar("plate", { length: 20 }).notNull(),
+  position: integer("position").notNull(),
+  capacityKg: numeric("capacity_kg", { precision: 10, scale: 2 }),
+  capacityM3: numeric("capacity_m3", { precision: 10, scale: 3 }),
+  maxStops: integer("max_stops"),
+  km: numeric("km", { precision: 10, scale: 2 }),
+  minutes: integer("minutes"),
+  loadKg: numeric("load_kg", { precision: 10, scale: 2 }),
+  loadM3: numeric("load_m3", { precision: 10, scale: 4 }),
+  /** El trazo por las calles, [lat, lng][], para dibujarlo en el mapa. */
+  geometry: jsonb("geometry").$type<[number, number][]>(),
+}, (t) => [index("route_plan_vehicles_plan_idx").on(t.planId)]);
+
+/** Las paradas de una programación: una por dirección, con sus pedidos. */
+export const routePlanStops = pgTable("route_plan_stops", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  planId: uuid("plan_id").notNull().references(() => routePlans.id, { onDelete: "cascade" }),
+  addressKey: varchar("address_key", { length: 400 }).notNull(),
+  orders: text("orders").array().notNull(),
+  customer: varchar("customer", { length: 400 }).notNull(),
+  phone: varchar("phone", { length: 120 }),
+  address: varchar("address", { length: 400 }).notNull(),
+  cleanAddress: varchar("clean_address", { length: 400 }).notNull(),
+  reference: varchar("reference", { length: 400 }),
+  district: varchar("district", { length: 80 }).notNull(),
+  dispatchType: varchar("dispatch_type", { length: 80 }),
+  agency: varchar("agency", { length: 160 }),
+  notes: text("notes"),
+  zone: varchar("zone", { length: 40 }),
+  deadline: date("deadline"),
+  kg: numeric("kg", { precision: 10, scale: 2 }).notNull().default("0"),
+  m3: numeric("m3", { precision: 10, scale: 4 }).notNull().default("0"),
+  products: jsonb("products").$type<{ codigo: string; descripcion: string; cantidad: number }[]>(),
+  lat: doublePrecision("lat"),
+  lng: doublePrecision("lng"),
+  /** EXACTA, CALLE, ZONA, DISTRITO, MANUAL o SIN_UBICAR. */
+  geoQuality: varchar("geo_quality", { length: 12 }),
+  geoLabel: varchar("geo_label", { length: 400 }),
+  planVehicleId: uuid("plan_vehicle_id").references(() => routePlanVehicles.id, { onDelete: "set null" }),
+  sequence: integer("sequence"),
+}, (t) => [index("route_plan_stops_plan_idx").on(t.planId)]);

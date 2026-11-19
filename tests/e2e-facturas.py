@@ -493,7 +493,7 @@ with sync_playwright() as p:
     # Lo que antes daba el rol Finanzas, marcado módulo por módulo.
     m.locator("#password").fill(fin_pass)
     for modulo in ["Facturas y calendario de pagos", "Detracciones", "Proveedores", "Préstamos y servicios"]:
-        m.get_by_role("radiogroup", name=modulo).get_by_text("Ver y editar", exact=True).click()
+        m.get_by_role("radiogroup", name=modulo, exact=True).get_by_text("Ver y editar", exact=True).click()
     m.get_by_role("button", name="Crear usuario").click()
     toast(page, "Usuario")
 

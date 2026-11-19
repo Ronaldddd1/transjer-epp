@@ -3,7 +3,7 @@
 import {
   Building2, CalendarCheck, CalendarDays, ChevronDown, ClipboardCheck, ClipboardList,
   FolderOpen, HardHat, Landmark, LayoutDashboard, LogOut, Mail, Menu, PackageSearch, Receipt, ShieldCheck,
-  Truck, Undo2, Users, Wallet, Wrench, X, MapPin,
+  Route, Truck, Undo2, Users, Wallet, Wrench, X, MapPin,
 } from "lucide-react";
 import Link, { useLinkStatus } from "next/link";
 import { usePathname } from "next/navigation";
@@ -55,6 +55,7 @@ const SECTIONS: NavSection[] = [
     label: "Flota",
     items: [
       { href: "/salidas", label: "Salidas y liquidación", icon: Truck, permission: "trips.view" },
+      { href: "/rutas", label: "Rutas de reparto", icon: Route, permission: "trips.view" },
       { href: "/documentos", label: "Documentos", icon: FolderOpen, permission: "documents.view" },
       { href: "/mantenimiento", label: "Mantenimiento", icon: Wrench, permission: "maintenance.view" },
       { href: "/clientes-provincia", label: "Clientes de provincia", icon: MapPin, permission: "provinceClients.view" },

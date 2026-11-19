@@ -1,0 +1,119 @@
+RUTAS DE REPARTO (Flota > Rutas de reparto)
+==========================================
+
+ANTES DE SUBIR
+--------------
+Lleva una migración nueva (0033). Si todavía no corriste las anteriores (0026 a 0032), van
+todas juntas. En tu PC, contra producción, y ANTES del git push:
+
+    npm run db:migrate
+
+    0033_rutas_reparto   las programaciones, sus paradas y móviles, el centro de recojo y
+                         la cochera, y las direcciones ya ubicadas
+
+Solo agrega tablas: no borra datos. Usa los permisos de "Salidas y liquidación" (ver /
+editar): quien maneja Salidas maneja las rutas.
+
+No necesita claves ni cuentas: usa OpenStreetMap (gratis). Ver "Variables" abajo.
+
+
+PRIMERA VEZ: UBICAR EL CENTRO DE RECOJO Y LA COCHERA
+-----------------------------------------------------
+Abre cualquier programación y, debajo del mapa:
+  - "Ubicar cochera" y clic en el mapa donde está la cochera. Es obligatorio: cada ruta
+    termina ahí.
+  - "Ubicar centro" y clic en el punto exacto del centro de recojo en Lurín. Mientras no
+    se ubique, se usa el centro del distrito (dice "aproximado").
+Se guardan una sola vez y valen para todas las programaciones.
+
+
+CADA DÍA
+--------
+1. "Nueva programación": sube el Excel que manda el cliente, tal cual, y el día del
+   reparto (por defecto, mañana).
+   - Se usa la hoja con los pedidos y sus direcciones ("LISTA DE PEDIDOS FINAL"); se
+     encuentra por sus columnas aunque cambie de nombre.
+   - Los productos de un pedido se juntan, y dos pedidos a la misma dirección son una
+     sola parada (se suman kg y m³).
+
+2. Las direcciones se ubican solas en el mapa (una por segundo: 16 paradas ≈ 20 s).
+   - Las direcciones pegadas se ordenan antes de buscarlas:
+     "CALLENARANJAL115URB CAMACHO" → "Calle Naranjal 115, La Molina".
+   - La referencia ("POR PORTON DE JICAMARCA", "FRENTE AL…") se separa: va en la hoja
+     del conductor, no en la búsqueda.
+   - Solo se acepta un resultado que esté en el distrito del pedido (hay calles con el
+     mismo nombre en varios distritos).
+   - Cada parada dice qué tan bien quedó: Exacta / A nivel de calle (bien para la ruta)
+     o, en amarillo con "?", Por la urbanización / Solo el distrito (por revisar).
+
+3. Revisa las que dicen "por revisar": "Ubicar en el mapa" y clic en el sitio correcto,
+   o arrastra el punto. Queda "Corregida a mano" y SE RECUERDA: la próxima vez que llegue
+   esa dirección ya sale en su sitio. Con los días, casi todo sale ubicado solo.
+
+4. Pestaña "Móviles y rutas": marca las móviles que salen ese día.
+   - La capacidad (kg y m³) viene de la ficha de la unidad; se puede cambiar para ese día.
+   - "Máx." es el tope de entregas acordado para esa móvil (vacío = sin tope).
+   - "Móvil de tercero": para una unidad alquilada, escribiendo su placa y capacidad.
+   - "Repartir entre todas las marcadas" (marcado): salen todas, con una cantidad pareja
+     de entregas. Desmarcado: el sistema usa solo las que hagan menos km en total (a
+     veces una sola).
+   - "Minutos por entrega" (15) y "Jornada máx." (9 h): ninguna ruta pasa de esa jornada,
+     contando el manejo y el tiempo en cada entrega.
+
+5. "Calcular rutas". Cada móvil sale del centro de recojo (Lurín), hace sus entregas y
+   termina en la cochera. El sistema busca el reparto y el orden que dan menos km en
+   total, respetando la capacidad, el tope de entregas y la jornada.
+   - En el mapa, cada móvil con su color y sus paradas numeradas en orden; la ruta va
+     dibujada por las calles.
+   - Por móvil: km, tiempo estimado, carga (kg y m³ con % de su capacidad) y el orden
+     de las entregas.
+   - "Google Maps": abre la ruta en el celular del conductor, con las paradas en orden
+     (si son más de 9, en tramos).
+   - Si algo no entra (capacidad o jornada), lo dice en rojo: agrega otra móvil o amplía.
+   - "Descargar hojas de ruta (Excel)": un resumen y una pestaña por móvil con el orden,
+     pedidos, cliente, teléfono, dirección, referencia, kg, m³, fecha máxima y
+     observación.
+
+   Si se corrige una ubicación después de calcular, la programación vuelve a "Por
+   calcular": "Recalcular rutas".
+
+
+CÓMO CALCULA (PARA QUIEN PREGUNTE)
+----------------------------------
+- Las distancias son por las calles (OSRM, el motor de rutas de OpenStreetMap), en el
+  sentido de las vías. Si ese servicio no responde, se estima en línea recta ×1.35 y la
+  pantalla dice "aproximado".
+- El reparto y el orden se buscan con el método que usan los programas de ruteo
+  (inserción por "arrepentimiento", mejoras 2-opt / or-opt / mover / intercambiar, y
+  destruir y reconstruir). En pruebas con casos chicos llega siempre a la ruta más corta
+  posible; con 16 paradas tarda menos de un segundo. El mismo archivo da siempre la misma
+  ruta.
+- El tiempo es estimado (sin tráfico): sirve para comparar y para la jornada, no como
+  hora exacta de llegada.
+
+
+LÍMITES QUE CONVIENE SABER
+--------------------------
+- OpenStreetMap ubica peor las direcciones de Lima que Google: muchas quedan "a nivel de
+  calle" (sin la cuadra exacta) y las de manzana y lote, por la zona o el distrito. Por
+  eso existe la corrección a mano y la memoria de direcciones.
+- Los servicios públicos de OpenStreetMap son para uso moderado (una consulta por
+  segundo para ubicar). Para unas decenas de paradas al día alcanza de sobra.
+- No considera ventanas horarias de los clientes ni la fecha máxima de entrega para
+  elegir qué va primero (la fecha se muestra en cada parada y en la hoja del conductor).
+
+
+VARIABLES (opcionales, en Vercel)
+---------------------------------
+  GEOCODER_EMAIL   un correo de contacto; Nominatim lo pide a quien usa su servicio.
+  GEOCODER_URL     solo si se monta un servidor propio de Nominatim.
+  OSRM_URL         solo si se monta un servidor propio de OSRM.
+
+
+PRUEBAS
+-------
+  npx tsx --conditions=react-server tests/rutas.test.ts   (lectura del Excel, direcciones,
+                                                           optimizador)
+  python3 tests/e2e-rutas.py   necesita el servidor apuntando al Nominatim/OSRM de prueba:
+      python3 tests/mock-mapas.py 3999 &
+      GEOCODER_URL=http://127.0.0.1:3999 OSRM_URL=http://127.0.0.1:3999 GEOCODER_DELAY_MS=0 npm start
