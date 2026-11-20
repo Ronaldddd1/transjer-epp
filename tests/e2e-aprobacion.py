@@ -305,6 +305,11 @@ with sync_playwright() as p:
     texto_ad = fila_ad.inner_text()
     check("el adelanto aparece en su columna", "400.00" in texto_ad, texto_ad)
     check("y el saldo baja lo adelantado", "732.00" in texto_ad, texto_ad)
+    neto = psql(f"select coalesce(nullif(subtotal, 0), round(total / 1.18, 2)) from supplier_invoices where series = '{SERIE}' and number = '{SELLO}3'")
+    neto_txt = f"{float(neto):,.2f}"
+    check("arriba va el neto sin IGV; debajo el total, la detracción, el adelanto y lo que se paga",
+          fila_ad.get_by_test_id("neto").inner_text().endswith(neto_txt)
+          and "detr." in texto_ad and "adel. S/ 400.00" in texto_ad and "A pagar S/ 732.00" in texto_ad, (neto_txt, texto_ad))
 
     fila_ad.get_by_role("button", name="Registrar pago").click()
     page.wait_for_timeout(1000)

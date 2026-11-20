@@ -1,6 +1,17 @@
 RUTAS DE REPARTO (Flota > Rutas de reparto)
 ==========================================
 
+Cambios del 20/11:
+  - Los KM de cada móvil cuentan desde que sale de la cochera: cochera → centro de recojo
+    → entregas → cochera. Pero el tramo cochera → centro NO se dibuja en el mapa (la
+    ruta dibujada empieza en el centro) y NO cuenta en el tiempo.
+  - Las HORAS cuentan desde que la móvil sale del centro hasta que vuelve a la cochera
+    (manejo + minutos por entrega). Se quitó el campo "Carga en el centro".
+  - En cada tarjeta: "Sale de la cochera → Centro de recojo: X km (suman en los km; no
+    se dibujan ni cuentan en el tiempo)". En el Excel también se indica.
+  - El enlace de Google Maps parte del centro.
+  - Lleva la migración 0034 (una columna: los km del tramo de salida).
+
 Cambios del 19/11 (noche):
   - Las rutas salían en línea recta entre las paradas: el servidor público de OSRM no
     respondía a Vercel (rechaza pedidos seguidos o desde la nube) y el sistema caía al
@@ -13,7 +24,8 @@ Cambios del 19/11 (noche):
   - Las programaciones ya calculadas con líneas rectas se corrigen solas al abrirlas.
 
 Cambios del 19/11 (tarde):
-  - La ruta es cochera → centro de recojo → entregas → cochera (antes salía del centro).
+  - La ruta es cochera → centro de recojo → entregas → cochera (ver arriba: el tramo
+    cochera → centro se quitó después).
   - Salen todas las móviles marcadas; el reparto entre ellas es por el menor recorrido
     total (no parejo): rutas en orden lógico, sin idas y vueltas ni cruces.
   - Al reubicar el centro o la cochera la página ya no salta (antes el mapa se iba de la
@@ -22,13 +34,14 @@ Cambios del 19/11 (tarde):
 
 ANTES DE SUBIR
 --------------
-Lleva una migración nueva (0033). Si todavía no corriste las anteriores (0026 a 0032), van
-todas juntas. En tu PC, contra producción, y ANTES del git push:
+Lleva migraciones nuevas (0033 y 0034). Si todavía no corriste las anteriores (0026 a 0032),
+van todas juntas. En tu PC, contra producción, y ANTES del git push:
 
     npm run db:migrate
 
     0033_rutas_reparto   las programaciones, sus paradas y móviles, el centro de recojo y
                          la cochera, y las direcciones ya ubicadas
+    0034_rutas_tramo_salida   los km del tramo cochera → centro de cada programación
 
 Solo agrega tablas: no borra datos. Usa los permisos de "Salidas y liquidación" (ver /
 editar): quien maneja Salidas maneja las rutas.
@@ -40,7 +53,7 @@ PRIMERA VEZ: UBICAR EL CENTRO DE RECOJO Y LA COCHERA
 -----------------------------------------------------
 Abre cualquier programación y, con los botones de la esquina del mapa:
   - "Ubicar cochera" y clic en el mapa donde está la cochera. Es obligatorio: cada ruta
-    empieza y termina ahí.
+    termina ahí.
   - "Ubicar centro" y clic en el punto exacto del centro de recojo en Lurín. Mientras no
     se ubique, se usa el centro del distrito (dice "aproximado").
 Se guardan una sola vez y valen para todas las programaciones.
@@ -73,11 +86,13 @@ CADA DÍA
    - La capacidad (kg y m³) viene de la ficha de la unidad; se puede cambiar para ese día.
    - "Máx." es el tope de entregas acordado para esa móvil (vacío = sin tope).
    - "Móvil de tercero": para una unidad alquilada, escribiendo su placa y capacidad.
-   - "Carga en el centro" (30 min), "Minutos por entrega" (15) y "Jornada máx." (9 h):
-     ninguna ruta pasa de esa jornada, contando el manejo, la carga y cada entrega.
+   - "Minutos por entrega" (15) y "Jornada máx." (9 h): ninguna ruta pasa de esa
+     jornada, contando desde que sale del centro: el manejo y cada entrega.
 
-5. "Calcular rutas". Cada móvil que sale hace: COCHERA → CENTRO DE RECOJO (Lurín, a
-   cargar) → sus entregas → COCHERA. El sistema busca el reparto y el orden que dan el
+5. "Calcular rutas". Cada móvil que sale hace: COCHERA → CENTRO DE RECOJO (Lurín) →
+   sus entregas → COCHERA. Los km cuentan desde la cochera; el tiempo, desde que sale
+   del centro; el mapa dibuja desde el centro. El sistema busca el reparto y el orden
+   que dan el
    MENOR RECORRIDO TOTAL, respetando la capacidad, el tope de entregas y la jornada.
    - SALEN TODAS LAS MÓVILES QUE MARQUES (si alguna no hace falta, desmárcala).
    - Entre ellas se reparten las entregas para el menor recorrido total: no parejo ni
@@ -87,8 +102,8 @@ CADA DÍA
      dibujada por las calles.
    - Por móvil: km, tiempo estimado, carga (kg y m³ con % de su capacidad) y el orden
      de las entregas.
-   - "Google Maps": abre la ruta en el celular del conductor, desde la cochera, pasando
-     por el centro y las paradas en orden (si son más de 9, en tramos).
+   - "Google Maps": abre la ruta en el celular del conductor, desde el centro, pasando
+     por las paradas en orden y terminando en la cochera (si son más de 9, en tramos).
    - Si algo no entra (capacidad o jornada), lo dice en rojo: agrega otra móvil o amplía.
    - "Descargar hojas de ruta (Excel)": un resumen y una pestaña por móvil con el orden,
      pedidos, cliente, teléfono, dirección, referencia, kg, m³, fecha máxima y

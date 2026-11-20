@@ -14,11 +14,11 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
   const monedas = Array.from(new Set(filas.map((f) => f.currency)));
   const totales = monedas.map((m) => {
     const de = filas.filter((f) => f.currency === m);
-    const suma = (k: "facturado" | "pagado" | "adelantos" | "pendiente") => de.reduce((s, f) => s + Number(f[k]), 0);
+    const suma = (k: "neto" | "facturado" | "pagado" | "adelantos" | "pendiente") => de.reduce((s, f) => s + Number(f[k]), 0);
     return {
       currency: m, proveedores: new Set(de.map((f) => f.supplierId)).size,
       facturas: de.reduce((s, f) => s + f.facturas, 0),
-      facturado: suma("facturado"), pagado: suma("pagado"), adelantos: suma("adelantos"), pendiente: suma("pendiente"),
+      neto: suma("neto"), facturado: suma("facturado"), pagado: suma("pagado"), adelantos: suma("adelantos"), pendiente: suma("pendiente"),
     };
   });
   const enlace = (supplierId: string) => {
@@ -37,9 +37,10 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
       </p>
 
       {totales.length > 0 && (
-        <dl className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="resumen-totales">
+        <dl className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5" data-testid="resumen-totales">
           {totales.flatMap((t) => [
-            { k: `${t.currency}-f`, label: `Facturado (${t.facturas} facturas, ${t.proveedores} proveedores)`, v: t.facturado, tone: "" },
+            { k: `${t.currency}-n`, label: `Neto sin IGV (${t.facturas} facturas, ${t.proveedores} proveedores)`, v: t.neto, tone: "" },
+            { k: `${t.currency}-f`, label: "Facturado con IGV", v: t.facturado, tone: "" },
             { k: `${t.currency}-p`, label: "Pagado", v: t.pagado, tone: "text-emerald-700" },
             { k: `${t.currency}-a`, label: "Adelantos", v: t.adelantos, tone: "text-sky-700" },
             { k: `${t.currency}-s`, label: "Saldo pendiente", v: t.pendiente, tone: "text-[#9A7000]" },
@@ -57,6 +58,7 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
           <tr>
             <Th>Proveedor</Th>
             <Th className="text-right">Facturas</Th>
+            <Th className="text-right">Neto sin IGV</Th>
             <Th className="text-right">Total facturado</Th>
             <Th className="text-right">Pagado</Th>
             <Th className="text-right">Adelantos</Th>
@@ -66,7 +68,7 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
         </thead>
         <tbody data-testid="resumen-proveedores">
           {filas.length === 0 && (
-            <EmptyRow colSpan={7} title="No hay facturas en ese rango" hint="Prueba con otras fechas o quita el proveedor elegido." />
+            <EmptyRow colSpan={8} title="No hay facturas en ese rango" hint="Prueba con otras fechas o quita el proveedor elegido." />
           )}
           {filas.map((f) => (
             <Tr key={`${f.supplierId}-${f.currency}`}>
@@ -78,7 +80,8 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
                 {f.facturas}
                 {f.pagadas > 0 && <p className="text-xs text-steel-500">{f.pagadas} pagada(s)</p>}
               </Td>
-              <Td className="whitespace-nowrap text-right tabular font-semibold">{formatMoney(f.facturado, f.currency)}</Td>
+              <Td className="whitespace-nowrap text-right tabular font-semibold">{formatMoney(f.neto, f.currency)}</Td>
+              <Td className="whitespace-nowrap text-right tabular text-steel-600">{formatMoney(f.facturado, f.currency)}</Td>
               <Td className="whitespace-nowrap text-right tabular text-emerald-700">{formatMoney(f.pagado, f.currency)}</Td>
               <Td className="whitespace-nowrap text-right tabular text-sky-700">{Number(f.adelantos) > 0 ? formatMoney(f.adelantos, f.currency) : "—"}</Td>
               <Td className="whitespace-nowrap text-right tabular font-semibold text-[#9A7000]">
@@ -95,7 +98,8 @@ export function ResumenProveedores({ filas, desde, hasta }: { filas: ResumenProv
       </TableShell>
 
       <p className="mt-3 text-xs text-steel-500">
-        Total facturado = pagado + adelantos + saldo pendiente. Los adelantos son los entregados a cuenta de facturas que
+        Neto sin IGV: lo que cuesta cada proveedor (la base imponible de sus comprobantes). Total facturado (con IGV) =
+        pagado + adelantos + saldo pendiente. Los adelantos son los entregados a cuenta de facturas que
         siguen por pagar. El saldo pendiente incluye la detracción, que se deposita aparte en el Banco de la Nación.
       </p>
     </>

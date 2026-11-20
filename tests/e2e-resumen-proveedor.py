@@ -103,21 +103,22 @@ with sync_playwright() as p:
     celdas = [c.strip() for c in fila.locator("td").all_inner_texts()] if fila.count() else []
     check("una fila para el proveedor", fila.count() == 1)
     check("2 facturas en el rango (sin la anulada ni la de septiembre)", celdas[1].startswith("2") if celdas else False, celdas)
-    check("total facturado 2,180.00", "2,180.00" in celdas[2] if celdas else False, celdas)
-    check("pagado 1,180.00", "1,180.00" in celdas[3] if celdas else False, celdas)
-    check("adelantos 300.00", "300.00" in celdas[4] if celdas else False, celdas)
-    check("saldo pendiente 700.00 (1,000 − 300 de adelanto)", "700.00" in celdas[5] if celdas else False, celdas)
+    check("neto sin IGV 1,847.46 (1,000.00 + 847.46: sin base imponible, total / 1.18)", "1,847.46" in celdas[2] if celdas else False, celdas)
+    check("total facturado 2,180.00", "2,180.00" in celdas[3] if celdas else False, celdas)
+    check("pagado 1,180.00", "1,180.00" in celdas[4] if celdas else False, celdas)
+    check("adelantos 300.00", "300.00" in celdas[5] if celdas else False, celdas)
+    check("saldo pendiente 700.00 (1,000 − 300 de adelanto)", "700.00" in celdas[6] if celdas else False, celdas)
     check("dice el rango", "del 01/10/2026 al 31/10/2026" in page.locator("main").inner_text())
     totales = page.locator("[data-testid=resumen-totales]").inner_text()
-    check("arriba, los totales del rango", "2,180.00" in totales and "700.00" in totales, totales[:200])
+    check("arriba, los totales del rango", "1,847.46" in totales and "2,180.00" in totales and "700.00" in totales, totales[:200])
 
     # El orden: primero a quien más se le debe, comparando números y no texto.
     page.goto(f"{BASE}/facturas?estado=RESUMEN&from=2026-10-01&to=2026-10-31"); page.wait_for_timeout(1500)
     pendientes = []
     for t in page.locator("[data-testid=resumen-proveedores] tr").all():
         c = t.locator("td").all_inner_texts()
-        if len(c) > 5 and "S/" in c[5] and "US$" not in c[5]:
-            pendientes.append(float(c[5].replace("S/", "").replace(",", "").strip()))
+        if len(c) > 6 and "S/" in c[6] and "US$" not in c[6]:
+            pendientes.append(float(c[6].replace("S/", "").replace(",", "").strip()))
     check("ordenado de mayor a menor saldo pendiente", pendientes == sorted(pendientes, reverse=True), pendientes[:6])
     page.goto(f"{BASE}/facturas?estado=RESUMEN&proveedor={SUPPLIER_ID}&from=2026-10-01&to=2026-10-31"); page.wait_for_timeout(1300)
     fila = page.locator("[data-testid=resumen-proveedores] tr").filter(has_text=PROVEEDOR)
@@ -132,7 +133,7 @@ with sync_playwright() as p:
     page.goto(f"{BASE}/facturas?estado=RESUMEN&proveedor={SUPPLIER_ID}"); page.wait_for_timeout(1300)
     celdas = page.locator("[data-testid=resumen-proveedores] tr").filter(has_text=PROVEEDOR).locator("td").all_inner_texts()
     check("sin rango cuenta todas (sin la anulada): 3 facturas y 1,500.00 pendientes",
-          celdas and celdas[1].strip().startswith("3") and "1,500.00" in celdas[5], celdas)
+          celdas and celdas[1].strip().startswith("3") and "1,500.00" in celdas[6], celdas)
 
     check("ninguna pantalla lanzó errores de JavaScript", not errores, errores[:3])
     nav.close()

@@ -60,8 +60,9 @@ export async function caminoPorCalles(
 }
 
 /**
- * Si un trazo guardado es solo la unión en línea recta de sus paradas (cochera, centro,
- * entregas, cochera): un camino por las calles siempre tiene muchos más puntos.
+ * Si un trazo guardado es solo la unión en línea recta de sus paradas (centro, entregas,
+ * cochera; los planes anteriores empezaban además en la cochera): un camino por las calles
+ * siempre tiene muchos más puntos.
  */
 export function esTrazoRecto(linea: [number, number][] | null | undefined, entregas: number) {
   return !!linea && linea.length >= 2 && linea.length <= entregas + 3;

@@ -280,6 +280,10 @@ export async function resumenProveedores(f: InvoiceFilters) {
     facturas: sql<number>`count(*)::int`,
     pagadas: sql<number>`count(*) filter (where ${supplierInvoices.status} = 'PAGADA')::int`,
     facturado: sql<string>`coalesce(sum(${supplierInvoices.total}), 0)::text`,
+    // El costo sin IGV: la base imponible; si no vino, total − IGV; si tampoco, total / 1.18.
+    neto: sql<string>`coalesce(sum(case when coalesce(${supplierInvoices.subtotal}, 0) > 0 then ${supplierInvoices.subtotal}
+      when ${supplierInvoices.igv} is not null then greatest(${supplierInvoices.total} - ${supplierInvoices.igv}, 0)
+      else round(${supplierInvoices.total} / 1.18, 2) end), 0)::text`,
     pagado: sql<string>`coalesce(sum(${supplierInvoices.total}) filter (where ${supplierInvoices.status} = 'PAGADA'), 0)::text`,
     adelantos: sql<string>`coalesce(sum(coalesce(${supplierInvoices.advances}, 0)) filter (where ${porPagar}), 0)::text`,
     pendiente: sql<string>`coalesce(sum(${supplierInvoices.total} - coalesce(${supplierInvoices.advances}, 0)) filter (where ${porPagar}), 0)::text`,

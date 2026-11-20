@@ -172,15 +172,23 @@ with sync_playwright() as p:
     minutos = psql(f"select string_agg(minutes::text, ',') from route_plan_vehicles where plan_id = '{plan_id}' and km is not null")
     check("ninguna móvil pasa la jornada de 9 h", all(int(x) <= 540 for x in minutos.split(",")), minutos)
     check("una tarjeta por móvil que sale, con sus km y tiempo", tarjetas.count() >= 1 and " km" in tarjetas.first.inner_text(), tarjetas.count())
-    check("la ruta empieza en la cochera y carga en el centro", "Sale de la cochera → carga en" in tarjetas.first.inner_text())
+    salida = float(psql(f"select coalesce(exit_km, 0) from route_plans where id = '{plan_id}'"))
+    check("la tarjeta dice el tramo cochera → centro con sus km", "Sale de la cochera" in tarjetas.first.inner_text() and f"{salida:.1f} km" in tarjetas.first.inner_text(), (salida, tarjetas.first.inner_text()[:200]))
+    kms = [float(x) for x in psql(f"select string_agg(km::text, ';') from route_plan_vehicles where plan_id = '{plan_id}' and km is not null").split(";")]
+    check("los km de cada móvil cuentan desde la cochera (incluyen ese tramo)", salida > 0 and all(k > salida for k in kms), (salida, kms))
     check("con enlace a Google Maps para el conductor", tarjetas.first.locator("a[href^='https://www.google.com/maps/dir/']").count() >= 1)
     check("las rutas se dibujan en el mapa", page.locator("[data-testid=mapa-rutas] .leaflet-overlay-pane path").count() >= 2)
     km_total = float(psql(f"select total_km from route_plans where id = '{plan_id}'"))
     km_moviles = float(psql(f"select sum(km) from route_plan_vehicles where plan_id = '{plan_id}'"))
     check("los km totales son la suma de los de cada móvil", abs(km_total - km_moviles) < 0.05, (km_total, km_moviles))
     enlace = tarjetas.first.locator("a[href^='https://www.google.com/maps/dir/']").first.get_attribute("href")
-    coch = psql("select round(lat::numeric, 6) || ',' || round(lng::numeric, 6) from route_places where key = 'COCHERA'")
-    check("el enlace de Google Maps sale de la cochera", f"origin={coch.replace(',', '%2C')}" in enlace, (coch, enlace[:120]))
+    cd = psql("select round(lat::numeric, 6) || ',' || round(lng::numeric, 6) from route_places where key = 'CD'")
+    check("el enlace de Google Maps sale del centro de recojo", f"origin={cd.replace(',', '%2C')}" in enlace, (cd, enlace[:120]))
+    coch = psql("select lat || ',' || lng from route_places where key = 'COCHERA'").split(",")
+    inicio = psql(f"select string_agg((geometry->0->>0) || ',' || (geometry->0->>1), ';') from route_plan_vehicles where plan_id = '{plan_id}' and km is not null")
+    cdp = cd.split(",")
+    check("el trazo de cada móvil empieza en el centro, no en la cochera",
+          all(abs(float(x.split(',')[0]) - float(cdp[0])) < 1e-4 and abs(float(x.split(',')[1]) - float(cdp[1])) < 1e-4 for x in inicio.split(";")), (inicio, cd))
     check("en Lima, el reparto suma una cantidad razonable de km (50–400)", 50 < km_total < 400, km_total)
 
     rectas_q = (f"select count(*) from route_plan_vehicles v where v.plan_id = '{plan_id}' and v.km is not null and "

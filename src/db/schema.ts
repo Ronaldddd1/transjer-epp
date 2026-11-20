@@ -1134,6 +1134,8 @@ export const routePlans = pgTable("route_plans", {
   /** BORRADOR: falta calcular. CALCULADA: ya tiene rutas. */
   status: varchar("status", { length: 12 }).notNull().default("BORRADOR"),
   totalKm: numeric("total_km", { precision: 10, scale: 2 }),
+  /** Km del tramo cochera → centro de recojo: suma en los km de cada móvil, no se dibuja. */
+  exitKm: numeric("exit_km", { precision: 10, scale: 2 }),
   /** Si las distancias salieron en línea recta (no se pudo consultar las calles). */
   approximate: boolean("approximate").notNull().default(false),
   calculatedAt: timestamp("calculated_at", { withTimezone: true }),

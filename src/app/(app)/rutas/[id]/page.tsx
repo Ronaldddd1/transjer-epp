@@ -48,7 +48,7 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
         ) : undefined}
       />
       <PlanRuta
-        plan={{ id: plan.id, serviceDate: plan.serviceDate, status: plan.status, totalKm: plan.totalKm, approximate: plan.approximate, serviceMinutes: plan.serviceMinutes }}
+        plan={{ id: plan.id, serviceDate: plan.serviceDate, status: plan.status, totalKm: plan.totalKm, exitKm: plan.exitKm, approximate: plan.approximate, serviceMinutes: plan.serviceMinutes }}
         paradas={paradas.map((p) => ({
           id: p.id, orders: p.orders, customer: p.customer, phone: p.phone, address: p.address, cleanAddress: p.cleanAddress,
           reference: p.reference, district: p.district, dispatchType: p.dispatchType, agency: p.agency, notes: p.notes,

@@ -61,7 +61,7 @@ export function enlacesGoogle(puntos: { lat: number; lng: number }[]) {
 }
 
 export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flota, canManage, servidoresOsrm }: {
-  plan: { id: string; serviceDate: string; status: string; totalKm: string | null; approximate: boolean; serviceMinutes: number };
+  plan: { id: string; serviceDate: string; status: string; totalKm: string | null; exitKm: string | null; approximate: boolean; serviceMinutes: number };
   paradas: ParadaUI[];
   moviles: MovilUI[];
   centro: LugarUI;
@@ -326,19 +326,21 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                   const ps = paradasDe(m);
                   const color = COLORES[m.position % COLORES.length];
                   const pct = (carga: string | null, cap: string | null) => (cap ? Math.round((Number(carga ?? 0) / Number(cap)) * 100) : null);
-                  const enlaces = enlacesGoogle([...(cochera ? [cochera] : []), centro, ...ps.map((p) => ({ lat: p.lat!, lng: p.lng! })), ...(cochera ? [cochera] : [])]);
+                  const enlaces = enlacesGoogle([centro, ...ps.map((p) => ({ lat: p.lat!, lng: p.lng! })), ...(cochera ? [cochera] : [])]);
                   return (
                     <section key={m.id} className="rounded-lg border border-steel-200 bg-white" data-testid="movil-ruta">
                       <header className="flex items-center justify-between gap-2 border-b border-steel-100 px-3 py-2" style={{ borderLeft: `6px solid ${color}` }}>
                         <p className="flex items-center gap-2 font-semibold"><Truck className="h-4 w-4" /> {m.plate}</p>
-                        <p className="text-right text-sm"><strong className="tabular">{Number(m.km).toFixed(1)} km</strong> · {horas(m.minutes ?? 0)}</p>
+                        <p className="text-right text-sm" title="Km desde que sale de la cochera. Tiempo desde que sale del centro de recojo hasta que vuelve a la cochera"><strong className="tabular">{Number(m.km).toFixed(1)} km</strong> · {horas(m.minutes ?? 0)}</p>
                       </header>
                       <div className="px-3 py-2 text-xs text-steel-600">
                         {ps.length} parada(s) · {Number(m.loadKg ?? 0).toFixed(1)} kg{pct(m.loadKg, m.capacityKg) != null && ` (${pct(m.loadKg, m.capacityKg)} %)`}
                         {" · "}{Number(m.loadM3 ?? 0).toFixed(2)} m³{pct(m.loadM3, m.capacityM3) != null && ` (${pct(m.loadM3, m.capacityM3)} %)`}
                       </div>
                       <ol className="grid gap-0.5 px-3 pb-2 text-sm">
-                        <li className="text-xs text-steel-500">Sale de la cochera → carga en {centro.name}</li>
+                        <li className="text-xs text-steel-500" data-testid="tramo-salida">
+                          Sale de la cochera → {centro.name}{plan.exitKm != null && <>: {Number(plan.exitKm).toFixed(1)} km (suman en los km; no se dibujan ni cuentan en el tiempo)</>}
+                        </li>
                         {ps.map((p) => (
                           <li key={p.id} className="flex gap-2">
                             <span className="mt-0.5 inline-grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: color }}>{p.sequence}</span>
@@ -418,10 +420,6 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                   más cerca (no necesariamente la misma cantidad para cada una).
                 </p>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
-                  <label className="flex items-center gap-2">
-                    Carga en el centro (min)
-                    <input name="loadMinutes" inputMode="numeric" defaultValue="30" aria-label="Minutos de carga en el centro" className={cn("h-8 w-14 rounded border px-1.5 text-right", errores.loadMinutes ? "border-red-500" : "border-steel-300")} />
-                  </label>
                   <label className="flex items-center gap-2">
                     Minutos por entrega
                     <input name="serviceMinutes" inputMode="numeric" defaultValue={plan.serviceMinutes} aria-label="Minutos por entrega" className="h-8 w-14 rounded border border-steel-300 px-1.5 text-right" />

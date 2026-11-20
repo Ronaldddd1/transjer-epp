@@ -160,6 +160,25 @@ export type AmountCheckKey = keyof typeof AMOUNT_CHECK_LABEL;
  * deduce del total, que es mejor que no poder comparar nada.
  */
 export const IGV_RATE = 0.18;
+/**
+ * El valor neto de un comprobante, sin IGV: lo que de verdad cuesta el servicio.
+ *
+ * La base imponible si vino en el comprobante; si no, el total menos el IGV registrado
+ * (0 para lo exonerado); y si tampoco hay IGV, el total entre 1.18.
+ */
+export function netoSinIgv(
+  subtotal: string | number | null | undefined,
+  igv: string | number | null | undefined,
+  total: string | number | null | undefined,
+): string {
+  const s = Number(subtotal ?? 0);
+  if (Number.isFinite(s) && s > 0) return s.toFixed(2);
+  const t = Number(total ?? 0);
+  if (!Number.isFinite(t) || t <= 0) return "0.00";
+  if (igv != null && igv !== "" && Number.isFinite(Number(igv))) return Math.max(0, t - Number(igv)).toFixed(2);
+  return (t / (1 + IGV_RATE)).toFixed(2);
+}
+
 export function valorSinIgv(
   subtotal: string | number | null | undefined,
   total: string | number | null | undefined,

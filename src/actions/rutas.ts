@@ -14,7 +14,7 @@ import { leerMoviles } from "@/lib/rutas/moviles";
 import { optimizar } from "@/lib/rutas/optimizar";
 import { formatDate } from "@/lib/utils";
 import { geocodificar } from "@/server/geocoder";
-import { matriz, trazo, VELOCIDAD_MS } from "@/server/osrm";
+import { matriz, trazo } from "@/server/osrm";
 import { lugares } from "@/server/rutas";
 import { leerExcelProgramacion } from "@/server/rutas-excel";
 
@@ -147,7 +147,7 @@ export async function moverParada(stopId: string, lat: number, lng: number): Pro
  * Guarda el trazo por las calles que obtuvo el navegador para una ruta que había quedado
  * en línea recta (el servidor no consiguió respuesta de OSRM al calcular). Corrige sus km
  * y su tiempo. Solo reemplaza un trazo recto, y solo por uno que empieza y termina donde
- * él (la cochera).
+ * él (el centro de recojo y la cochera).
  */
 export async function guardarTrazo(movilId: string, camino: Camino): Promise<ActionResult> {
   try {
@@ -172,11 +172,13 @@ export async function guardarTrazo(movilId: string, camino: Camino): Promise<Act
       throw new BusinessError("El trazo no corresponde a esta ruta.");
     }
 
+    const [plan] = await db.select({ exitKm: routePlans.exitKm, serviceMinutes: routePlans.serviceMinutes })
+      .from(routePlans).where(eq(routePlans.id, mv.planId));
     const kmAntes = Number(mv.km ?? 0);
-    const km = metros / 1000;
-    // Los minutos guardados = manejo estimado + carga + entregas: se cambia solo el manejo.
-    const manejoAntes = Math.round((kmAntes * 1000) / VELOCIDAD_MS / 60);
-    const minutos = mv.minutes != null ? Math.max(0, mv.minutes - manejoAntes) + Math.round(segundos / 60) : null;
+    // El trazo va del centro a la cochera; el tramo cochera → centro suma aparte.
+    const km = metros / 1000 + Number(plan?.exitKm ?? 0);
+    // El tiempo: manejo desde el centro + cada entrega.
+    const minutos = Math.round(segundos / 60) + (plan?.serviceMinutes ?? 0) * entregas(mv.id);
     const quedanRectas = todas.some((t) => t.id !== mv.id && esTrazoRecto(t.geometry, entregas(t.id)));
     const total = todas.reduce((s, t) => s + (t.id === mv.id ? km : Number(t.km ?? 0)), 0);
 
@@ -222,7 +224,8 @@ export async function guardarLugar(key: "CD" | "COCHERA", lat: number, lng: numb
 /**
  * Calcula las rutas: reparte las paradas entre las móviles elegidas y ordena cada ruta para
  * hacer la menor cantidad de kilómetros. Cada móvil que sale hace cochera → centro de
- * recojo (a cargar) → sus entregas → cochera. Guarda el trazo por las calles para dibujarlo.
+ * recojo → sus entregas → cochera. Los km cuentan desde la cochera; el tramo cochera →
+ * centro no se dibuja ni suma al tiempo (la jornada se cuenta desde que sale del centro). Guarda el trazo por las calles para dibujarlo.
  */
 export async function calcularRutas(planId: string, formData: FormData): Promise<ActionResult> {
   try {
@@ -233,9 +236,6 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
     const jornadaTxt = String(formData.get("maxHours") ?? "").trim().replace(",", ".");
     const jornadaH = jornadaTxt ? Number(jornadaTxt) : null;
     if (jornadaH != null && (!Number.isFinite(jornadaH) || jornadaH <= 0 || jornadaH > 24)) errores.maxHours = "Jornada entre 1 y 24 horas";
-    const cargaTxt = String(formData.get("loadMinutes") ?? "30").trim();
-    const cargaMin = cargaTxt ? Number(cargaTxt) : 0;
-    if (!Number.isInteger(cargaMin) || cargaMin < 0 || cargaMin > 300) errores.loadMinutes = "Carga entre 0 y 300 minutos";
     if (!moviles.length) return { ok: false, message: "Elige al menos una móvil.", fieldErrors: { moviles: "Elige al menos una móvil" } };
     if (Object.keys(errores).length) return { ok: false, message: "Revisa los campos marcados.", fieldErrors: errores };
 
@@ -256,9 +256,10 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
       distancias: m.distancias,
       duraciones: m.duraciones,
       servicioSeg: servicio * 60,
-      // El tramo cochera → centro (índices: la cochera es la última fila de la matriz).
+      // El tramo cochera → centro (la cochera es la última fila de la matriz): suma km a cada
+      // móvil que sale, pero no tiempo: la jornada se cuenta desde que sale del centro.
       salidaMetros: m.distancias[puntos.length - 1][0],
-      salidaSegundos: m.duraciones[puntos.length - 1][0] + cargaMin * 60,
+      salidaSegundos: 0,
       // Salen todas las móviles marcadas: si no hace falta alguna, se desmarca.
       usarTodas: true,
       kg: [0, ...paradas.map((p) => Number(p.kg))],
@@ -277,10 +278,12 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
     const trazos: (Awaited<ReturnType<typeof trazo>> | null)[] = [];
     for (const ruta of r.rutas) {
       const sinTiempo = m.aproximada || Date.now() - inicio > 25_000;
-      trazos.push(ruta.length ? await trazo([cochera, centro, ...ruta.map((i) => puntos[i]), cochera], sinTiempo) : null);
+      trazos.push(ruta.length ? await trazo([centro, ...ruta.map((i) => puntos[i]), cochera], sinTiempo) : null);
     }
     const aproximado = m.aproximada || trazos.some((t) => t?.aproximado);
 
+    // Se dibuja desde el centro; el tramo desde la cochera solo suma sus km.
+    const salidaKm = m.distancias[puntos.length - 1][0] / 1000;
     let totalKm = 0;
     await db.transaction(async (tx) => {
       await tx.update(routePlanStops).set({ planVehicleId: null, sequence: null }).where(eq(routePlanStops.planId, planId));
@@ -288,7 +291,7 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
       for (let v = 0; v < moviles.length; v++) {
         const ruta = r.rutas[v];
         const t = trazos[v];
-        const km = t ? t.metros / 1000 : 0;
+        const km = t ? t.metros / 1000 + salidaKm : 0;
         totalKm += km;
         const cargaKg = ruta.reduce((s, i) => s + Number(paradas[i - 1].kg), 0);
         const cargaM3 = ruta.reduce((s, i) => s + Number(paradas[i - 1].m3), 0);
@@ -297,7 +300,7 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
           capacityKg: moviles[v].capacidadKg?.toFixed(2) ?? null, capacityM3: moviles[v].capacidadM3?.toFixed(3) ?? null,
           maxStops: moviles[v].maxParadas,
           km: ruta.length ? km.toFixed(2) : null,
-          minutes: ruta.length ? Math.round((t!.segundos / 60) + cargaMin + servicio * ruta.length) : null,
+          minutes: ruta.length ? Math.round((t!.segundos / 60) + servicio * ruta.length) : null,
           loadKg: cargaKg.toFixed(2), loadM3: cargaM3.toFixed(4),
           geometry: t?.linea ?? null,
         }).returning({ id: routePlanVehicles.id });
@@ -307,7 +310,7 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
         }
       }
       await tx.update(routePlans).set({
-        status: "CALCULADA", totalKm: totalKm.toFixed(2), approximate: aproximado, serviceMinutes: servicio, calculatedAt: new Date(),
+        status: "CALCULADA", totalKm: totalKm.toFixed(2), exitKm: salidaKm.toFixed(2), approximate: aproximado, serviceMinutes: servicio, calculatedAt: new Date(),
       }).where(eq(routePlans.id, planId));
       await logAudit({
         user, action: "EDITAR", module: "RUTAS", recordId: planId,

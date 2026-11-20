@@ -18,7 +18,7 @@ import { requirePageUser } from "@/lib/auth";
 import { can } from "@/lib/permissions";
 import {
   cn, first, formatDate, formatMoney, INVOICE_DOC_TYPE_LABEL, INVOICE_SERVICE_TYPE_LABEL,
-  invoiceNumber, pageParams, saldoAPagar, type SearchParams,
+  invoiceNumber, netoSinIgv, pageParams, saldoAPagar, type SearchParams,
 } from "@/lib/utils";
 import {
   archivosDeNotasCredito,
@@ -180,7 +180,7 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
             <Th>Proveedor</Th>
             <Th className="hidden xl:table-cell">Emisión</Th>
             <Th>Recibida</Th>
-            <Th className="text-right">A pagar</Th>
+            <Th className="text-right" title="Valor del servicio sin IGV. Debajo, lo que se le transfiere al proveedor">Neto sin IGV</Th>
             <Th className="hidden text-right xl:table-cell">Adelanto</Th>
             <Th>Vence</Th>
             <Th>Estado</Th>
@@ -244,14 +244,15 @@ export default async function InvoicesPage({ searchParams }: { searchParams: Sea
                 <Td className="hidden whitespace-nowrap tabular text-steel-600 xl:table-cell">{formatDate(i.issueDate)}</Td>
                 <Td className="whitespace-nowrap tabular text-steel-600">{formatDate(i.receivedAt ?? i.createdAt)}</Td>
                 <Td className={cn("whitespace-nowrap text-right", i.status === "ANULADA" && "line-through")}>
-                  <span className="font-display text-base font-bold tabular">{formatMoney(aPagar, i.currency)}</span>
-                  {(Number(i.detractionAmount ?? 0) > 0 || adelanto > 0) && (
-                    <p className="text-xs text-steel-500" title="Total del comprobante, menos la detracción y los adelantos">
-                      {formatMoney(i.total, i.currency)}
-                      {Number(i.detractionAmount ?? 0) > 0 && <> − {formatMoney(i.detractionAmount, i.currency)}</>}
-                      {adelanto > 0 && <> − {formatMoney(i.advances, i.currency)}</>}
-                    </p>
-                  )}
+                  {/* Arriba, el neto sin IGV: lo que cuesta el proveedor. Debajo, cómo se
+                      llega a lo que se le transfiere: total con IGV − detracción − adelantos. */}
+                  <span className="font-display text-base font-bold tabular" data-testid="neto">{formatMoney(netoSinIgv(i.subtotal, i.igv, i.total), i.currency)}</span>
+                  <p className="text-xs text-steel-500" title="Total del comprobante (con IGV), menos la detracción y los adelantos">
+                    Total {formatMoney(i.total, i.currency)}
+                    {Number(i.detractionAmount ?? 0) > 0 && <> − detr. {formatMoney(i.detractionAmount, i.currency)}</>}
+                    {adelanto > 0 && <> − adel. {formatMoney(i.advances, i.currency)}</>}
+                  </p>
+                  <p className="text-xs font-semibold text-steel-700" data-testid="a-pagar">A pagar {formatMoney(aPagar, i.currency)}</p>
                 </Td>
                 <Td className="hidden whitespace-nowrap text-right tabular text-steel-600 xl:table-cell">
                   {adelanto > 0 ? formatMoney(i.advances, i.currency) : "—"}

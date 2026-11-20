@@ -30,7 +30,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
   const res = wb.addWorksheet("Resumen");
   res.columns = [{ width: 14 }, { width: 10 }, { width: 10 }, { width: 12 }, { width: 12 }, { width: 12 }];
   res.addRow([`Reparto del ${formatDate(plan.serviceDate)}`]).font = { ...negrita, size: 13 };
-  res.addRow([`Cochera → carga en ${centro.name} → entregas → cochera${plan.approximate ? " · km aproximados (línea recta)" : ""}`]).font = { name: "Arial", size: 10, italic: true };
+  res.addRow([`Cochera → ${centro.name} → entregas → cochera · km desde la cochera${plan.exitKm != null ? ` (${Number(plan.exitKm).toFixed(1)} km hasta el centro)` : ""} · tiempo desde que sale del centro${plan.approximate ? " · km aproximados (línea recta)" : ""}`]).font = { name: "Arial", size: 10, italic: true };
   res.addRow([]);
   const cab = res.addRow(["Móvil", "Paradas", "Km", "Tiempo (min)", "Carga (kg)", "Carga (m³)"]);
   cab.font = negrita;
@@ -54,7 +54,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       { width: 9 }, { width: 9 }, { width: 12 }, { width: 40 },
     ];
     ws.addRow([`Móvil ${m.plate} · ${Number(m.km).toFixed(1)} km · ${m.minutes ?? 0} min · ${Number(m.loadKg ?? 0).toFixed(1)} kg`]).font = { ...negrita, size: 12 };
-    ws.addRow([`Reparto del ${formatDate(plan.serviceDate)} · sale de la cochera, carga en ${centro.name}, vuelve a la cochera`]).font = { name: "Arial", size: 10, italic: true };
+    ws.addRow([`Reparto del ${formatDate(plan.serviceDate)} · sale de la cochera, carga en ${centro.name} y vuelve a la cochera`]).font = { name: "Arial", size: 10, italic: true };
     ws.addRow([]);
     const h = ws.addRow(["N°", "Pedido(s)", "Cliente", "Teléfono", "Dirección", "Distrito", "Referencia", "Kg", "m³", "Entrega hasta", "Observación"]);
     h.font = negrita;

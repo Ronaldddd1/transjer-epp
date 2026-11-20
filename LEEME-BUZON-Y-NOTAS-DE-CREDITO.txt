@@ -148,3 +148,16 @@ RECHAZO QUE ESPERA NOTA DE CRÉDITO: CÓMO SE ASOCIA LA NC
   - Si la NC llega sin XML (solo PDF): cae en Observadas y no se puede asociar sola. Se
     asocia a mano en Facturas > "Esperan nota de crédito" > "Adjuntar NC": se sube el PDF
     y se escribe el número. Si después llega el XML, se adjunta ahí y completa los datos.
+
+
+20/11 — FACTURAS: NETO SIN IGV
+------------------------------
+- En la lista de facturas, la cifra grande es el NETO SIN IGV (la base imponible del
+  comprobante): lo que de verdad cuesta cada proveedor. Debajo:
+      Total S/ 1,475.00 − detr. S/ 59.00 − adel. S/ 500.00
+      A pagar S/ 916.00
+- Si el comprobante no trae base imponible, el neto es total − IGV; y si tampoco trae
+  IGV, total / 1.18.
+- En "Resumen por proveedor" hay una columna y un total "Neto sin IGV" antes del total
+  facturado (con IGV).
+- No cambia ningún cálculo de pago: se paga lo mismo que antes ("A pagar").
