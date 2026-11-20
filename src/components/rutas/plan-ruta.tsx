@@ -1,10 +1,10 @@
 "use client";
 
-import { AlertTriangle, Crosshair, ExternalLink, FileDown, MapPin, Plus, Route, Truck, Warehouse } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Crosshair, ExternalLink, FileDown, MapPin, Plus, Route, Shuffle, Truck, Warehouse } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { calcularRutas, guardarLugar, guardarTrazo, moverParada, ubicarParada } from "@/actions/rutas";
+import { asignarParada, calcularRutas, guardarLugar, guardarTrazo, moverEnRuta, moverParada, ordenarRuta, ubicarParada } from "@/actions/rutas";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -199,6 +199,31 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
   const paradasDe = (m: MovilUI) => paradas.filter((p) => p.planVehicleId === m.id).sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
   const sinMovil = calculada ? paradas.filter((p) => !p.planVehicleId) : [];
 
+  // Ajuste a mano: pasar una parada a otra móvil, cambiar el orden u ordenar una ruta.
+  const [ajustando, setAjustando] = useState<string | null>(null);
+  function ajustar(clave: string, accion: () => Promise<{ ok: boolean; message?: string }>) {
+    setAjustando(clave);
+    start(async () => {
+      const r = await accion();
+      setAjustando(null);
+      notify(r.ok && !r.message?.includes("Ojo:") ? "success" : "error", r.message ?? (r.ok ? "Listo." : "No se pudo."));
+      if (r.ok) router.refresh();
+    });
+  }
+  const selectorMovil = (p: ParadaUI) => canManage && (
+    <select
+      aria-label={`Pasar ${p.customer} a otra móvil`}
+      value={p.planVehicleId ?? ""}
+      disabled={pending}
+      onChange={(ev) => ajustar(p.id, () => asignarParada(p.id, ev.target.value || null))}
+      className="h-7 rounded border border-steel-300 bg-white px-1 text-xs"
+      data-testid="pasar-a"
+    >
+      {moviles.map((m) => <option key={m.id} value={m.id}>{m.plate}</option>)}
+      <option value="">Sin móvil</option>
+    </select>
+  );
+
   return (
     <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_440px]">
       {/* El mapa se queda a la vista mientras se recorre la lista de la derecha. Los avisos
@@ -239,7 +264,14 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
             onMoverParada={mover}
             onElegirPunto={eligiendo ? alElegir : null}
             foco={foco}
-            onSeleccionar={(id) => { setFoco(id); setPestaña("paradas"); document.getElementById(`parada-${id}`)?.scrollIntoView({ block: "nearest" }); }}
+            onSeleccionar={(id) => {
+              setFoco(id);
+              // En «Móviles y rutas» se queda ahí y marca la entrega en su ruta (para pasarla
+              // a otra móvil); si no, va a la lista de paradas.
+              const enRutas = document.getElementById(`ruta-parada-${id}`);
+              if (pestaña === "rutas" && enRutas) enRutas.scrollIntoView({ block: "nearest" });
+              else { setPestaña("paradas"); document.getElementById(`parada-${id}`)?.scrollIntoView({ block: "nearest" }); }
+            }}
           />
         </div>
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm text-steel-600">
@@ -318,11 +350,26 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                   </p>
                 )}
                 {sinMovil.length > 0 && (
-                  <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" data-testid="sin-movil">
-                    {sinMovil.length} parada(s) no entran en las móviles elegidas: {sinMovil.map((p) => p.customer).join(", ")}.
+                  <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" data-testid="sin-movil">
+                    <p>{sinMovil.length} parada(s) sin móvil{canManage ? ": elige a cuál pasarlas." : "."}</p>
+                    <ul className="mt-1 grid gap-1">
+                      {sinMovil.map((p) => (
+                        <li key={p.id} className="flex items-center justify-between gap-2 text-steel-800">
+                          <span><span className="font-medium">{p.customer}</span> <span className="text-steel-500">· {p.district}</span></span>
+                          {selectorMovil(p)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {canManage && (
+                  <p className="text-xs text-steel-500">
+                    Puedes ajustar a mano: con «Pasar a» cambias una entrega de móvil (entra donde menos recorrido agrega),
+                    con las flechas cambias el orden, y «Ordenar» vuelve a ordenar esa ruta sola. Los km y el tiempo se
+                    rehacen en el momento. «Recalcular rutas» vuelve a repartir todo automáticamente.
                   </p>
                 )}
-                {moviles.filter((m) => m.km != null).map((m) => {
+                {moviles.map((m) => {
                   const ps = paradasDe(m);
                   const color = COLORES[m.position % COLORES.length];
                   const pct = (carga: string | null, cap: string | null) => (cap ? Math.round((Number(carga ?? 0) / Number(cap)) * 100) : null);
@@ -331,20 +378,51 @@ export function PlanRuta({ plan, paradas: inicial, moviles, centro, cochera, flo
                     <section key={m.id} className="rounded-lg border border-steel-200 bg-white" data-testid="movil-ruta">
                       <header className="flex items-center justify-between gap-2 border-b border-steel-100 px-3 py-2" style={{ borderLeft: `6px solid ${color}` }}>
                         <p className="flex items-center gap-2 font-semibold"><Truck className="h-4 w-4" /> {m.plate}</p>
-                        <p className="text-right text-sm" title="Km desde que sale de la cochera. Tiempo desde que sale del centro de recojo hasta que vuelve a la cochera"><strong className="tabular">{Number(m.km).toFixed(1)} km</strong> · {horas(m.minutes ?? 0)}</p>
+                        <div className="flex items-center gap-2">
+                          {canManage && ps.length > 1 && (
+                            <button type="button" disabled={pending} onClick={() => ajustar(m.id, () => ordenarRuta(m.id))}
+                              className="inline-flex items-center gap-1 rounded border border-steel-300 px-1.5 py-0.5 text-xs font-medium text-steel-700 hover:border-ink disabled:opacity-50"
+                              title="Ordenar esta ruta por el menor recorrido (con sus mismas entregas)">
+                              <Shuffle className="h-3 w-3" /> {ajustando === m.id ? "Ordenando…" : "Ordenar"}
+                            </button>
+                          )}
+                          {m.km != null ? (
+                            <p className="text-right text-sm" title="Km desde que sale de la cochera. Tiempo desde que sale del centro de recojo hasta que vuelve a la cochera"><strong className="tabular">{Number(m.km).toFixed(1)} km</strong> · {horas(m.minutes ?? 0)}</p>
+                          ) : (
+                            <p className="text-sm text-steel-500">Sin entregas</p>
+                          )}
+                        </div>
                       </header>
                       <div className="px-3 py-2 text-xs text-steel-600">
-                        {ps.length} parada(s) · {Number(m.loadKg ?? 0).toFixed(1)} kg{pct(m.loadKg, m.capacityKg) != null && ` (${pct(m.loadKg, m.capacityKg)} %)`}
-                        {" · "}{Number(m.loadM3 ?? 0).toFixed(2)} m³{pct(m.loadM3, m.capacityM3) != null && ` (${pct(m.loadM3, m.capacityM3)} %)`}
+                        {ps.length} parada(s){m.maxStops != null && ps.length > m.maxStops && <span className="font-semibold text-red-700"> (tope {m.maxStops})</span>}
+                        {" · "}<span className={cn((pct(m.loadKg, m.capacityKg) ?? 0) > 100 && "font-semibold text-red-700")}>{Number(m.loadKg ?? 0).toFixed(1)} kg{pct(m.loadKg, m.capacityKg) != null && ` (${pct(m.loadKg, m.capacityKg)} %)`}</span>
+                        {" · "}<span className={cn((pct(m.loadM3, m.capacityM3) ?? 0) > 100 && "font-semibold text-red-700")}>{Number(m.loadM3 ?? 0).toFixed(2)} m³{pct(m.loadM3, m.capacityM3) != null && ` (${pct(m.loadM3, m.capacityM3)} %)`}</span>
                       </div>
                       <ol className="grid gap-0.5 px-3 pb-2 text-sm">
                         <li className="text-xs text-steel-500" data-testid="tramo-salida">
                           Sale de la cochera → {centro.name}{plan.exitKm != null && <>: {Number(plan.exitKm).toFixed(1)} km (suman en los km; no se dibujan ni cuentan en el tiempo)</>}
                         </li>
-                        {ps.map((p) => (
-                          <li key={p.id} className="flex gap-2">
+                        {ps.map((p, k) => (
+                          <li key={p.id} id={`ruta-parada-${p.id}`} className={cn("flex items-start gap-2 rounded px-1 py-0.5", foco === p.id && "bg-brand-soft", ajustando === p.id && "opacity-50")} data-testid="parada-ruta">
                             <span className="mt-0.5 inline-grid h-5 w-5 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white" style={{ background: color }}>{p.sequence}</span>
-                            <span><span className="font-medium">{p.customer}</span> <span className="text-steel-500">· {p.district}</span></span>
+                            <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setFoco(p.id)}>
+                              <span className="font-medium">{p.customer}</span> <span className="text-steel-500">· {p.district}</span>
+                            </button>
+                            {canManage && (
+                              <span className="flex shrink-0 items-center gap-1">
+                                <button type="button" aria-label={`Subir ${p.customer}`} disabled={pending || k === 0}
+                                  onClick={() => ajustar(p.id, () => moverEnRuta(p.id, -1))}
+                                  className="grid h-7 w-6 place-items-center rounded border border-steel-300 text-steel-600 hover:border-ink disabled:opacity-30">
+                                  <ArrowUp className="h-3.5 w-3.5" />
+                                </button>
+                                <button type="button" aria-label={`Bajar ${p.customer}`} disabled={pending || k === ps.length - 1}
+                                  onClick={() => ajustar(p.id, () => moverEnRuta(p.id, 1))}
+                                  className="grid h-7 w-6 place-items-center rounded border border-steel-300 text-steel-600 hover:border-ink disabled:opacity-30">
+                                  <ArrowDown className="h-3.5 w-3.5" />
+                                </button>
+                                {selectorMovil(p)}
+                              </span>
+                            )}
                           </li>
                         ))}
                         <li className="text-xs text-steel-500">Vuelve a la cochera</li>

@@ -334,6 +334,200 @@ export async function calcularRutas(planId: string, formData: FormData): Promise
   }
 }
 
+// ---------------------------------------------------------------------------------------
+// Ajuste manual de las rutas ya calculadas
+// ---------------------------------------------------------------------------------------
+
+type Contexto = {
+  planId: string;
+  centro: { lat: number; lng: number };
+  cochera: { lat: number; lng: number };
+  exitKm: number;
+  servicio: number;
+};
+
+async function contextoAjuste(planId: string): Promise<Contexto & { serviceDate: string }> {
+  const [plan] = await db.select().from(routePlans).where(eq(routePlans.id, planId));
+  if (!plan) throw new BusinessError("La programación no existe.");
+  if (plan.status !== "CALCULADA") throw new BusinessError("Primero calcula las rutas; después se pueden ajustar a mano.");
+  const { centro, cochera } = await lugares();
+  if (!cochera) throw new BusinessError("Falta ubicar la cochera.");
+  return { planId, centro, cochera, exitKm: Number(plan.exitKm ?? 0), servicio: plan.serviceMinutes, serviceDate: plan.serviceDate };
+}
+
+type ParadaRuta = typeof routePlanStops.$inferSelect;
+
+/**
+ * Los datos de una ruta con sus paradas en el orden dado: trazo por las calles (desde el
+ * centro hasta la cochera), km (más el tramo cochera → centro), tiempo y carga.
+ */
+async function rehacerRuta(c: Contexto, paradas: ParadaRuta[]) {
+  if (!paradas.length) {
+    return { km: null, minutes: null, geometry: null, loadKg: "0.00", loadM3: "0.0000", aproximado: false };
+  }
+  const t = await trazo([c.centro, ...paradas.map((p) => ({ lat: p.lat!, lng: p.lng! })), c.cochera]);
+  return {
+    km: (t.metros / 1000 + c.exitKm).toFixed(2),
+    minutes: Math.round(t.segundos / 60 + c.servicio * paradas.length),
+    geometry: t.linea,
+    loadKg: paradas.reduce((s, p) => s + Number(p.kg), 0).toFixed(2),
+    loadM3: paradas.reduce((s, p) => s + Number(p.m3), 0).toFixed(4),
+    aproximado: t.aproximado,
+  };
+}
+
+/** Guarda las rutas cambiadas (orden y datos) y rehace el total del plan. */
+async function guardarRutas(
+  c: Contexto, cambios: { movilId: string; paradas: ParadaRuta[] }[], sueltas: ParadaRuta[],
+  auditoria: { user: Awaited<ReturnType<typeof requireActionUser>>; description: string },
+) {
+  const datos: { movilId: string; paradas: ParadaRuta[]; r: Awaited<ReturnType<typeof rehacerRuta>> }[] = [];
+  for (const x of cambios) datos.push({ ...x, r: await rehacerRuta(c, x.paradas) });
+  await db.transaction(async (tx) => {
+    for (const x of datos) {
+      const { aproximado: _a, ...valores } = x.r;
+      await tx.update(routePlanVehicles).set(valores).where(and(eq(routePlanVehicles.id, x.movilId), eq(routePlanVehicles.planId, c.planId)));
+      for (let k = 0; k < x.paradas.length; k++) {
+        await tx.update(routePlanStops).set({ planVehicleId: x.movilId, sequence: k + 1 })
+          .where(and(eq(routePlanStops.id, x.paradas[k].id), eq(routePlanStops.planId, c.planId)));
+      }
+    }
+    for (const p of sueltas) {
+      await tx.update(routePlanStops).set({ planVehicleId: null, sequence: null })
+        .where(and(eq(routePlanStops.id, p.id), eq(routePlanStops.planId, c.planId)));
+    }
+    const todas = await tx.select({ km: routePlanVehicles.km }).from(routePlanVehicles).where(eq(routePlanVehicles.planId, c.planId));
+    const total = todas.reduce((s, v) => s + Number(v.km ?? 0), 0);
+    await tx.update(routePlans).set({
+      totalKm: total.toFixed(2),
+      ...(datos.some((x) => x.r.aproximado) ? { approximate: true } : {}),
+    }).where(eq(routePlans.id, c.planId));
+    await logAudit({ user: auditoria.user, action: "EDITAR", module: "RUTAS", recordId: c.planId, description: auditoria.description }, tx);
+  });
+  revalidatePath(`/rutas/${c.planId}`);
+  revalidatePath("/rutas");
+}
+
+async function paradasDeMovil(planId: string, movilId: string) {
+  const ps = await db.select().from(routePlanStops)
+    .where(and(eq(routePlanStops.planId, planId), eq(routePlanStops.planVehicleId, movilId)));
+  return ps.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+}
+
+/** Si una móvil queda pasada de su capacidad o de su tope de entregas, el aviso. */
+function excesos(m: typeof routePlanVehicles.$inferSelect, paradas: ParadaRuta[]) {
+  const kg = paradas.reduce((s, p) => s + Number(p.kg), 0);
+  const m3 = paradas.reduce((s, p) => s + Number(p.m3), 0);
+  const avisos: string[] = [];
+  if (m.capacityKg != null && kg > Number(m.capacityKg) + 1e-6) avisos.push(`${kg.toFixed(1)} kg de ${Number(m.capacityKg).toFixed(0)}`);
+  if (m.capacityM3 != null && m3 > Number(m.capacityM3) + 1e-6) avisos.push(`${m3.toFixed(2)} m³ de ${Number(m.capacityM3).toFixed(2)}`);
+  if (m.maxStops != null && paradas.length > m.maxStops) avisos.push(`${paradas.length} entregas de ${m.maxStops} acordadas`);
+  return avisos.length ? ` Ojo: ${m.plate} queda pasada (${avisos.join(", ")}).` : "";
+}
+
+/**
+ * Pasa una parada a otra móvil (o la deja sin móvil). En la móvil que la recibe entra en
+ * el lugar de su ruta donde menos recorrido agrega, sin cambiar el orden de las demás; la
+ * que la suelta sigue en su mismo orden. Se puede pasar aunque exceda la capacidad: se avisa.
+ */
+export async function asignarParada(stopId: string, movilId: string | null): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("trips.manage");
+    const [parada] = await db.select().from(routePlanStops).where(eq(routePlanStops.id, stopId));
+    if (!parada) throw new BusinessError("La parada no existe.");
+    const c = await contextoAjuste(parada.planId);
+    if (parada.planVehicleId === movilId) return { ok: true, message: "La parada ya está en esa móvil." };
+    const moviles = await db.select().from(routePlanVehicles).where(eq(routePlanVehicles.planId, c.planId));
+    const destino = movilId ? moviles.find((m) => m.id === movilId) : null;
+    if (movilId && !destino) throw new BusinessError("Esa móvil no es de esta programación.");
+    if (parada.lat == null || parada.lng == null) throw new BusinessError("Primero ubica la parada en el mapa.");
+
+    const cambios: { movilId: string; paradas: ParadaRuta[] }[] = [];
+    const origen = parada.planVehicleId ? moviles.find((m) => m.id === parada.planVehicleId) : null;
+    if (origen) {
+      cambios.push({ movilId: origen.id, paradas: (await paradasDeMovil(c.planId, origen.id)).filter((p) => p.id !== parada.id) });
+    }
+    let aviso = "";
+    if (destino) {
+      const actuales = await paradasDeMovil(c.planId, destino.id);
+      // El mejor lugar: donde menos km agrega (por las calles, en el sentido de las vías).
+      const pts = [c.centro, ...actuales.map((p) => ({ lat: p.lat!, lng: p.lng! })), { lat: parada.lat, lng: parada.lng }, c.cochera];
+      const k = actuales.length;
+      let mejor = k;
+      if (k > 0) {
+        const d = (await matriz(pts)).distancias;
+        const nueva = k + 1;
+        const fin = k + 2;
+        let costoMin = Infinity;
+        for (let pos = 0; pos <= k; pos++) {
+          const antes = pos === 0 ? 0 : pos; // índice en la matriz de la parada anterior
+          const despues = pos === k ? fin : pos + 1;
+          const costo = d[antes][nueva] + d[nueva][despues] - d[antes][despues];
+          if (costo < costoMin) { costoMin = costo; mejor = pos; }
+        }
+      }
+      const nuevas = [...actuales.slice(0, mejor), parada, ...actuales.slice(mejor)];
+      cambios.push({ movilId: destino.id, paradas: nuevas });
+      aviso = excesos(destino, nuevas);
+    }
+    await guardarRutas(c, cambios, destino ? [] : [parada], {
+      user,
+      description: `${user.name} pasó la parada de ${parada.customer} (${parada.district}) `
+        + `de ${origen?.plate ?? "sin móvil"} a ${destino?.plate ?? "sin móvil"} en el reparto del ${formatDate(c.serviceDate)}.`,
+    });
+    return { ok: true, message: `${parada.customer} pasó a ${destino?.plate ?? "sin móvil"}.${aviso}` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Sube o baja una parada en el orden de su ruta (el orden lo decide quien la ajusta). */
+export async function moverEnRuta(stopId: string, paso: -1 | 1): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("trips.manage");
+    if (paso !== -1 && paso !== 1) throw new BusinessError("Movimiento no válido.");
+    const [parada] = await db.select().from(routePlanStops).where(eq(routePlanStops.id, stopId));
+    if (!parada?.planVehicleId) throw new BusinessError("La parada no está en ninguna ruta.");
+    const c = await contextoAjuste(parada.planId);
+    const ps = await paradasDeMovil(c.planId, parada.planVehicleId);
+    const i = ps.findIndex((p) => p.id === stopId);
+    const j = i + paso;
+    if (i < 0 || j < 0 || j >= ps.length) return { ok: true, message: "Ya está en ese extremo de la ruta." };
+    [ps[i], ps[j]] = [ps[j], ps[i]];
+    await guardarRutas(c, [{ movilId: parada.planVehicleId, paradas: ps }], [], {
+      user, description: `${user.name} cambió el orden de una ruta (${parada.customer} pasó a la entrega ${j + 1}) en el reparto del ${formatDate(c.serviceDate)}.`,
+    });
+    return { ok: true, message: `${parada.customer} queda como entrega ${j + 1}.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
+/** Ordena automáticamente una sola ruta (sus mismas paradas) por el menor recorrido. */
+export async function ordenarRuta(movilId: string): Promise<ActionResult> {
+  try {
+    const user = await requireActionUser("trips.manage");
+    const [movil] = await db.select().from(routePlanVehicles).where(eq(routePlanVehicles.id, movilId));
+    if (!movil) throw new BusinessError("La móvil no existe.");
+    const c = await contextoAjuste(movil.planId);
+    const ps = await paradasDeMovil(c.planId, movilId);
+    if (ps.length < 2) return { ok: true, message: "No hay nada que ordenar." };
+    const pts = [c.centro, ...ps.map((p) => ({ lat: p.lat!, lng: p.lng! })), c.cochera];
+    const m = await matriz(pts);
+    const r = optimizar({
+      distancias: m.distancias, kg: [0, ...ps.map(() => 0)], m3: [0, ...ps.map(() => 0)],
+      moviles: [{ capacidadKg: null, capacidadM3: null, maxParadas: null }], tiempoMs: 2000,
+    });
+    const orden = r.rutas[0].map((i) => ps[i - 1]);
+    await guardarRutas(c, [{ movilId, paradas: orden }], [], {
+      user, description: `${user.name} ordenó automáticamente la ruta de ${movil.plate} en el reparto del ${formatDate(c.serviceDate)}.`,
+    });
+    return { ok: true, message: `Ruta de ${movil.plate} ordenada por el menor recorrido.` };
+  } catch (e) {
+    return toActionError(e);
+  }
+}
+
 export async function eliminarPlan(planId: string): Promise<ActionResult> {
   const r = await borrarPlan(planId);
   // Borrada, su página ya no existe: se vuelve a la lista.

@@ -213,6 +213,66 @@ with sync_playwright() as p:
     finally:
         urllib.request.urlopen("http://127.0.0.1:3999/__fallar-servidor?on=0").read()
 
+    # --- Ajuste a mano: pasar entregas de una móvil a otra, cambiar el orden, ordenar ---
+    page.reload(); page.wait_for_timeout(2500)
+    def seq_ok():
+        orden = psql(f"select string_agg(sequence::text, ',' order by sequence) from route_plan_stops where plan_id = '{plan_id}' and plan_vehicle_id is not null group by plan_vehicle_id")
+        return all(o.split(",") == [str(i) for i in range(1, len(o.split(",")) + 1)] for o in orden.splitlines())
+    def totales_ok():
+        a = float(psql(f"select total_km from route_plans where id = '{plan_id}'"))
+        b = float(psql(f"select coalesce(sum(km), 0) from route_plan_vehicles where plan_id = '{plan_id}'"))
+        return abs(a - b) < 0.05
+    v901 = psql(f"select id from route_plan_vehicles where plan_id = '{plan_id}' and plate = 'RTA-901'")
+    v902 = psql(f"select id from route_plan_vehicles where plan_id = '{plan_id}' and plate = 'RTA-902'")
+    antes_901 = int(psql(f"select count(*) from route_plan_stops where plan_vehicle_id = '{v901}'"))
+    antes_902 = int(psql(f"select count(*) from route_plan_stops where plan_vehicle_id = '{v902}'"))
+    def tarjeta(placa):
+        return page.locator("[data-testid=movil-ruta]").filter(has=page.locator("header", has_text=placa))
+    tarjeta901 = tarjeta("RTA-901")
+    primera = tarjeta901.locator("[data-testid=parada-ruta]").first
+    cliente = primera.locator("button").first.inner_text().split(" · ")[0].strip()
+    parada_id = psql(f"select id from route_plan_stops where plan_vehicle_id = '{v901}' and sequence = 1")
+    primera.get_by_test_id("pasar-a").select_option(label="RTA-902"); page.wait_for_timeout(2500)
+    check("«Pasar a» cambia la entrega a la otra móvil", psql(f"select plan_vehicle_id from route_plan_stops where id = '{parada_id}'") == v902, cliente)
+    check("una pierde y la otra gana una entrega",
+          int(psql(f"select count(*) from route_plan_stops where plan_vehicle_id = '{v901}'")) == antes_901 - 1
+          and int(psql(f"select count(*) from route_plan_stops where plan_vehicle_id = '{v902}'")) == antes_902 + 1)
+    check("las dos rutas siguen numeradas sin saltos", seq_ok())
+    check("los km se rehacen (el total es la suma)", totales_ok())
+    check("la tarjeta de RTA-902 la muestra", cliente in tarjeta("RTA-902").inner_text())
+    check("queda en la auditoría", int(psql(f"select count(*) from audit_logs where record_id = '{plan_id}' and description like '%pasó la parada%'")) >= 1)
+
+    # Bajarla un lugar en su nueva ruta.
+    seq = int(psql(f"select sequence from route_plan_stops where id = '{parada_id}'"))
+    total_902 = antes_902 + 1
+    fila = page.locator(f"#ruta-parada-{parada_id}")
+    if seq < total_902:
+        fila.get_by_role("button", name=re.compile("^Bajar")).click(); page.wait_for_timeout(2000)
+        check("con la flecha baja un lugar en el orden", int(psql(f"select sequence from route_plan_stops where id = '{parada_id}'")) == seq + 1)
+    else:
+        fila.get_by_role("button", name=re.compile("^Subir")).click(); page.wait_for_timeout(2000)
+        check("con la flecha sube un lugar en el orden", int(psql(f"select sequence from route_plan_stops where id = '{parada_id}'")) == seq - 1)
+    check("y sigue numerada sin saltos", seq_ok() and totales_ok())
+
+    # «Ordenar» vuelve a ordenar esa ruta sola, con sus mismas entregas.
+    km_antes = float(psql(f"select km from route_plan_vehicles where id = '{v902}'"))
+    tarjeta("RTA-902").get_by_role("button", name=re.compile("Ordenar")).click()
+    page.wait_for_timeout(3000)
+    km_despues = float(psql(f"select km from route_plan_vehicles where id = '{v902}'"))
+    check("«Ordenar» no cambia qué entregas lleva", int(psql(f"select count(*) from route_plan_stops where plan_vehicle_id = '{v902}'")) == total_902)
+    check("y no da más km que el orden manual", km_despues <= km_antes + 0.05, (km_antes, km_despues))
+    check("sigue todo cuadrado", seq_ok() and totales_ok())
+
+    # Dejarla sin móvil y volver a asignarla desde el aviso.
+    page.locator(f"#ruta-parada-{parada_id}").get_by_test_id("pasar-a").select_option(label="Sin móvil"); page.wait_for_timeout(2500)
+    check("se puede dejar una entrega sin móvil", psql(f"select coalesce(plan_vehicle_id::text, 'null') from route_plan_stops where id = '{parada_id}'") == "null")
+    aviso = page.locator("[data-testid=sin-movil]")
+    check("y aparece en el aviso, para asignarla", aviso.count() == 1 and cliente in aviso.inner_text())
+    aviso.get_by_test_id("pasar-a").first.select_option(label="RTA-901"); page.wait_for_timeout(2500)
+    check("desde el aviso se asigna a una móvil", psql(f"select plan_vehicle_id from route_plan_stops where id = '{parada_id}'") == v901)
+    check("todo sigue cuadrado", seq_ok() and totales_ok()
+          and psql(f"select count(*) from route_plan_stops where plan_id = '{plan_id}' and plan_vehicle_id is null") == "0")
+
     # --- Hojas de ruta en Excel ---
     with page.expect_download() as bajada:
         page.get_by_role("link", name=re.compile("Descargar hojas de ruta")).click()

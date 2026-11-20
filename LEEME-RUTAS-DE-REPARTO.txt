@@ -1,6 +1,26 @@
 RUTAS DE REPARTO (Flota > Rutas de reparto)
 ==========================================
 
+Cambios del 20/11 (tarde): AJUSTE A MANO
+  Después de "Calcular rutas", en la pestaña "Móviles y rutas", cada entrega de cada
+  móvil tiene:
+    - "Pasar a": elige otra móvil (o "Sin móvil"). En la que la recibe entra en el lugar
+      de su ruta donde menos km agrega, sin tocar el orden de las demás.
+    - Flechas ↑ ↓: cambian el orden de la entrega dentro de su ruta.
+  Y cada móvil tiene "Ordenar": reordena esa ruta sola (con sus mismas entregas) por el
+  menor recorrido.
+  Al hacer cualquiera de estos cambios se rehacen en el momento el trazo en el mapa, los
+  km, el tiempo y la carga de las móviles afectadas.
+  - Se puede pasar una entrega aunque la móvil quede por encima de su capacidad o de su
+    tope de entregas: se avisa y la cifra sale en rojo en la tarjeta.
+  - Las entregas "sin móvil" salen en el aviso rojo con su "Pasar a" para asignarlas.
+  - Clic en un punto del mapa, estando en "Móviles y rutas", marca esa entrega en su
+    tarjeta (para encontrarla y pasarla).
+  - OJO: "Recalcular rutas" vuelve a repartir todo automáticamente y se pierden los
+    ajustes a mano.
+  - Queda en la auditoría quién pasó qué entrega, de qué móvil a cuál.
+  - No lleva migración nueva.
+
 Cambios del 20/11:
   - Los KM de cada móvil cuentan desde que sale de la cochera: cochera → centro de recojo
     → entregas → cochera. Pero el tramo cochera → centro NO se dibuja en el mapa (la
